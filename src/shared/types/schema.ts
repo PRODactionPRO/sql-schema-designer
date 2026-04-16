@@ -1,0 +1,190 @@
+// ── Shared schema domain types ──
+// Used across pages/editor and pages/projects
+
+export type FieldType =
+  | 'uuid'
+  | 'bigint'
+  | 'integer'
+  | 'smallint'
+  | 'serial'
+  | 'bigserial'
+  | 'varchar'
+  | 'text'
+  | 'citext'
+  | 'boolean'
+  | 'timestamp'
+  | 'timestamptz'
+  | 'date'
+  | 'time'
+  | 'interval'
+  | 'json'
+  | 'jsonb'
+  | 'decimal'
+  | 'numeric'
+  | 'real'
+  | 'double precision'
+  | 'money'
+  | 'bytea'
+  | 'inet'
+  | 'cidr'
+  | 'macaddr'
+  | 'point'
+  | 'line'
+  | 'polygon'
+  | 'circle'
+  | 'xml'
+  | 'array'
+  | 'enum';
+
+export const ALL_FIELD_TYPES: FieldType[] = [
+  'uuid', 'bigint', 'integer', 'smallint', 'serial', 'bigserial',
+  'varchar', 'text', 'citext',
+  'boolean',
+  'timestamp', 'timestamptz', 'date', 'time', 'interval',
+  'json', 'jsonb',
+  'decimal', 'numeric', 'real', 'double precision', 'money',
+  'bytea', 'inet', 'cidr', 'macaddr',
+  'point', 'line', 'polygon', 'circle',
+  'xml', 'array', 'enum'
+];
+
+export interface Field {
+  id: string;
+  name: string;
+  type: FieldType;
+  isPrimaryKey: boolean;
+  isNullable: boolean;
+  isForeignKey: boolean;
+  foreignKeyTable?: string;
+  foreignKeyField?: string;
+  defaultValue?: string;
+  isUnique?: boolean;
+  isIndexed?: boolean;
+  isNotNull?: boolean;
+}
+
+export interface Domain {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface Table {
+  id: string;
+  name: string;
+  description?: string;
+  fields: Field[];
+  position: { x: number; y: number };
+  color?: string;
+  schema?: string; // e.g. 'public'
+  domainId?: string;
+}
+
+export type RelationType = '1:1' | '1:N' | 'N:1' | 'N:M';
+
+export interface Relation {
+  id: string;
+  fromTableId: string;
+  fromFieldId: string;
+  toTableId: string;
+  toFieldId: string;
+  type: RelationType;
+}
+
+export interface Schema {
+  tables: Table[];
+  relations: Relation[];
+  domains?: Domain[];
+}
+
+// Serialization format identifier
+export type SerializationFormat = 'json' | 'postgresql' | 'supabase-rls' | 'mermaid';
+
+export type LineType = 'curved' | 'orthogonal' | 'straight';
+
+export interface ProjectSettings {
+  lineType: LineType;
+  enabledFieldTypes: FieldType[];
+}
+
+export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
+  lineType: 'curved',
+  enabledFieldTypes: [...ALL_FIELD_TYPES],
+};
+
+// Default domain colors
+export const DOMAIN_COLORS = [
+  '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e',
+  '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
+  '#a855f7', '#d946ef', '#ec4899', '#f43f5e',
+];
+
+// ── Type Compatibility Groups ──
+// Fields within the same group can be linked via FK (compatible implicit casts in PostgreSQL)
+const TYPE_COMPATIBILITY_GROUPS: Record<string, FieldType[]> = {
+  integer: ['bigint', 'integer', 'smallint', 'serial', 'bigserial'],
+  text: ['varchar', 'text', 'citext'],
+  uuid: ['uuid'],
+  boolean: ['boolean'],
+  timestamp: ['timestamp', 'timestamptz'],
+  date: ['date'],
+  time: ['time'],
+  interval: ['interval'],
+  json: ['json', 'jsonb'],
+  numeric: ['decimal', 'numeric', 'real', 'double precision', 'money'],
+  binary: ['bytea'],
+  network: ['inet', 'cidr', 'macaddr'],
+  geometric: ['point', 'line', 'polygon', 'circle'],
+  xml: ['xml'],
+  array: ['array'],
+  enum: ['enum'],
+};
+
+/** Get the compatibility group name for a field type */
+export function getTypeGroup(type: FieldType): string {
+  for (const [group, types] of Object.entries(TYPE_COMPATIBILITY_GROUPS)) {
+    if ((types as string[]).includes(type)) return group;
+  }
+  return type; // fallback: self-group
+}
+
+/** Check if two field types are compatible for FK linking */
+export function areTypesCompatible(type1: FieldType, type2: FieldType): boolean {
+  return getTypeGroup(type1) === getTypeGroup(type2);
+}
+
+// ── Three-level type compatibility ──
+
+export type TypeCompatibility = 'exact' | 'compatible' | 'warning' | 'forbidden';
+
+/**
+ * Cross-group casts that PostgreSQL supports via explicit CAST.
+ * These produce a "warning" level — the link is allowed but risky.
+ * Format: "groupA:groupB" (order-independent, checked both ways).
+ */
+const CASTABLE_CROSS_GROUPS = new Set<string>([
+  'integer:numeric',   // int <-> decimal/numeric — explicit cast
+  'timestamp:date',    // timestamp -> date extraction
+  'timestamp:time',    // timestamp -> time extraction
+  'text:uuid',         // text representation of uuid
+  'text:integer',      // text can hold numbers
+  'text:numeric',      // text can hold decimals
+  'text:boolean',      // text 'true'/'false'
+  'text:date',         // text '2024-01-01'
+  'text:timestamp',    // text iso timestamp
+  'text:json',         // text is valid json
+  'text:enum',         // text <-> enum
+]);
+
+/** Get detailed compatibility level between two types for FK linking */
+export function getTypeCompatibility(type1: FieldType, type2: FieldType): TypeCompatibility {
+  if (type1 === type2) return 'exact';
+  const g1 = getTypeGroup(type1);
+  const g2 = getTypeGroup(type2);
+  if (g1 === g2) return 'compatible';
+  // Check cross-group castable pairs
+  if (CASTABLE_CROSS_GROUPS.has(`${g1}:${g2}`) || CASTABLE_CROSS_GROUPS.has(`${g2}:${g1}`)) {
+    return 'warning';
+  }
+  return 'forbidden';
+}

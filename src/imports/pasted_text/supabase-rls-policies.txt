@@ -1,0 +1,959 @@
+-- =========================================================
+-- REVERIE / Supabase RLS policies
+-- Assumption: public.users.id = auth.uid()
+-- =========================================================
+
+-- ---------------------------
+-- 0. Safety
+-- ---------------------------
+set search_path = public;
+
+-- ---------------------------
+-- 1. Helper functions
+-- ---------------------------
+
+create or replace function public.is_workspace_member(_workspace_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.workspace_members wm
+    where wm.workspace_id = _workspace_id
+      and wm.user_id = auth.uid()
+  );
+$$;
+
+create or replace function public.has_workspace_role(_workspace_id uuid, _roles text[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.workspace_members wm
+    where wm.workspace_id = _workspace_id
+      and wm.user_id = auth.uid()
+      and wm.role = any(_roles)
+  );
+$$;
+
+create or replace function public.workspace_id_for_brand(_brand_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.brands b
+  where b.id = _brand_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_product(_product_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.products p
+  join public.brands b on b.id = p.brand_id
+  where p.id = _product_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_audience_segment(_audience_segment_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.audience_segments a
+  join public.brands b on b.id = a.brand_id
+  where a.id = _audience_segment_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_channel(_channel_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.channels c
+  join public.brands b on b.id = c.brand_id
+  where c.id = _channel_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_content_topic(_content_topic_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.content_topics ct
+  join public.brands b on b.id = ct.brand_id
+  where ct.id = _content_topic_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_content_item(_content_item_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.content_items ci
+  join public.brands b on b.id = ci.brand_id
+  where ci.id = _content_item_id
+  limit 1;
+$$;
+
+create or replace function public.workspace_id_for_brand_asset(_brand_asset_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select b.workspace_id
+  from public.brand_assets ba
+  join public.brands b on b.id = ba.brand_id
+  where ba.id = _brand_asset_id
+  limit 1;
+$$;
+
+-- ---------------------------
+-- 2. Enable RLS
+-- ---------------------------
+
+alter table public.users enable row level security;
+alter table public.plans enable row level security;
+alter table public.workspaces enable row level security;
+alter table public.workspace_members enable row level security;
+alter table public.brands enable row level security;
+alter table public.brand_snapshots enable row level security;
+alter table public.products enable row level security;
+alter table public.competitors enable row level security;
+alter table public.audience_segments enable row level security;
+alter table public.product_audience_segments enable row level security;
+alter table public.platform_profiles enable row level security;
+alter table public.channels enable row level security;
+alter table public.channel_overrides enable row level security;
+alter table public.channel_funnel_roles enable row level security;
+alter table public.channel_daily_stats enable row level security;
+alter table public.trigger_types enable row level security;
+alter table public.content_topics enable row level security;
+alter table public.content_items enable row level security;
+alter table public.content_item_versions enable row level security;
+alter table public.generation_jobs enable row level security;
+alter table public.content_item_metrics enable row level security;
+alter table public.brand_assets enable row level security;
+
+-- ---------------------------
+-- 3. USERS
+-- ---------------------------
+
+drop policy if exists "users_select_self" on public.users;
+create policy "users_select_self"
+on public.users
+for select
+to authenticated
+using (id = auth.uid());
+
+drop policy if exists "users_update_self" on public.users;
+create policy "users_update_self"
+on public.users
+for update
+to authenticated
+using (id = auth.uid())
+with check (id = auth.uid());
+
+drop policy if exists "users_insert_self" on public.users;
+create policy "users_insert_self"
+on public.users
+for insert
+to authenticated
+with check (id = auth.uid());
+
+-- ---------------------------
+-- 4. PLANS / REFERENCE TABLES
+-- ---------------------------
+
+drop policy if exists "plans_read_authenticated" on public.plans;
+create policy "plans_read_authenticated"
+on public.plans
+for select
+to authenticated
+using (true);
+
+drop policy if exists "platform_profiles_read_authenticated" on public.platform_profiles;
+create policy "platform_profiles_read_authenticated"
+on public.platform_profiles
+for select
+to authenticated
+using (true);
+
+drop policy if exists "trigger_types_read_authenticated" on public.trigger_types;
+create policy "trigger_types_read_authenticated"
+on public.trigger_types
+for select
+to authenticated
+using (true);
+
+-- ---------------------------
+-- 5. WORKSPACES
+-- ---------------------------
+
+drop policy if exists "workspaces_select_member" on public.workspaces;
+create policy "workspaces_select_member"
+on public.workspaces
+for select
+to authenticated
+using (public.is_workspace_member(id));
+
+drop policy if exists "workspaces_insert_owner" on public.workspaces;
+create policy "workspaces_insert_owner"
+on public.workspaces
+for insert
+to authenticated
+with check (owner_user_id = auth.uid());
+
+drop policy if exists "workspaces_update_admin" on public.workspaces;
+create policy "workspaces_update_admin"
+on public.workspaces
+for update
+to authenticated
+using (
+  public.has_workspace_role(id, array['owner','admin'])
+)
+with check (
+  public.has_workspace_role(id, array['owner','admin'])
+);
+
+drop policy if exists "workspaces_delete_owner" on public.workspaces;
+create policy "workspaces_delete_owner"
+on public.workspaces
+for delete
+to authenticated
+using (
+  public.has_workspace_role(id, array['owner'])
+);
+
+-- ---------------------------
+-- 6. WORKSPACE MEMBERS
+-- ---------------------------
+
+drop policy if exists "workspace_members_select_member" on public.workspace_members;
+create policy "workspace_members_select_member"
+on public.workspace_members
+for select
+to authenticated
+using (
+  public.is_workspace_member(workspace_id)
+);
+
+drop policy if exists "workspace_members_insert_admin" on public.workspace_members;
+create policy "workspace_members_insert_admin"
+on public.workspace_members
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(workspace_id, array['owner','admin'])
+);
+
+drop policy if exists "workspace_members_update_admin" on public.workspace_members;
+create policy "workspace_members_update_admin"
+on public.workspace_members
+for update
+to authenticated
+using (
+  public.has_workspace_role(workspace_id, array['owner','admin'])
+)
+with check (
+  public.has_workspace_role(workspace_id, array['owner','admin'])
+);
+
+drop policy if exists "workspace_members_delete_admin" on public.workspace_members;
+create policy "workspace_members_delete_admin"
+on public.workspace_members
+for delete
+to authenticated
+using (
+  public.has_workspace_role(workspace_id, array['owner','admin'])
+);
+
+-- ---------------------------
+-- 7. BRANDS
+-- ---------------------------
+
+drop policy if exists "brands_select_member" on public.brands;
+create policy "brands_select_member"
+on public.brands
+for select
+to authenticated
+using (
+  public.is_workspace_member(workspace_id)
+);
+
+drop policy if exists "brands_insert_editor" on public.brands;
+create policy "brands_insert_editor"
+on public.brands
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(workspace_id, array['owner','admin','editor'])
+);
+
+drop policy if exists "brands_update_editor" on public.brands;
+create policy "brands_update_editor"
+on public.brands
+for update
+to authenticated
+using (
+  public.has_workspace_role(workspace_id, array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(workspace_id, array['owner','admin','editor'])
+);
+
+drop policy if exists "brands_delete_admin" on public.brands;
+create policy "brands_delete_admin"
+on public.brands
+for delete
+to authenticated
+using (
+  public.has_workspace_role(workspace_id, array['owner','admin'])
+);
+
+-- ---------------------------
+-- 8. BRAND SNAPSHOTS
+-- ---------------------------
+
+drop policy if exists "brand_snapshots_select_member" on public.brand_snapshots;
+create policy "brand_snapshots_select_member"
+on public.brand_snapshots
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "brand_snapshots_insert_editor" on public.brand_snapshots;
+create policy "brand_snapshots_insert_editor"
+on public.brand_snapshots
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "brand_snapshots_update_editor" on public.brand_snapshots;
+create policy "brand_snapshots_update_editor"
+on public.brand_snapshots
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "brand_snapshots_delete_admin" on public.brand_snapshots;
+create policy "brand_snapshots_delete_admin"
+on public.brand_snapshots
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 9. PRODUCTS
+-- ---------------------------
+
+drop policy if exists "products_select_member" on public.products;
+create policy "products_select_member"
+on public.products
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "products_insert_editor" on public.products;
+create policy "products_insert_editor"
+on public.products
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "products_update_editor" on public.products;
+create policy "products_update_editor"
+on public.products
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "products_delete_admin" on public.products;
+create policy "products_delete_admin"
+on public.products
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 10. COMPETITORS
+-- ---------------------------
+
+drop policy if exists "competitors_select_member" on public.competitors;
+create policy "competitors_select_member"
+on public.competitors
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "competitors_insert_editor" on public.competitors;
+create policy "competitors_insert_editor"
+on public.competitors
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "competitors_update_editor" on public.competitors;
+create policy "competitors_update_editor"
+on public.competitors
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "competitors_delete_admin" on public.competitors;
+create policy "competitors_delete_admin"
+on public.competitors
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 11. AUDIENCE SEGMENTS
+-- ---------------------------
+
+drop policy if exists "audience_segments_select_member" on public.audience_segments;
+create policy "audience_segments_select_member"
+on public.audience_segments
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "audience_segments_insert_editor" on public.audience_segments;
+create policy "audience_segments_insert_editor"
+on public.audience_segments
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "audience_segments_update_editor" on public.audience_segments;
+create policy "audience_segments_update_editor"
+on public.audience_segments
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "audience_segments_delete_admin" on public.audience_segments;
+create policy "audience_segments_delete_admin"
+on public.audience_segments
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 12. PRODUCT_AUDIENCE_SEGMENTS
+-- ---------------------------
+
+drop policy if exists "product_audience_segments_select_member" on public.product_audience_segments;
+create policy "product_audience_segments_select_member"
+on public.product_audience_segments
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_product(product_id))
+);
+
+drop policy if exists "product_audience_segments_insert_editor" on public.product_audience_segments;
+create policy "product_audience_segments_insert_editor"
+on public.product_audience_segments
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_product(product_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "product_audience_segments_delete_editor" on public.product_audience_segments;
+create policy "product_audience_segments_delete_editor"
+on public.product_audience_segments
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_product(product_id), array['owner','admin','editor'])
+);
+
+-- ---------------------------
+-- 13. CHANNELS
+-- ---------------------------
+
+drop policy if exists "channels_select_member" on public.channels;
+create policy "channels_select_member"
+on public.channels
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "channels_insert_editor" on public.channels;
+create policy "channels_insert_editor"
+on public.channels
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channels_update_editor" on public.channels;
+create policy "channels_update_editor"
+on public.channels
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channels_delete_admin" on public.channels;
+create policy "channels_delete_admin"
+on public.channels
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 14. CHANNEL OVERRIDES
+-- ---------------------------
+
+drop policy if exists "channel_overrides_select_member" on public.channel_overrides;
+create policy "channel_overrides_select_member"
+on public.channel_overrides
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_channel(channel_id))
+);
+
+drop policy if exists "channel_overrides_insert_editor" on public.channel_overrides;
+create policy "channel_overrides_insert_editor"
+on public.channel_overrides
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_overrides_update_editor" on public.channel_overrides;
+create policy "channel_overrides_update_editor"
+on public.channel_overrides
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_overrides_delete_admin" on public.channel_overrides;
+create policy "channel_overrides_delete_admin"
+on public.channel_overrides
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 15. CHANNEL FUNNEL ROLES
+-- ---------------------------
+
+drop policy if exists "channel_funnel_roles_select_member" on public.channel_funnel_roles;
+create policy "channel_funnel_roles_select_member"
+on public.channel_funnel_roles
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_channel(channel_id))
+);
+
+drop policy if exists "channel_funnel_roles_insert_editor" on public.channel_funnel_roles;
+create policy "channel_funnel_roles_insert_editor"
+on public.channel_funnel_roles
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_funnel_roles_update_editor" on public.channel_funnel_roles;
+create policy "channel_funnel_roles_update_editor"
+on public.channel_funnel_roles
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_funnel_roles_delete_editor" on public.channel_funnel_roles;
+create policy "channel_funnel_roles_delete_editor"
+on public.channel_funnel_roles
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+-- ---------------------------
+-- 16. CHANNEL DAILY STATS
+-- ---------------------------
+
+drop policy if exists "channel_daily_stats_select_member" on public.channel_daily_stats;
+create policy "channel_daily_stats_select_member"
+on public.channel_daily_stats
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_channel(channel_id))
+);
+
+drop policy if exists "channel_daily_stats_insert_editor" on public.channel_daily_stats;
+create policy "channel_daily_stats_insert_editor"
+on public.channel_daily_stats
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_daily_stats_update_editor" on public.channel_daily_stats;
+create policy "channel_daily_stats_update_editor"
+on public.channel_daily_stats
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "channel_daily_stats_delete_admin" on public.channel_daily_stats;
+create policy "channel_daily_stats_delete_admin"
+on public.channel_daily_stats
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_channel(channel_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 17. CONTENT TOPICS
+-- ---------------------------
+
+drop policy if exists "content_topics_select_member" on public.content_topics;
+create policy "content_topics_select_member"
+on public.content_topics
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "content_topics_insert_editor" on public.content_topics;
+create policy "content_topics_insert_editor"
+on public.content_topics
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "content_topics_update_editor" on public.content_topics;
+create policy "content_topics_update_editor"
+on public.content_topics
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "content_topics_delete_admin" on public.content_topics;
+create policy "content_topics_delete_admin"
+on public.content_topics
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin'])
+);
+
+-- ---------------------------
+-- 18. CONTENT ITEMS
+-- ---------------------------
+
+drop policy if exists "content_items_select_member" on public.content_items;
+create policy "content_items_select_member"
+on public.content_items
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "content_items_insert_editor" on public.content_items;
+create policy "content_items_insert_editor"
+on public.content_items
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor','reviewer'])
+);
+
+drop policy if exists "content_items_update_editor" on public.content_items;
+create policy "content_items_update_editor"
+on public.content_items
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor','reviewer'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor','reviewer'])
+);
+
+drop policy if exists "content_items_delete_admin" on public.content_items;
+create policy "content_items_delete_admin"
+on public.content_items
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+-- ---------------------------
+-- 19. CONTENT ITEM VERSIONS
+-- ---------------------------
+
+drop policy if exists "content_item_versions_select_member" on public.content_item_versions;
+create policy "content_item_versions_select_member"
+on public.content_item_versions
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_content_item(content_item_id))
+);
+
+drop policy if exists "content_item_versions_insert_editor" on public.content_item_versions;
+create policy "content_item_versions_insert_editor"
+on public.content_item_versions
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+);
+
+drop policy if exists "content_item_versions_update_editor" on public.content_item_versions;
+create policy "content_item_versions_update_editor"
+on public.content_item_versions
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+);
+
+drop policy if exists "content_item_versions_delete_admin" on public.content_item_versions;
+create policy "content_item_versions_delete_admin"
+on public.content_item_versions
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor'])
+);
+
+-- ---------------------------
+-- 20. GENERATION JOBS
+-- ---------------------------
+
+drop policy if exists "generation_jobs_select_member" on public.generation_jobs;
+create policy "generation_jobs_select_member"
+on public.generation_jobs
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_content_item(content_item_id))
+);
+
+drop policy if exists "generation_jobs_insert_editor" on public.generation_jobs;
+create policy "generation_jobs_insert_editor"
+on public.generation_jobs
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+);
+
+drop policy if exists "generation_jobs_update_editor" on public.generation_jobs;
+create policy "generation_jobs_update_editor"
+on public.generation_jobs
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor','reviewer'])
+);
+
+-- ---------------------------
+-- 21. CONTENT ITEM METRICS
+-- ---------------------------
+
+drop policy if exists "content_item_metrics_select_member" on public.content_item_metrics;
+create policy "content_item_metrics_select_member"
+on public.content_item_metrics
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_content_item(content_item_id))
+);
+
+drop policy if exists "content_item_metrics_insert_editor" on public.content_item_metrics;
+create policy "content_item_metrics_insert_editor"
+on public.content_item_metrics
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "content_item_metrics_update_editor" on public.content_item_metrics;
+create policy "content_item_metrics_update_editor"
+on public.content_item_metrics
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_content_item(content_item_id), array['owner','admin','editor'])
+);
+
+-- ---------------------------
+-- 22. BRAND ASSETS
+-- ---------------------------
+
+drop policy if exists "brand_assets_select_member" on public.brand_assets;
+create policy "brand_assets_select_member"
+on public.brand_assets
+for select
+to authenticated
+using (
+  public.is_workspace_member(public.workspace_id_for_brand(brand_id))
+);
+
+drop policy if exists "brand_assets_insert_editor" on public.brand_assets;
+create policy "brand_assets_insert_editor"
+on public.brand_assets
+for insert
+to authenticated
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "brand_assets_update_editor" on public.brand_assets;
+create policy "brand_assets_update_editor"
+on public.brand_assets
+for update
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+)
+with check (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
+
+drop policy if exists "brand_assets_delete_editor" on public.brand_assets;
+create policy "brand_assets_delete_editor"
+on public.brand_assets
+for delete
+to authenticated
+using (
+  public.has_workspace_role(public.workspace_id_for_brand(brand_id), array['owner','admin','editor'])
+);
