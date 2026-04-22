@@ -433,6 +433,13 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   toggleTableSelection: (id, additive) => {
     set(state => {
       const next = new Set(additive ? state.selectedTableIds : []);
+
+      // If user starts additive selection from a single selected table,
+      // promote that anchor table into the multi-selection set.
+      if (additive && state.selectedTableId && !next.has(state.selectedTableId)) {
+        next.add(state.selectedTableId);
+      }
+
       if (state.selectedTableIds.has(id) && additive) {
         next.delete(id);
       } else {
