@@ -10,3 +10,9 @@ Notes:
 
 - Single-file sync example: `tokens/tokens.json`
 - Multi-file/themes sync: `tokens` (folder mode)
+- Current token sets in `tokens/tokens.json`:
+  - `core` (primitive colors + radius)
+  - `semanticLight`
+  - `semanticDark`
+  - `semanticEditor`
+  - `typography` (font families, weights, sizes, text styles)
