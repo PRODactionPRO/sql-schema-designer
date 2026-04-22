@@ -7,7 +7,8 @@ import type { SchemaStoreInitialData } from '../model/useSchemaStore';
 import type { ProjectSettings } from '../model/types';
 import { DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '../model/types';
 import type { ProjectData } from '@/shared/types/project';
-import { STORAGE_PROJECT_PREFIX } from '@/shared/config/storage';
+import { loadProjectById } from '@/shared/lib/project-storage';
+import { useEditorStoreSelectors } from '../model/useEditorStoreSelectors';
 
 // ── Extracted hooks ──
 import { useEditorKeyboardShortcuts } from '../model/useEditorKeyboardShortcuts';
@@ -36,12 +37,7 @@ import { Code, PanelLeft } from 'lucide-react';
 import type { FieldType } from '../model/types';
 
 function loadProjectFromStorage(id: string): ProjectData | null {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_PROJECT_PREFIX}${id}`);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return loadProjectById(id);
 }
 
 export function EditorPage() {
@@ -110,45 +106,47 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   }
 
   // ── Store selectors ──
-  const tables = useSchemaStore(s => s.tables);
-  const relations = useSchemaStore(s => s.relations);
-  const domains = useSchemaStore(s => s.domains);
-  const selectedTableId = useSchemaStore(s => s.selectedTableId);
-  const selectedTableIds = useSchemaStore(s => s.selectedTableIds);
-  const selectedRelation = useSchemaStore(s => s.selectedRelation);
-  const setSelectedTableId = useSchemaStore(s => s.setSelectedTableId);
-  const setSelectedRelation = useSchemaStore(s => s.setSelectedRelation);
-  const addTable = useSchemaStore(s => s.addTable);
-  const updateTablePosition = useSchemaStore(s => s.updateTablePosition);
-  const updateTableName = useSchemaStore(s => s.updateTableName);
-  const updateTableDescription = useSchemaStore(s => s.updateTableDescription);
-  const updateTableDomain = useSchemaStore(s => s.updateTableDomain);
-  const deleteTable = useSchemaStore(s => s.deleteTable);
-  const deleteTables = useSchemaStore(s => s.deleteTables);
-  const addField = useSchemaStore(s => s.addField);
-  const updateField = useSchemaStore(s => s.updateField);
-  const deleteField = useSchemaStore(s => s.deleteField);
-  const addRelation = useSchemaStore(s => s.addRelation);
-  const updateRelation = useSchemaStore(s => s.updateRelation);
-  const deleteRelation = useSchemaStore(s => s.deleteRelation);
-  const addDomain = useSchemaStore(s => s.addDomain);
-  const updateDomain = useSchemaStore(s => s.updateDomain);
-  const deleteDomain = useSchemaStore(s => s.deleteDomain);
-  const toggleTableSelection = useSchemaStore(s => s.toggleTableSelection);
-  const selectTablesInRect = useSchemaStore(s => s.selectTablesInRect);
-  const clearMultiSelection = useSchemaStore(s => s.clearMultiSelection);
-  const moveSelectedTables = useSchemaStore(s => s.moveSelectedTables);
-  const autoLayout = useSchemaStore(s => s.autoLayout);
-  const exportToFormat = useSchemaStore(s => s.exportToFormat);
-  const importFromFormat = useSchemaStore(s => s.importFromFormat);
-  const getTableColor = useSchemaStore(s => s.getTableColor);
-  const assignDomainToTables = useSchemaStore(s => s.assignDomainToTables);
-  const reorderTables = useSchemaStore(s => s.reorderTables);
-  const undo = useSchemaStore(s => s.undo);
-  const redo = useSchemaStore(s => s.redo);
-  const pushHistory = useSchemaStore(s => s.pushHistory);
-  const pastLength = useSchemaStore(s => s._past.length);
-  const futureLength = useSchemaStore(s => s._future.length);
+  const {
+    tables,
+    relations,
+    domains,
+    selectedTableId,
+    selectedTableIds,
+    selectedRelation,
+    setSelectedTableId,
+    setSelectedRelation,
+    addTable,
+    updateTablePosition,
+    updateTableName,
+    updateTableDescription,
+    updateTableDomain,
+    deleteTable,
+    deleteTables,
+    addField,
+    updateField,
+    deleteField,
+    addRelation,
+    updateRelation,
+    deleteRelation,
+    addDomain,
+    updateDomain,
+    deleteDomain,
+    toggleTableSelection,
+    selectTablesInRect,
+    clearMultiSelection,
+    moveSelectedTables,
+    autoLayout,
+    exportToFormat,
+    importFromFormat,
+    getTableColor,
+    assignDomainToTables,
+    reorderTables,
+    undo,
+    redo,
+    pushHistory,
+    pastLength,
+    futureLength,
+  } = useEditorStoreSelectors();
 
   // ── Local UI state ──
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);

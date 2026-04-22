@@ -1,11 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { Table, Relation, Domain, ProjectSettings } from './types';
 import type { ProjectData } from '@/shared/types/project';
-import { STORAGE_PROJECT_PREFIX } from '@/shared/config/storage';
-
-function saveProjectToStorage(project: ProjectData) {
-  localStorage.setItem(`${STORAGE_PROJECT_PREFIX}${project.id}`, JSON.stringify(project));
-}
+import { saveProject } from '@/shared/lib/project-storage';
 
 interface UseAutoSaveOptions {
   projectId: string | null;
@@ -66,7 +62,7 @@ export function useAutoSave({
       snapshot,
       updatedAt: new Date().toISOString(),
     };
-    saveProjectToStorage(updated);
+    saveProject(updated);
     projectDataRef.current = updated;
   }, [projectId]);
 

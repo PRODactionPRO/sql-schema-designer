@@ -2,11 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
 import type { ProjectData } from '@/shared/types/project';
-import { STORAGE_PROJECT_PREFIX } from '@/shared/config/storage';
-
-function saveProjectToStorage(project: ProjectData) {
-  localStorage.setItem(`${STORAGE_PROJECT_PREFIX}${project.id}`, JSON.stringify(project));
-}
+import { saveProject } from '@/shared/lib/project-storage';
 
 interface UseSnapshotCaptureOptions {
   projectId: string | null;
@@ -90,7 +86,7 @@ export function useSnapshotCapture({
             const current = projectDataRef.current;
             if (current) {
               const updated = { ...current, snapshot: dataUrl, updatedAt: new Date().toISOString() };
-              saveProjectToStorage(updated);
+              saveProject(updated);
               projectDataRef.current = updated;
             }
           }
