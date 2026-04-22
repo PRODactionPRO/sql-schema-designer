@@ -414,7 +414,9 @@ export function TableDetailsPanel({
 
                       <Tip label="Column details">
                         <button
-                          ref={el => moreBtnRefs.current[field.id] = el}
+                          ref={el => {
+                            moreBtnRefs.current[field.id] = el;
+                          }}
                           onClick={() => setMoreOpenFieldId(isMoreOpen ? null : field.id)}
                           className={`size-6 flex items-center justify-center rounded transition-colors ${isMoreOpen ? 'text-white bg-gray-800' : `${dk ? 'text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} opacity-0 group-hover/row:opacity-100`}`}
                         >

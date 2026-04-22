@@ -220,7 +220,7 @@ export function renderSnapshotDataUrl(
       // Field type
       ctx.fillStyle = '#94a3b8';
       ctx.textAlign = 'right';
-      let ftype = f.type;
+      let ftype = String(f.type);
       const ftypeMaxW = tw * 0.35;
       while (ctx.measureText(ftype).width > ftypeMaxW && ftype.length > 1) {
         ftype = ftype.slice(0, -1);
