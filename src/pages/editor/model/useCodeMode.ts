@@ -148,80 +148,98 @@ export function useCodeMode({
   }, [tables, relations, domains, codeMode, activeCodeTab, serializeForTab]);
 
   // ── Code → Canvas sync ──
+  const applyCodeToCanvas = useCallback((rawCode: string): { applied: boolean; hasErrors: boolean } => {
+    const result = parseForTab(activeCodeTab, rawCode);
+    setCodeErrors(result.errors);
+
+    if (result.errors.length > 0) {
+      return { applied: false, hasErrors: true };
+    }
+
+    if (result.tables.length === 0) {
+      return { applied: false, hasErrors: false };
+    }
+
+    codeSyncDirection.current = 'from-code';
+
+    // Preserve existing positions & IDs
+    const positionMap = new Map<string, { x: number; y: number }>();
+    const idMap = new Map<string, string>();
+    const domainIdMap = new Map<string, string>();
+    for (const t of tables) {
+      positionMap.set(t.name.toLowerCase(), { ...t.position });
+      idMap.set(t.name.toLowerCase(), t.id);
+      if (t.domainId) domainIdMap.set(t.name.toLowerCase(), t.domainId);
+    }
+    const existingDomainIdMap = new Map<string, string>();
+    for (const d of domains) {
+      existingDomainIdMap.set(d.name.toLowerCase(), d.id);
+    }
+
+    const patchedTables = result.tables.map(t => {
+      const key = t.name.toLowerCase();
+      return {
+        ...t,
+        id: idMap.get(key) || t.id,
+        position: positionMap.get(key) || t.position,
+      };
+    });
+
+    const patchedDomains = result.domains.map(d => {
+      const existingDomId = existingDomainIdMap.get(d.name.toLowerCase());
+      return { ...d, id: existingDomId || d.id };
+    });
+
+    const newIdByOldId = new Map<string, string>();
+    for (let i = 0; i < result.tables.length; i++) {
+      newIdByOldId.set(result.tables[i].id, patchedTables[i].id);
+    }
+
+    const patchedRelations = result.relations.map(r => ({
+      ...r,
+      fromTableId: newIdByOldId.get(r.fromTableId) || r.fromTableId,
+      toTableId: newIdByOldId.get(r.toTableId) || r.toTableId,
+    }));
+
+    for (const pt of patchedTables) {
+      if (pt.domainId) {
+        const origDomain = result.domains.find(d => d.id === pt.domainId);
+        if (origDomain) {
+          const patchedDomain = patchedDomains.find(pd => pd.name.toLowerCase() === origDomain.name.toLowerCase());
+          if (patchedDomain) pt.domainId = patchedDomain.id;
+        }
+      }
+    }
+
+    try {
+      const schemaJson = JSON.stringify({ tables: patchedTables, relations: patchedRelations, domains: patchedDomains });
+      importFromFormat('json', schemaJson);
+      return { applied: true, hasErrors: false };
+    } catch {
+      return { applied: false, hasErrors: false };
+    }
+  }, [activeCodeTab, domains, importFromFormat, parseForTab, tables]);
+
   const handleCodeChange = useCallback((newValue: string) => {
     setCodeValue(newValue);
     if (codeParseTimerRef.current) clearTimeout(codeParseTimerRef.current);
     codeParseTimerRef.current = setTimeout(() => {
-      const result = parseForTab(activeCodeTab, newValue);
-      setCodeErrors(result.errors);
-      if (result.errors.length === 0 && result.tables.length > 0) {
-        codeSyncDirection.current = 'from-code';
-        // Preserve existing positions & IDs
-        const positionMap = new Map<string, { x: number; y: number }>();
-        const idMap = new Map<string, string>();
-        const domainIdMap = new Map<string, string>();
-        for (const t of tables) {
-          positionMap.set(t.name.toLowerCase(), { ...t.position });
-          idMap.set(t.name.toLowerCase(), t.id);
-          if (t.domainId) domainIdMap.set(t.name.toLowerCase(), t.domainId);
-        }
-        const existingDomainIdMap = new Map<string, string>();
-        for (const d of domains) {
-          existingDomainIdMap.set(d.name.toLowerCase(), d.id);
-        }
-
-        const patchedTables = result.tables.map(t => {
-          const key = t.name.toLowerCase();
-          return {
-            ...t,
-            id: idMap.get(key) || t.id,
-            position: positionMap.get(key) || t.position,
-          };
-        });
-
-        const patchedDomains = result.domains.map(d => {
-          const existingDomId = existingDomainIdMap.get(d.name.toLowerCase());
-          return { ...d, id: existingDomId || d.id };
-        });
-
-        const newIdByOldId = new Map<string, string>();
-        for (let i = 0; i < result.tables.length; i++) {
-          newIdByOldId.set(result.tables[i].id, patchedTables[i].id);
-        }
-
-        const patchedRelations = result.relations.map(r => ({
-          ...r,
-          fromTableId: newIdByOldId.get(r.fromTableId) || r.fromTableId,
-          toTableId: newIdByOldId.get(r.toTableId) || r.toTableId,
-        }));
-
-        for (const pt of patchedTables) {
-          if (pt.domainId) {
-            const origDomain = result.domains.find(d => d.id === pt.domainId);
-            if (origDomain) {
-              const patchedDomain = patchedDomains.find(pd => pd.name.toLowerCase() === origDomain.name.toLowerCase());
-              if (patchedDomain) pt.domainId = patchedDomain.id;
-            }
-          }
-        }
-
-        try {
-          const schemaJson = JSON.stringify({ tables: patchedTables, relations: patchedRelations, domains: patchedDomains });
-          importFromFormat('json', schemaJson);
-        } catch {
-          // Ignore import errors
-        }
-      }
+      applyCodeToCanvas(newValue);
     }, 500);
-  }, [importFromFormat, tables, domains, activeCodeTab, parseForTab]);
+  }, [applyCodeToCanvas]);
 
   const handleCodeSync = useCallback(() => {
-    codeSyncDirection.current = 'from-canvas';
-    const dsl = serializeForTab(activeCodeTab, tables, relations, domains);
-    setCodeValue(dsl);
-    setCodeErrors([]);
-    toast.success('Code synced from canvas');
-  }, [tables, relations, domains, activeCodeTab, serializeForTab]);
+    const syncResult = applyCodeToCanvas(codeValue);
+    if (syncResult.applied) {
+      toast.success('Canvas synced from code');
+      return;
+    }
+    if (syncResult.hasErrors) {
+      toast.error('Cannot sync: fix syntax errors in code first');
+      return;
+    }
+    toast.error('Cannot sync: no tables were parsed from current code');
+  }, [applyCodeToCanvas, codeValue]);
 
   // ── Scroll code editor to a table ──
   const scrollToTable = useCallback((tableName: string, fieldName?: string) => {
