@@ -4,7 +4,8 @@
   "version": "0.0.1",
   "type": "module",
   "workspaces": [
-    "apps/api"
+    "apps/api",
+    "packages/api-client"
   ],
   "scripts": {
     "build": "vite build",
@@ -16,8 +17,14 @@
     "api:dev": "npm run start:dev --workspace api",
     "api:build": "npm run build --workspace api",
     "api:start": "npm run start --workspace api",
+    "api:lint": "npm run lint --workspace api",
+    "api:test:e2e": "npm run test:e2e --workspace api -- --runInBand",
     "api:migrate": "npm run prisma:migrate --workspace api",
-    "api:generate": "npm run prisma:generate --workspace api"
+    "api:generate": "npm run prisma:generate --workspace api",
+    "api:openapi": "npm run openapi:generate --workspace api",
+    "client:generate": "npm run generate --workspace @repo/api-client",
+    "client:build": "npm run build --workspace @repo/api-client",
+    "contracts:generate": "npm run api:openapi && npm run client:generate"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",

@@ -1,17 +1,19 @@
 # SQL Schema Designer API (NestJS)
 
-Minimal backend for production usage with:
-- NestJS
-- PostgreSQL
-- Prisma
+Backend foundation for production usage with:
+- NestJS + Prisma + PostgreSQL
 - JWT auth
-- Projects + revisions storage
+- Domain modules: projects, revisions, views, migrations
+- CLI commands for operations
+- OpenAPI contract generation
 
 ## Data model
 
 - `User`
 - `Project` (stores full schema in `schemaJson` as JSONB)
 - `ProjectRevision` (version history snapshots)
+- `ProjectSqlView` (saved analytical SQL queries)
+- `ProjectMigration` (saved migration drafts)
 
 ## Local run
 
@@ -40,6 +42,7 @@ npm run start:dev
 ```
 
 API base URL: `http://localhost:3000/api`
+Swagger UI: `http://localhost:3000/api/docs`
 
 ## Main endpoints
 
@@ -58,3 +61,32 @@ API base URL: `http://localhost:3000/api`
 - `GET /api/projects/:projectId/revisions`
 - `POST /api/projects/:projectId/revisions`
 - `POST /api/projects/:projectId/revisions/:revision/restore`
+
+### Views (JWT required)
+- `GET /api/projects/:projectId/views`
+- `POST /api/projects/:projectId/views`
+- `PUT /api/projects/:projectId/views/:viewId`
+- `DELETE /api/projects/:projectId/views/:viewId`
+
+### Migrations (JWT required)
+- `GET /api/projects/:projectId/migrations`
+- `POST /api/projects/:projectId/migrations`
+- `PUT /api/projects/:projectId/migrations/:migrationId`
+- `DELETE /api/projects/:projectId/migrations/:migrationId`
+
+## CLI
+
+```bash
+# create admin/user
+npm run cli -- create-user --email admin@example.com --password secret --role admin
+
+# import project from json file
+npm run cli -- import-project --owner-email admin@example.com --file ./schema.json --name "Imported schema"
+```
+
+## Contract generation
+
+```bash
+# from repository root:
+npm run contracts:generate
+```

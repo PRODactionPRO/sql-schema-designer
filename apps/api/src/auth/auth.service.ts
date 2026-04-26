@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { User } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -15,6 +16,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -23,7 +25,13 @@ export class AuthService {
       throw new ConflictException('Email is already in use');
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const rounds = Number(
+      this.configService.get<string>(
+        'auth.bcryptSaltRounds',
+        this.configService.get<string>('BCRYPT_SALT_ROUNDS', '10'),
+      ),
+    );
+    const passwordHash = await bcrypt.hash(dto.password, rounds);
     const user = await this.usersService.create({
       email: dto.email,
       passwordHash,
@@ -62,6 +70,7 @@ export class AuthService {
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
       email: user.email,
+      role: user.role,
     });
 
     return {
@@ -70,6 +79,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
       },
     };
   }
