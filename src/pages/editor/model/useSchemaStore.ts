@@ -1,7 +1,9 @@
 import { create } from 'zustand';
-import type { Table, Field, Relation, Schema, RelationType, Domain } from './types';
+import type { Table, Field, Relation, Schema, RelationType, Domain, EnumType } from './types';
 import { DOMAIN_COLORS } from './types';
 import { getSerializer } from '../lib/serializers';
+import { deepClone } from '@/shared/lib/json';
+import { normalizeSchema } from '@/shared/lib/schema-normalizer';
 
 // ── Types ──
 
@@ -9,12 +11,14 @@ export interface SchemaStoreInitialData {
   tables?: Table[];
   relations?: Relation[];
   domains?: Domain[];
+  enums?: EnumType[];
 }
 
 interface HistorySnapshot {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
 }
 
 const MAX_HISTORY = 50;
@@ -78,6 +82,7 @@ interface SchemaState {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
 
   // UI state (not tracked)
   selectedTableId: string | null;
@@ -127,6 +132,11 @@ interface SchemaState {
   deleteDomain: (id: string) => void;
   assignDomainToTables: (domainId: string, tableIds: string[]) => void;
 
+  // Enum CRUD
+  addEnum: (name: string, values?: string[]) => EnumType;
+  updateEnum: (id: string, updates: Partial<Omit<EnumType, 'id'>>) => void;
+  deleteEnum: (id: string) => void;
+
   // Multi-select
   toggleTableSelection: (id: string, additive: boolean) => void;
   selectTablesInRect: (rect: { x: number; y: number; w: number; h: number }) => void;
@@ -150,12 +160,21 @@ interface SchemaState {
 
 // ── Helpers ──
 
-function snapshot(state: { tables: Table[]; relations: Relation[]; domains: Domain[] }): HistorySnapshot {
+function snapshot(state: { tables: Table[]; relations: Relation[]; domains: Domain[]; enums: EnumType[] }): HistorySnapshot {
   return {
-    tables: JSON.parse(JSON.stringify(state.tables)),
-    relations: JSON.parse(JSON.stringify(state.relations)),
-    domains: JSON.parse(JSON.stringify(state.domains)),
+    tables: deepClone(state.tables),
+    relations: deepClone(state.relations),
+    domains: deepClone(state.domains),
+    enums: deepClone(state.enums),
   };
+}
+
+function withHistory(
+  state: Pick<SchemaState, 'tables' | 'relations' | 'domains' | 'enums' | '_past'>,
+  next: Partial<SchemaState>,
+): Partial<SchemaState> {
+  const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
+  return { ...next, _past: past, _future: [] };
 }
 
 let _idCounter = Date.now();
@@ -170,6 +189,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   tables: DEFAULT_TABLES,
   relations: DEFAULT_RELATIONS,
   domains: [],
+  enums: [],
   selectedTableId: DEFAULT_TABLES[0]?.id ?? null,
   selectedTableIds: new Set<string>(),
   selectedRelation: null,
@@ -178,13 +198,21 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   // ── Initialization ──
   initialize: (data?: SchemaStoreInitialData) => {
-    const tables = data?.tables ?? DEFAULT_TABLES;
-    const relations = data?.relations ?? DEFAULT_RELATIONS;
-    const domains = data?.domains ?? [];
+    const normalized = normalizeSchema({
+      tables: data?.tables ?? DEFAULT_TABLES,
+      relations: data?.relations ?? DEFAULT_RELATIONS,
+      domains: data?.domains ?? [],
+      enums: data?.enums ?? [],
+    });
+    const tables = normalized.tables;
+    const relations = normalized.relations;
+    const domains = normalized.domains ?? [];
+    const enums = normalized.enums ?? [];
     set({
       tables,
       relations,
       domains,
+      enums,
       selectedTableId: tables.length > 0 ? tables[0]?.id ?? null : null,
       selectedTableIds: new Set(),
       selectedRelation: null,
@@ -195,27 +223,29 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   // ── Undo / Redo ──
   undo: () => {
-    const { _past, _future, tables, relations, domains } = get();
+    const { _past, _future, tables, relations, domains, enums } = get();
     if (_past.length === 0) return;
     const prev = _past[_past.length - 1];
     set({
       tables: prev.tables,
       relations: prev.relations,
       domains: prev.domains,
+      enums: prev.enums,
       _past: _past.slice(0, -1),
-      _future: [..._future, snapshot({ tables, relations, domains })],
+      _future: [..._future, snapshot({ tables, relations, domains, enums })],
     });
   },
 
   redo: () => {
-    const { _past, _future, tables, relations, domains } = get();
+    const { _past, _future, tables, relations, domains, enums } = get();
     if (_future.length === 0) return;
     const next = _future[_future.length - 1];
     set({
       tables: next.tables,
       relations: next.relations,
       domains: next.domains,
-      _past: [..._past, snapshot({ tables, relations, domains })],
+      enums: next.enums,
+      _past: [..._past, snapshot({ tables, relations, domains, enums })],
       _future: _future.slice(0, -1),
     });
   },
@@ -231,7 +261,6 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   // ── Table CRUD ──
   addTable: (name, position) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     // Deduplicate name
     let finalName = name;
     const nameExists = (n: string) => state.tables.some(t => t.name.toLowerCase() === n.toLowerCase());
@@ -253,12 +282,10 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       }],
       position: position || { x: 100, y: 100 },
     };
-    set({
+    set(withHistory(state, {
       tables: [...state.tables, newTable],
       selectedTableId: newTable.id,
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   updateTablePosition: (id, position) => {
@@ -271,7 +298,6 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   updateTableName: (id, name) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     // Prevent duplicate names (case-insensitive, excluding self)
     let finalName = name;
     const nameExists = (n: string) => state.tables.some(t => t.id !== id && t.name.toLowerCase() === n.toLowerCase());
@@ -280,192 +306,231 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       while (nameExists(`${name}_${suffix}`)) suffix++;
       finalName = `${name}_${suffix}`;
     }
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t => t.id === id ? { ...t, name: finalName } : t),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   updateTableDescription: (id, description) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t => t.id === id ? { ...t, description } : t),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   updateTableDomain: (tableId, domainId) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t => {
         if (t.id !== tableId) return t;
         if (!domainId) return { ...t, domainId: undefined, color: undefined };
         return { ...t, domainId };
       }),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   deleteTable: (id) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const newSelectedTableIds = new Set(state.selectedTableIds);
     newSelectedTableIds.delete(id);
-    set({
+    set(withHistory(state, {
       tables: state.tables.filter(t => t.id !== id),
       relations: state.relations.filter(r => r.fromTableId !== id && r.toTableId !== id),
       selectedTableId: state.selectedTableId === id ? null : state.selectedTableId,
       selectedTableIds: newSelectedTableIds,
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   deleteTables: (ids) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const idSet = new Set(ids);
-    set({
+    set(withHistory(state, {
       tables: state.tables.filter(t => !idSet.has(t.id)),
       relations: state.relations.filter(r => !idSet.has(r.fromTableId) && !idSet.has(r.toTableId)),
       selectedTableId: state.selectedTableId && idSet.has(state.selectedTableId) ? null : state.selectedTableId,
       selectedTableIds: new Set(),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   // ── Field CRUD ──
   addField: (tableId, field) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const newField: Field = { ...field, id: nextId() };
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t =>
         t.id === tableId ? { ...t, fields: [...t.fields, newField] } : t
       ),
-      _past: past,
-      _future: [],
-    });
+    }));
     return newField.id;
   },
 
   updateField: (tableId, fieldId, updates) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    const normalizedUpdates: Partial<Field> = { ...updates };
+    if (normalizedUpdates.type && normalizedUpdates.type !== 'enum') {
+      normalizedUpdates.enumId = undefined;
+      normalizedUpdates.enumName = undefined;
+    }
+    if (normalizedUpdates.type === 'enum') {
+      if (normalizedUpdates.enumId) {
+        const enumType = state.enums.find(e => e.id === normalizedUpdates.enumId);
+        normalizedUpdates.enumName = enumType?.name;
+      } else if (normalizedUpdates.enumName) {
+        const enumType = state.enums.find(e => e.name.toLowerCase() === normalizedUpdates.enumName?.toLowerCase());
+        normalizedUpdates.enumId = enumType?.id;
+      }
+    }
+    set(withHistory(state, {
       tables: state.tables.map(t =>
         t.id === tableId
-          ? { ...t, fields: t.fields.map(f => f.id === fieldId ? { ...f, ...updates } : f) }
+          ? { ...t, fields: t.fields.map(f => f.id === fieldId ? { ...f, ...normalizedUpdates } : f) }
           : t
       ),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   deleteField: (tableId, fieldId) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t =>
         t.id === tableId ? { ...t, fields: t.fields.filter(f => f.id !== fieldId) } : t
       ),
       relations: state.relations.filter(r => r.fromFieldId !== fieldId && r.toFieldId !== fieldId),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   // ── Relation CRUD ──
   addRelation: (relation) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const newRelation: Relation = { ...relation, id: nextId() };
-    set({
+    set(withHistory(state, {
       relations: [...state.relations, newRelation],
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   updateRelation: (id, type) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       relations: state.relations.map(r => r.id === id ? { ...r, type } : r),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   deleteRelation: (id) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       relations: state.relations.filter(r => r.id !== id),
       selectedRelation: state.selectedRelation?.id === id ? null : state.selectedRelation,
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   // ── Domain CRUD ──
   addDomain: (name) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const usedColors = new Set(state.domains.map(d => d.color));
     const color = DOMAIN_COLORS.find(c => !usedColors.has(c)) || DOMAIN_COLORS[state.domains.length % DOMAIN_COLORS.length];
     const newDomain: Domain = { id: nextId(), name, color };
-    set({
+    set(withHistory(state, {
       domains: [...state.domains, newDomain],
-      _past: past,
-      _future: [],
-    });
+    }));
     return newDomain;
   },
 
   updateDomain: (id, updates) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       domains: state.domains.map(d => d.id === id ? { ...d, ...updates } : d),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   deleteDomain: (id) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
+    set(withHistory(state, {
       domains: state.domains.filter(d => d.id !== id),
       tables: state.tables.map(t => t.domainId === id ? { ...t, domainId: undefined } : t),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   assignDomainToTables: (domainId, tableIds) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const idSet = new Set(tableIds);
-    set({
+    set(withHistory(state, {
       tables: state.tables.map(t => idSet.has(t.id) ? { ...t, domainId } : t),
-      _past: past,
-      _future: [],
-    });
+    }));
+  },
+
+  // ── Enum CRUD ──
+  addEnum: (name, values = []) => {
+    const state = get();
+    const existingNames = new Set(state.enums.map(e => e.name.toLowerCase()));
+    let finalName = name.trim() || 'Enum';
+    if (existingNames.has(finalName.toLowerCase())) {
+      let suffix = 2;
+      while (existingNames.has(`${finalName}_${suffix}`.toLowerCase())) suffix += 1;
+      finalName = `${finalName}_${suffix}`;
+    }
+    const uniqueValues = Array.from(new Set(values.map(v => v.trim()).filter(Boolean)));
+    const nextEnum: EnumType = {
+      id: nextId(),
+      name: finalName,
+      values: uniqueValues,
+    };
+    set(withHistory(state, {
+      enums: [...state.enums, nextEnum],
+    }));
+    return nextEnum;
+  },
+
+  updateEnum: (id, updates) => {
+    const state = get();
+    const prevEnum = state.enums.find(e => e.id === id);
+    if (!prevEnum) return;
+    const nextNameRaw = updates.name?.trim();
+    const nextName = nextNameRaw && nextNameRaw.length > 0 ? nextNameRaw : prevEnum.name;
+    const uniqueValues = updates.values
+      ? Array.from(new Set(updates.values.map(v => v.trim()).filter(Boolean)))
+      : prevEnum.values;
+
+    set(withHistory(state, {
+      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues } : e),
+      tables: state.tables.map(table => ({
+        ...table,
+        fields: table.fields.map(field => {
+          if (field.enumId !== id) return field;
+          return { ...field, enumName: nextName };
+        }),
+      })),
+    }));
+  },
+
+  deleteEnum: (id) => {
+    const state = get();
+    const enumFieldIds = new Set(
+      state.tables.flatMap(table => table.fields.filter(field => field.enumId === id).map(field => field.id)),
+    );
+    set(withHistory(state, {
+      enums: state.enums.filter(e => e.id !== id),
+      tables: state.tables.map(table => ({
+        ...table,
+        fields: table.fields.map(field => {
+          if (field.enumId !== id) return field;
+          return { ...field, type: 'varchar', enumId: undefined, enumName: undefined, isForeignKey: false, foreignKeyField: undefined, foreignKeyTable: undefined };
+        }),
+      })),
+      relations: state.relations.filter(rel => !enumFieldIds.has(rel.fromFieldId) && !enumFieldIds.has(rel.toFieldId)),
+    }));
   },
 
   // ── Multi-select (no history) ──
   toggleTableSelection: (id, additive) => {
     set(state => {
       const next = new Set(additive ? state.selectedTableIds : []);
+
+      // If user starts additive selection from a single selected table,
+      // promote that anchor table into the multi-selection set.
+      if (additive && state.selectedTableId && !next.has(state.selectedTableId)) {
+        next.add(state.selectedTableId);
+      }
+
       if (state.selectedTableIds.has(id) && additive) {
         next.delete(id);
       } else {
@@ -520,11 +585,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   // ── History helper (push snapshot without data change — e.g. after drag-end) ──
   pushHistory: () => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
-    set({
-      _past: past,
-      _future: [],
-    });
+    set(withHistory(state, {}));
   },
 
   // ── Auto-layout ──
@@ -532,8 +593,6 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     const state = get();
     const { tables, relations, domains } = state;
     if (tables.length === 0) return;
-
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
 
     // Group tables by domain
     const domainGroups = new Map<string, string[]>();
@@ -583,20 +642,18 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       });
     }
 
-    set({
+    set(withHistory(state, {
       tables: tables.map(t => {
         const pos = newPositions.get(t.id);
         return pos ? { ...t, position: pos } : t;
       }),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   // ─ Import/Export ──
   exportToFormat: (formatId) => {
-    const { tables, relations, domains } = get();
-    const schema: Schema = { tables, relations, domains };
+    const { tables, relations, domains, enums } = get();
+    const schema: Schema = { tables, relations, domains, enums };
     const serializer = getSerializer(formatId);
     if (!serializer) throw new Error(`Unknown format: ${formatId}`);
     return serializer.serialize(schema);
@@ -604,10 +661,9 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   importFromFormat: (formatId, content) => {
     const state = get();
-    const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
     const serializer = getSerializer(formatId);
     if (!serializer) throw new Error(`Unknown format: ${formatId}`);
-    const schema = serializer.deserialize(content);
+    const schema = normalizeSchema(serializer.deserialize(content));
     // Deduplicate tables by id (safety net for parsers)
     const seenIds = new Set<string>();
     const dedupedTables = schema.tables.filter(t => {
@@ -628,16 +684,15 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
         seenNames.add(lower);
       }
     }
-    set({
+    set(withHistory(state, {
       tables: dedupedTables,
       relations: schema.relations,
       domains: schema.domains ?? state.domains,
+      enums: schema.enums ?? state.enums,
       selectedTableId: dedupedTables.length > 0 ? dedupedTables[0].id : null,
       selectedRelation: null,
       selectedTableIds: new Set(),
-      _past: past,
-      _future: [],
-    });
+    }));
   },
 
   // ── Helpers ──

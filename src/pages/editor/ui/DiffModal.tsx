@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 import type { Table, Relation } from '../model/types';
 import { diffSchemas, generateMigration, type SchemaDiff, type TableDiff, type FieldDiff } from '../lib/schema-diff';
 import { downloadFile } from '@/shared/lib/download';
+import { safeJsonParse } from '@/shared/lib/json';
+import { normalizeSchema } from '@/shared/lib/schema-normalizer';
 
 interface DiffModalProps {
   isOpen: boolean;
@@ -40,15 +42,15 @@ export function DiffModal({ isOpen, onClose, tables, relations }: DiffModalProps
 
   const baseline = useMemo(() => {
     if (!baselineJson) return null;
-    try {
-      const data = JSON.parse(baselineJson);
-      return {
-        tables: (data.tables || data.schema?.tables || []) as Table[],
-        relations: (data.relations || data.schema?.relations || []) as Relation[],
-      };
-    } catch {
-      return null;
-    }
+    const data = safeJsonParse<unknown>(baselineJson, null);
+    if (!data || typeof data !== 'object') return null;
+    const record = data as Record<string, unknown>;
+    const source = record.schema ?? data;
+    const normalized = normalizeSchema(source);
+    return {
+      tables: normalized.tables as Table[],
+      relations: normalized.relations as Relation[],
+    };
   }, [baselineJson]);
 
   const diff: SchemaDiff | null = useMemo(() => {

@@ -1,5 +1,7 @@
 import type { SchemaSerializer } from './types';
 import type { Schema } from '../../model/types';
+import { safeJsonParse } from '@/shared/lib/json';
+import { normalizeSchema } from '@/shared/lib/schema-normalizer';
 
 export const jsonSerializer: SchemaSerializer = {
   id: 'json',
@@ -15,16 +17,10 @@ export const jsonSerializer: SchemaSerializer = {
   },
 
   deserialize(content: string): Schema {
-    const parsed = JSON.parse(content);
-
-    if (!parsed.tables || !Array.isArray(parsed.tables)) {
+    const parsed = safeJsonParse<unknown>(content, null);
+    if (!parsed || typeof parsed !== 'object') {
       throw new Error('Invalid JSON schema: missing "tables" array');
     }
-
-    return {
-      tables: parsed.tables,
-      relations: parsed.relations || [],
-      domains: parsed.domains || [],
-    };
+    return normalizeSchema(parsed);
   },
 };

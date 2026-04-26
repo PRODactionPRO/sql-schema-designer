@@ -16,12 +16,13 @@
  *   -- line comments
  */
 
-import type { Table, Field, Relation, Domain, FieldType, RelationType } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType, FieldType, RelationType } from '../../model/types';
 
 export interface ParseResult {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
   errors: ParseError[];
 }
 
@@ -33,6 +34,16 @@ export interface ParseError {
 let idCounter = 0;
 function genId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${(idCounter++).toString(36)}`;
+}
+
+const IDENT = `(?:"(?:[^"]|"")+"|[A-Za-z_][\\w$]*)`;
+
+function unquoteIdent(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1).replace(/""/g, '"');
+  }
+  return trimmed;
 }
 
 // ─── Type mapping ───────────────────────────────────────────
@@ -87,10 +98,10 @@ const TYPE_MAP: Record<string, FieldType> = {
   'xml': 'xml',
 };
 
-function parseFieldType(sqlType: string): FieldType {
+function parseFieldType(sqlType: string): FieldType | null {
   // Remove parenthesized arguments like (255) or (10,2)
   const normalized = sqlType.toLowerCase().replace(/\s*\([^)]*\)/, '').trim();
-  return TYPE_MAP[normalized] || 'text';
+  return TYPE_MAP[normalized] || null;
 }
 
 // ─── Main parser ────────────────────────────────────────────
@@ -99,8 +110,10 @@ export function parseDDL(source: string): ParseResult {
   const tables: Table[] = [];
   const relations: Relation[] = [];
   const domains: Domain[] = [];
+  const enums: EnumType[] = [];
   const errors: ParseError[] = [];
   const tableMap = new Map<string, Table>();
+  const enumByName = new Map<string, EnumType>();
 
   // Track deferred FK constraints (from ALTER TABLE or table-level CONSTRAINT)
   const deferredFKs: {
@@ -129,11 +142,29 @@ export function parseDDL(source: string): ParseResult {
     }
 
     // ─── CREATE TABLE ───
+    const enumMatch = trimmed.match(new RegExp(`^CREATE\\s+TYPE\\s+(${IDENT})\\s+AS\\s+ENUM\\s*\\((.+)\\)`, 'i'));
+    if (enumMatch) {
+      const enumName = unquoteIdent(enumMatch[1]);
+      const values = enumMatch[2]
+        .split(',')
+        .map((raw) => raw.trim().replace(/^'/, '').replace(/'$/, '').replace(/''/g, "'"))
+        .filter(Boolean);
+      const enumType: EnumType = {
+        id: genId('enum'),
+        name: enumName,
+        values: Array.from(new Set(values)),
+      };
+      enums.push(enumType);
+      enumByName.set(enumName.toLowerCase(), enumType);
+      i++;
+      continue;
+    }
+
     const createMatch = trimmed.match(
-      /^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(\w+)\.)?(\w+)\s*\(/i
+      new RegExp(`^CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:(${IDENT})\\.)?(${IDENT})\\s*\\(`, 'i')
     );
     if (createMatch) {
-      const tableName = createMatch[2];
+      const tableName = unquoteIdent(createMatch[2]);
 
       // Collect the entire CREATE TABLE body until we hit ");"
       let bodyStr = '';
@@ -194,7 +225,7 @@ export function parseDDL(source: string): ParseResult {
           // Extract PK columns and mark them
           const pkMatch = col.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
           if (pkMatch) {
-            const pkCols = pkMatch[1].split(',').map(c => c.trim().toLowerCase());
+            const pkCols = pkMatch[1].split(',').map(c => unquoteIdent(c).toLowerCase());
             for (const f of fields) {
               if (pkCols.includes(f.name.toLowerCase())) {
                 f.isPrimaryKey = true;
@@ -207,15 +238,15 @@ export function parseDDL(source: string): ParseResult {
 
         if (/^\s*(CONSTRAINT\s+\w+\s+)?FOREIGN\s+KEY\s*\(/i.test(col)) {
           const fkMatch = col.match(
-            /FOREIGN\s+KEY\s*\((\w+)\)\s*REFERENCES\s+(?:\w+\.)?(\w+)\s*\((\w+)\)/i
+            new RegExp(`FOREIGN\\s+KEY\\s*\\(\\s*(${IDENT})\\s*\\)\\s*REFERENCES\\s+(?:(${IDENT})\\.)?(${IDENT})\\s*\\(\\s*(${IDENT})\\s*\\)`, 'i')
           );
           if (fkMatch) {
             deferredFKs.push({
               line: colLine,
               fromTableName: tableName,
-              fromFieldName: fkMatch[1],
-              toTableName: fkMatch[2],
-              toFieldName: fkMatch[3],
+              fromFieldName: unquoteIdent(fkMatch[1]),
+              toTableName: unquoteIdent(fkMatch[3]),
+              toFieldName: unquoteIdent(fkMatch[4]),
             });
           }
           continue;
@@ -224,7 +255,7 @@ export function parseDDL(source: string): ParseResult {
         if (/^\s*(CONSTRAINT\s+\w+\s+)?UNIQUE\s*\(/i.test(col)) {
           const uqMatch = col.match(/UNIQUE\s*\(([^)]+)\)/i);
           if (uqMatch) {
-            const uqCols = uqMatch[1].split(',').map(c => c.trim().toLowerCase());
+            const uqCols = uqMatch[1].split(',').map(c => unquoteIdent(c).toLowerCase());
             for (const f of fields) {
               if (uqCols.includes(f.name.toLowerCase())) {
                 f.isUnique = true;
@@ -238,10 +269,8 @@ export function parseDDL(source: string): ParseResult {
 
         // ─── Parse column definition ───
         // Pattern: column_name TYPE_EXPRESSION [modifiers...]
-        const colMatch = col.match(
-          /^\s*(\w+)\s+([\w\s]+?(?:\([^)]*\))?(?:\s+(?:varying|precision|without\s+time\s+zone|with\s+time\s+zone))?)\s*(.*)/i
-        );
-        if (!colMatch) {
+        const colHeadMatch = col.match(new RegExp(`^\\s*(${IDENT})\\s+(.+)$`, 'i'));
+        if (!colHeadMatch) {
           // Don't report errors for empty/whitespace-only
           if (col.trim()) {
             errors.push({ line: colLine, message: `Cannot parse column: "${col.trim()}"` });
@@ -249,15 +278,26 @@ export function parseDDL(source: string): ParseResult {
           continue;
         }
 
-        const colName = colMatch[1];
+        const colName = unquoteIdent(colHeadMatch[1]);
         // Skip if column name looks like a keyword
         if (/^(constraint|primary|foreign|unique|check|index|exclude)$/i.test(colName)) continue;
 
-        const rawType = colMatch[2].trim();
-        const rest = colMatch[3] || '';
+        const columnTail = colHeadMatch[2];
+        const typeAndRestMatch = columnTail.match(
+          /^(.*?)(?=\s+(?:PRIMARY\s+KEY|NOT\s+NULL|NULL|UNIQUE|DEFAULT|REFERENCES|CHECK|CONSTRAINT)\b|$)\s*(.*)$/i
+        );
+        if (!typeAndRestMatch || !typeAndRestMatch[1].trim()) {
+          errors.push({ line: colLine, message: `Cannot parse column type for "${colName}"` });
+          continue;
+        }
+
+        const rawType = typeAndRestMatch[1].trim();
+        const rest = typeAndRestMatch[2] || '';
         const restUpper = rest.toUpperCase();
 
         const fieldType = parseFieldType(rawType);
+        const enumType = enumByName.get(rawType.replace(/^"/, '').replace(/"$/, '').toLowerCase());
+        const resolvedType = enumType ? 'enum' : (fieldType || 'text');
         const isPK = restUpper.includes('PRIMARY KEY');
         const isNotNull = restUpper.includes('NOT NULL') || isPK;
         const isUnique = restUpper.includes('UNIQUE');
@@ -270,13 +310,17 @@ export function parseDDL(source: string): ParseResult {
         }
 
         // Check for inline REFERENCES
-        const refMatch = rest.match(/REFERENCES\s+(?:\w+\.)?(\w+)\s*\((\w+)\)/i);
+        const refMatch = rest.match(
+          new RegExp(`REFERENCES\\s+(?:(${IDENT})\\.)?(${IDENT})\\s*\\(\\s*(${IDENT})\\s*\\)`, 'i')
+        );
         const isForeignKey = !!refMatch;
 
         const field: Field = {
           id: genId('fld'),
           name: colName,
-          type: fieldType,
+          type: resolvedType,
+          enumId: enumType?.id,
+          enumName: enumType?.name,
           isPrimaryKey: isPK,
           isNullable: !isNotNull,
           isForeignKey,
@@ -288,8 +332,8 @@ export function parseDDL(source: string): ParseResult {
         if (refMatch) {
           tableInlineFKs.push({
             fieldName: colName,
-            refTable: refMatch[1],
-            refField: refMatch[2],
+            refTable: unquoteIdent(refMatch[2]),
+            refField: unquoteIdent(refMatch[3]),
             defLine: colLine,
           });
         }
@@ -323,15 +367,15 @@ export function parseDDL(source: string): ParseResult {
 
     // ─── ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ───
     const alterMatch = trimmed.match(
-      /^ALTER\s+TABLE\s+(?:\w+\.)?(\w+)\s+ADD\s+(?:CONSTRAINT\s+\w+\s+)?FOREIGN\s+KEY\s*\((\w+)\)\s*REFERENCES\s+(?:\w+\.)?(\w+)\s*\((\w+)\)/i
+      new RegExp(`^ALTER\\s+TABLE\\s+(?:(${IDENT})\\.)?(${IDENT})\\s+ADD\\s+(?:CONSTRAINT\\s+${IDENT}\\s+)?FOREIGN\\s+KEY\\s*\\(\\s*(${IDENT})\\s*\\)\\s*REFERENCES\\s+(?:(${IDENT})\\.)?(${IDENT})\\s*\\(\\s*(${IDENT})\\s*\\)`, 'i')
     );
     if (alterMatch) {
       deferredFKs.push({
         line: lineNum,
-        fromTableName: alterMatch[1],
-        fromFieldName: alterMatch[2],
-        toTableName: alterMatch[3],
-        toFieldName: alterMatch[4],
+        fromTableName: unquoteIdent(alterMatch[2]),
+        fromFieldName: unquoteIdent(alterMatch[3]),
+        toTableName: unquoteIdent(alterMatch[5]),
+        toFieldName: unquoteIdent(alterMatch[6]),
       });
       i++;
       continue;
@@ -339,11 +383,11 @@ export function parseDDL(source: string): ParseResult {
 
     // ─── CREATE INDEX ───
     const indexMatch = trimmed.match(
-      /^CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+)\s+ON\s+(?:\w+\.)?(\w+)\s*\((\w+)/i
+      new RegExp(`^CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:${IDENT})\\s+ON\\s+(?:(${IDENT})\\.)?(${IDENT})\\s*\\(\\s*(${IDENT})`, 'i')
     );
     if (indexMatch) {
-      const idxTableName = indexMatch[1];
-      const idxFieldName = indexMatch[2];
+      const idxTableName = unquoteIdent(indexMatch[2]);
+      const idxFieldName = unquoteIdent(indexMatch[3]);
       const idxTable = tableMap.get(idxTableName.toLowerCase());
       if (idxTable) {
         const idxField = idxTable.fields.find(f => f.name.toLowerCase() === idxFieldName.toLowerCase());
@@ -397,7 +441,7 @@ export function parseDDL(source: string): ParseResult {
     });
   }
 
-  return { tables, relations, domains, errors };
+  return { tables, relations, domains, enums, errors };
 }
 
 // ─── Helper: split string by commas at top-level (respecting parentheses) ───

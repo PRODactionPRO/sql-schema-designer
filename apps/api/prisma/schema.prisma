@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String            @id @default(uuid())
+  email        String            @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  projects     Project[]
+  revisions    ProjectRevision[]
+}
+
+model Project {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  schemaJson  Json
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+  ownerId     String
+  owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  revisions   ProjectRevision[]
+
+  @@index([ownerId])
+  @@index([updatedAt])
+}
+
+model ProjectRevision {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revision   Int
+  schemaJson Json
+  comment    String?
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@unique([projectId, revision])
+  @@index([projectId, createdAt])
+}

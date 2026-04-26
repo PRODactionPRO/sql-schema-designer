@@ -1,0 +1,53 @@
+import { useSchemaStore } from './useSchemaStore';
+import { useShallow } from 'zustand/react/shallow';
+
+export function useEditorStoreSelectors() {
+  return useSchemaStore(
+    useShallow((s) => ({
+      tables: s.tables,
+      relations: s.relations,
+      domains: s.domains,
+      enums: s.enums,
+      selectedTableId: s.selectedTableId,
+      selectedTableIds: s.selectedTableIds,
+      selectedRelation: s.selectedRelation,
+
+      setSelectedTableId: s.setSelectedTableId,
+      setSelectedRelation: s.setSelectedRelation,
+      addTable: s.addTable,
+      updateTablePosition: s.updateTablePosition,
+      updateTableName: s.updateTableName,
+      updateTableDescription: s.updateTableDescription,
+      updateTableDomain: s.updateTableDomain,
+      deleteTable: s.deleteTable,
+      deleteTables: s.deleteTables,
+      addField: s.addField,
+      updateField: s.updateField,
+      deleteField: s.deleteField,
+      addRelation: s.addRelation,
+      updateRelation: s.updateRelation,
+      deleteRelation: s.deleteRelation,
+      addDomain: s.addDomain,
+      updateDomain: s.updateDomain,
+      deleteDomain: s.deleteDomain,
+      toggleTableSelection: s.toggleTableSelection,
+      selectTablesInRect: s.selectTablesInRect,
+      clearMultiSelection: s.clearMultiSelection,
+      moveSelectedTables: s.moveSelectedTables,
+      autoLayout: s.autoLayout,
+      exportToFormat: s.exportToFormat,
+      importFromFormat: s.importFromFormat,
+      getTableColor: s.getTableColor,
+      assignDomainToTables: s.assignDomainToTables,
+      addEnum: s.addEnum,
+      updateEnum: s.updateEnum,
+      deleteEnum: s.deleteEnum,
+      reorderTables: s.reorderTables,
+      undo: s.undo,
+      redo: s.redo,
+      pushHistory: s.pushHistory,
+      pastLength: s._past.length,
+      futureLength: s._future.length,
+    })),
+  );
+}

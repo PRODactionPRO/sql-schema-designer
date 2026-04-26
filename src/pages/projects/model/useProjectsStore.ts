@@ -1,51 +1,25 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { ProjectData } from './types';
 import { createEmptyProject } from './types';
-import { STORAGE_PROJECT_PREFIX, STORAGE_INDEX_KEY } from '@/shared/config/storage';
-
-function getProjectKey(id: string) {
-  return `${STORAGE_PROJECT_PREFIX}${id}`;
-}
-
-function loadIndex(): string[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_INDEX_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveIndex(ids: string[]) {
-  localStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify(ids));
-}
-
-function loadProject(id: string): ProjectData | null {
-  try {
-    const raw = localStorage.getItem(getProjectKey(id));
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveProject(project: ProjectData) {
-  localStorage.setItem(getProjectKey(project.id), JSON.stringify(project));
-}
-
-function removeProject(id: string) {
-  localStorage.removeItem(getProjectKey(id));
-}
+import { deepClone, safeJsonParse } from '@/shared/lib/json';
+import { normalizeProjectData, normalizeSchema } from '@/shared/lib/schema-normalizer';
+import {
+  loadProjectById,
+  loadProjectIndex,
+  removeProject,
+  saveProject,
+  saveProjectIndex,
+} from '@/shared/lib/project-storage';
 
 export function useProjectsStore() {
   const [projects, setProjects] = useState<ProjectData[]>([]);
 
   // Reload projects from localStorage
   const reloadProjects = useCallback(() => {
-    const ids = loadIndex();
+    const ids = loadProjectIndex();
     const loaded: ProjectData[] = [];
     for (const id of ids) {
-      const p = loadProject(id);
+      const p = loadProjectById(id);
       if (p) loaded.push(p);
     }
     loaded.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -59,17 +33,17 @@ export function useProjectsStore() {
   const createProject = useCallback((name: string): ProjectData => {
     const project = createEmptyProject(name);
     saveProject(project);
-    const ids = loadIndex();
+    const ids = loadProjectIndex();
     ids.unshift(project.id);
-    saveIndex(ids);
+    saveProjectIndex(ids);
     setProjects(prev => [project, ...prev]);
     return project;
   }, []);
 
   const deleteProject = useCallback((id: string) => {
     removeProject(id);
-    const ids = loadIndex().filter(i => i !== id);
-    saveIndex(ids);
+    const ids = loadProjectIndex().filter(i => i !== id);
+    saveProjectIndex(ids);
     setProjects(prev => prev.filter(p => p.id !== id));
   }, []);
 
@@ -77,14 +51,14 @@ export function useProjectsStore() {
     const source = projects.find(p => p.id === id);
     if (!source) return null;
     const copy = createEmptyProject(`${source.name} (copy)`);
-    copy.schema = JSON.parse(JSON.stringify(source.schema));
+    copy.schema = deepClone(source.schema);
     copy.settings = { ...source.settings };
     copy.snapshot = source.snapshot;
     copy.description = source.description;
     saveProject(copy);
-    const ids = loadIndex();
+    const ids = loadProjectIndex();
     ids.unshift(copy.id);
-    saveIndex(ids);
+    saveProjectIndex(ids);
     setProjects(prev => [copy, ...prev]);
     return copy;
   }, [projects]);
@@ -103,7 +77,7 @@ export function useProjectsStore() {
 
   /** Export a project as a .drawsql JSON string */
   const exportProjectFile = useCallback((id: string): { content: string; filename: string } | null => {
-    const project = loadProject(id);
+    const project = loadProjectById(id);
     if (!project) return null;
     // Strip snapshot from export to keep file small
     const exportData = {
@@ -125,7 +99,10 @@ export function useProjectsStore() {
 
   /** Import a .drawsql JSON file and create a new project */
   const importProjectFile = useCallback((jsonString: string): ProjectData => {
-    const parsed = JSON.parse(jsonString);
+    const parsed = safeJsonParse<unknown>(jsonString, null);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Invalid .drawsql file format');
+    }
 
     // Support both wrapped format { formatVersion, project: {...} } and raw ProjectData
     let name: string;
@@ -133,18 +110,28 @@ export function useProjectsStore() {
     let schema: ProjectData['schema'];
     let settings: ProjectData['settings'];
 
-    if (parsed.formatVersion && parsed.project) {
-      name = parsed.project.name || 'Imported Schema';
-      description = parsed.project.description;
-      schema = parsed.project.schema;
-      settings = parsed.project.settings;
-    } else if (parsed.schema && parsed.name) {
-      name = parsed.name;
-      description = parsed.description;
-      schema = parsed.schema;
-      settings = parsed.settings;
+    const data = parsed as Record<string, unknown>;
+    const wrappedProject = data.project as Record<string, unknown> | undefined;
+
+    if (data.formatVersion && wrappedProject) {
+      name = typeof wrappedProject.name === 'string' ? wrappedProject.name : 'Imported Schema';
+      description = typeof wrappedProject.description === 'string' ? wrappedProject.description : undefined;
+      schema = normalizeSchema(wrappedProject.schema);
+      settings = wrappedProject.settings as ProjectData['settings'];
+    } else if (data.schema && data.name) {
+      name = typeof data.name === 'string' ? data.name : 'Imported Schema';
+      description = typeof data.description === 'string' ? data.description : undefined;
+      schema = normalizeSchema(data.schema);
+      settings = data.settings as ProjectData['settings'];
     } else {
-      throw new Error('Invalid .drawsql file format');
+      const normalizedRaw = normalizeProjectData(parsed);
+      if (!normalizedRaw) {
+        throw new Error('Invalid .drawsql file format');
+      }
+      name = normalizedRaw.name;
+      description = normalizedRaw.description;
+      schema = normalizedRaw.schema;
+      settings = normalizedRaw.settings;
     }
 
     const project = createEmptyProject(name);
@@ -152,9 +139,9 @@ export function useProjectsStore() {
     project.schema = schema;
     if (settings) project.settings = settings;
     saveProject(project);
-    const ids = loadIndex();
+    const ids = loadProjectIndex();
     ids.unshift(project.id);
-    saveIndex(ids);
+    saveProjectIndex(ids);
     setProjects(prev => [project, ...prev]);
     return project;
   }, []);
