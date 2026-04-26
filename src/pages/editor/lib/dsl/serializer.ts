@@ -2,14 +2,25 @@
  * DSL Serializer — converts schema objects into our custom DSL text.
  */
 
-import type { Table, Field, Relation, Domain } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType } from '../../model/types';
 
 export function serializeToDSL(
   tables: Table[],
   relations: Relation[],
   domains: Domain[],
+  enums: EnumType[],
 ): string {
   const lines: string[] = [];
+
+  // ─── Enums ───
+  for (const enumType of enums) {
+    lines.push(`enum ${enumType.name} {`);
+    for (const value of enumType.values) {
+      lines.push(`  ${value}`);
+    }
+    lines.push('}');
+    lines.push('');
+  }
 
   // Build a lookup: fromFieldId → { toTableName, toFieldName }
   const fkMap = new Map<string, { toTableName: string; toFieldName: string }>();
@@ -28,7 +39,8 @@ export function serializeToDSL(
     lines.push(`table ${table.name} {`);
 
     for (const field of table.fields) {
-      const parts: string[] = [`  ${field.name}`, field.type];
+      const fieldTypeLabel = field.type === 'enum' ? (field.enumName || 'enum') : field.type;
+      const parts: string[] = [`  ${field.name}`, fieldTypeLabel];
 
       if (field.isPrimaryKey) parts.push('pk');
       if (field.isUnique) parts.push('unique');

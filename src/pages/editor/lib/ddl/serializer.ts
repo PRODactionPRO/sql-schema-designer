@@ -15,17 +15,25 @@
  *   );
  */
 
-import type { Table, Field, Relation, Domain, FieldType } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType, FieldType } from '../../model/types';
 
 export function serializeToDDL(
   tables: Table[],
   relations: Relation[],
   _domains: Domain[],
+  enums: EnumType[],
 ): string {
   const lines: string[] = [];
 
   lines.push('-- PostgreSQL Schema');
   lines.push('');
+
+  for (const enumType of enums) {
+    if (enumType.values.length === 0) continue;
+    const quotedValues = enumType.values.map((value) => `'${value.replace(/'/g, "''")}'`).join(', ');
+    lines.push(`CREATE TYPE "${enumType.name}" AS ENUM (${quotedValues});`);
+  }
+  if (enums.length > 0) lines.push('');
 
   // Build FK lookup: fromFieldId → { toTableName, toFieldName }
   const fkMap = new Map<string, { toTableName: string; toFieldName: string }>();
@@ -53,7 +61,7 @@ export function serializeToDDL(
 
     const fieldDefs: string[] = [];
     for (const field of table.fields) {
-      let def = `  ${field.name} ${mapTypeToSQL(field.type)}`;
+      let def = `  ${field.name} ${mapTypeToSQL(field.type, field.enumName)}`;
       if (field.isPrimaryKey) def += ' PRIMARY KEY';
       if (!field.isNullable && !field.isPrimaryKey) def += ' NOT NULL';
       if (field.isNotNull && !field.isPrimaryKey && field.isNullable) def += ' NOT NULL';
@@ -85,7 +93,7 @@ export function serializeToDDL(
 
 // ─── Type mapping ───────────────────────────────────────────
 
-function mapTypeToSQL(type: FieldType): string {
+function mapTypeToSQL(type: FieldType, enumName?: string): string {
   const map: Record<string, string> = {
     'uuid': 'UUID',
     'bigint': 'BIGINT',
@@ -119,7 +127,7 @@ function mapTypeToSQL(type: FieldType): string {
     'money': 'MONEY',
     'xml': 'XML',
     'array': 'TEXT[]',
-    'enum': 'TEXT',
+    'enum': enumName ? `"${enumName}"` : 'TEXT',
   };
   return map[type] || type.toUpperCase();
 }

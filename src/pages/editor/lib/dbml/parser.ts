@@ -15,13 +15,14 @@
  *   // Domain: <name> (<#color>)
  */
 
-import type { Table, Field, Relation, Domain, FieldType, RelationType } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType, FieldType, RelationType } from '../../model/types';
 import { ALL_FIELD_TYPES } from '../../model/types';
 
 export interface ParseResult {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
   errors: ParseError[];
 }
 
@@ -66,6 +67,7 @@ export function parseDBML(source: string): ParseResult {
   const tables: Table[] = [];
   const relations: Relation[] = [];
   const domains: Domain[] = [];
+  const enums: EnumType[] = [];
   const errors: ParseError[] = [];
 
   const tableMap = new Map<string, Table>();
@@ -97,6 +99,24 @@ export function parseDBML(source: string): ParseResult {
 
     // Regular comments
     if (line.startsWith('//') || line.startsWith('#')) { i++; continue; }
+
+    // ─── Enum definition ───
+    const enumMatch = line.match(/^Enum\s+(\w+)\s*\{?\s*$/i);
+    if (enumMatch) {
+      const enumName = enumMatch[1];
+      const values: string[] = [];
+      i++;
+      while (i < lines.length) {
+        const vline = lines[i].trim();
+        i++;
+        if (vline === '}' || vline === '};') break;
+        if (!vline || vline.startsWith('//')) continue;
+        const sanitized = vline.replace(/,$/, '').trim();
+        if (sanitized) values.push(sanitized);
+      }
+      enums.push({ id: genId('enum'), name: enumName, values: Array.from(new Set(values)) });
+      continue;
+    }
 
     // ─── Table definition ───
     const tableMatch = line.match(/^Table\s+(\w+)\s*(?:\[.*?\])?\s*\{?\s*$/i);
@@ -131,7 +151,7 @@ export function parseDBML(source: string): ParseResult {
           continue;
         }
 
-        const parsed = parseDBMLFieldLine(fline, flineNum);
+        const parsed = parseDBMLFieldLine(fline, flineNum, enums);
         if (parsed.error) {
           errors.push(parsed.error);
           continue;
@@ -266,7 +286,7 @@ export function parseDBML(source: string): ParseResult {
     }
   }
 
-  return { tables, relations, domains, errors };
+  return { tables, relations, domains, enums, errors };
 }
 
 // ─── Field line parser ───
@@ -277,7 +297,7 @@ interface FieldParseResult {
   error: ParseError | null;
 }
 
-function parseDBMLFieldLine(line: string, lineNum: number): FieldParseResult {
+function parseDBMLFieldLine(line: string, lineNum: number, enums: EnumType[]): FieldParseResult {
   // Format: field_name type [attrs...]
   // Extract attrs block
   const attrMatch = line.match(/^(\S+)\s+(\S+(?:\s+\S+)?)\s*(?:\[(.*)\])?\s*$/);
@@ -296,7 +316,8 @@ function parseDBMLFieldLine(line: string, lineNum: number): FieldParseResult {
   }
 
   const fieldType = normaliseType(typeStr);
-  if (!fieldType) {
+  const enumType = enums.find(e => e.name.toLowerCase() === typeStr.toLowerCase());
+  if (!fieldType && !enumType) {
     return { field: null, ref: null, error: { line: lineNum, message: `Unknown type "${typeStr}"` } };
   }
 
@@ -339,7 +360,9 @@ function parseDBMLFieldLine(line: string, lineNum: number): FieldParseResult {
   const field: Field = {
     id: genId('fld'),
     name: fieldName,
-    type: fieldType,
+    type: enumType ? 'enum' : fieldType!,
+    enumId: enumType?.id,
+    enumName: enumType?.name,
     isPrimaryKey,
     isNullable,
     isForeignKey: false,

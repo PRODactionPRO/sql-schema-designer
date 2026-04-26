@@ -45,6 +45,11 @@ function getTypeIcon(type: string) {
   return FIELD_TYPE_ICONS[type] || <Database className="size-3.5" />;
 }
 
+function getFieldTypeLabel(field: Field): string {
+  if (field.type !== 'enum') return field.type;
+  return field.enumName || 'enum';
+}
+
 export interface DragFieldInfo {
   tableId: string;
   fieldId: string;
@@ -52,6 +57,8 @@ export interface DragFieldInfo {
   tableName: string;
   isPrimaryKey: boolean;
   fieldType: FieldType;
+  fieldEnumId?: string;
+  fieldEnumName?: string;
 }
 
 interface TableNodeProps {
@@ -216,7 +223,16 @@ export const TableNode = memo(function TableNode({
   const handleFieldDragStart = (e: React.MouseEvent, field: Field) => {
     e.stopPropagation(); e.preventDefault();
     if (onFieldDragStart) {
-      onFieldDragStart({ tableId: table.id, fieldId: field.id, fieldName: field.name, tableName: table.name, isPrimaryKey: field.isPrimaryKey, fieldType: field.type }, e);
+      onFieldDragStart({
+        tableId: table.id,
+        fieldId: field.id,
+        fieldName: field.name,
+        tableName: table.name,
+        isPrimaryKey: field.isPrimaryKey,
+        fieldType: field.type,
+        fieldEnumId: field.enumId,
+        fieldEnumName: field.enumName,
+      }, e);
     }
   };
 
@@ -229,7 +245,10 @@ export const TableNode = memo(function TableNode({
     if (existingFKFieldIds?.has(field.id)) {
       return { compat: 'forbidden', blocked: true, reason: 'Already has FK' };
     }
-    const compat = getTypeCompatibility(dragSourceFieldType, field.type);
+    const compat = getTypeCompatibility(
+      { type: dragSourceFieldType, enumId: undefined, enumName: undefined },
+      field,
+    );
     if (compat === 'forbidden') {
       return { compat: 'forbidden', blocked: true, reason: 'Incompatible type' };
     }
@@ -325,7 +344,7 @@ export const TableNode = memo(function TableNode({
                 {field.isForeignKey && !field.isPrimaryKey && <Key className="size-3 text-blue-400 flex-shrink-0" style={{ transform: 'rotate(45deg)' }} />}
                 <span className={`text-sm truncate ${field.isForeignKey ? 'text-blue-600' : ''}`} style={{ opacity: textOpacity }}>{field.name}</span>
               </div>
-              <span className="text-xs text-gray-400 flex-shrink-0">{field.type}</span>
+                <span className="text-xs text-gray-400 flex-shrink-0">{getFieldTypeLabel(field)}</span>
             </div>
           ))}
         </div>
@@ -490,7 +509,7 @@ export const TableNode = memo(function TableNode({
                   onClick={(e) => handleTypeClick(e, field.id)}
                   title="Click to change type"
                 >
-                  {field.type}
+                  {getFieldTypeLabel(field)}
                   {onFieldTypeChange && <ChevronDown className="size-2.5 opacity-50" />}
                 </button>
               </div>

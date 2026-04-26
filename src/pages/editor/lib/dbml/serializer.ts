@@ -13,14 +13,25 @@
  *   Ref: posts.author_id > users.id
  */
 
-import type { Table, Field, Relation, Domain } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType } from '../../model/types';
 
 export function serializeToDBML(
   tables: Table[],
   relations: Relation[],
   domains: Domain[],
+  enums: EnumType[],
 ): string {
   const lines: string[] = [];
+
+  // ─── Enums ───
+  for (const enumType of enums) {
+    lines.push(`Enum ${enumType.name} {`);
+    for (const value of enumType.values) {
+      lines.push(`  ${value}`);
+    }
+    lines.push('}');
+    lines.push('');
+  }
 
   // ─── Domain groups as DBML TableGroups ───
   const domainTablesMap = new Map<string, string[]>();
@@ -52,7 +63,8 @@ export function serializeToDBML(
     for (const field of table.fields) {
       const attrs = buildFieldAttrs(field);
       const attrStr = attrs.length > 0 ? ` [${attrs.join(', ')}]` : '';
-      lines.push(`  ${field.name} ${field.type}${attrStr}`);
+      const fieldTypeLabel = field.type === 'enum' ? (field.enumName || 'enum') : field.type;
+      lines.push(`  ${field.name} ${fieldTypeLabel}${attrStr}`);
     }
 
     // Indexes block for indexed fields

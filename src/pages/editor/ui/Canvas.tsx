@@ -436,11 +436,10 @@ export function Canvas({
     );
   };
 
-  const dragSourceFieldType = dragState
+  const dragSourceField = dragState
     ? (() => {
         const sourceTable = tables.find(t => t.id === dragState.source.tableId);
-        const sourceField = sourceTable?.fields.find(f => f.id === dragState.source.fieldId);
-        return sourceField?.type || null;
+        return sourceTable?.fields.find(f => f.id === dragState.source.fieldId) || null;
       })()
     : null;
 
@@ -459,11 +458,11 @@ export function Canvas({
     const startX = endX > st.position.x + TABLE_WIDTH / 2 ? st.position.x + TABLE_WIDTH : st.position.x;
     const hasTarget = !!dragState.targetTableId;
     let compat: TypeCompatibility = 'exact';
-    if (hasTarget && dragState.targetFieldId && dragSourceFieldType) {
+    if (hasTarget && dragState.targetFieldId && dragSourceField) {
       const targetTable = tables.find(t => t.id === dragState.targetTableId);
       const targetField = targetTable?.fields.find(f => f.id === dragState.targetFieldId);
       if (targetField) {
-        compat = getTypeCompatibility(dragSourceFieldType, targetField.type);
+        compat = getTypeCompatibility(dragSourceField, targetField);
       }
     }
     const color = compat === 'forbidden' ? '#ef4444'
@@ -668,18 +667,20 @@ export function Canvas({
     if (dragState.targetTableId) {
       let compat: TypeCompatibility = 'exact';
       let targetTypeName = '';
-      if (dragState.targetFieldId && dragSourceFieldType) {
+      if (dragState.targetFieldId && dragSourceField) {
         const tt = tables.find(t => t.id === dragState.targetTableId);
         const tf = tt?.fields.find(f => f.id === dragState.targetFieldId);
         if (tf) {
-          compat = getTypeCompatibility(dragSourceFieldType, tf.type);
-          targetTypeName = tf.type;
+          compat = getTypeCompatibility(dragSourceField, tf);
+          targetTypeName = tf.type === 'enum' ? tf.enumName || 'enum' : tf.type;
         }
       }
       if (compat === 'forbidden') {
-        tooltipContent = <span className="text-red-400">Incompatible types: {dragState.source.fieldType} ✗ {targetTypeName}</span>;
+        const sourceTypeName = dragSourceField?.type === 'enum' ? dragSourceField.enumName || 'enum' : dragState.source.fieldType;
+        tooltipContent = <span className="text-red-400">Incompatible types: {sourceTypeName} ✗ {targetTypeName}</span>;
       } else if (compat === 'warning') {
-        tooltipContent = <span className="text-yellow-300">Requires cast: {dragState.source.fieldType} → {targetTypeName}</span>;
+        const sourceTypeName = dragSourceField?.type === 'enum' ? dragSourceField.enumName || 'enum' : dragState.source.fieldType;
+        tooltipContent = <span className="text-yellow-300">Requires cast: {sourceTypeName} → {targetTypeName}</span>;
       } else {
         tooltipContent = <span className="text-green-300">{dragState.targetFieldId ? 'Link to field' : 'Drop to create FK field'}</span>;
       }
@@ -898,7 +899,7 @@ export function Canvas({
                 dropTargetFieldId={dragState?.targetTableId === table.id ? dragState.targetFieldId : null}
                 onGroupDragStart={handleGroupDragStart}
                 enabledFieldTypes={enabledFieldTypes}
-                dragSourceFieldType={dragState ? dragSourceFieldType : null}
+                dragSourceFieldType={dragState ? dragSourceField?.type || null : null}
                 isDragSourceTable={dragState?.source.tableId === table.id}
                 existingFKFieldIds={dragState ? existingFKFieldIds : undefined}
                 dragSourceFieldId={dragState?.source.fieldId}

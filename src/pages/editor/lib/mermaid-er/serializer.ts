@@ -18,14 +18,20 @@
  * Note: Mermaid ER uses type-first notation (type before field name).
  */
 
-import type { Table, Relation, Domain } from '../../model/types';
+import type { Table, Relation, Domain, EnumType } from '../../model/types';
 
 export function serializeToMermaidER(
   tables: Table[],
   relations: Relation[],
   _domains: Domain[],
+  enums: EnumType[],
 ): string {
   const lines: string[] = ['erDiagram'];
+
+  for (const enumType of enums) {
+    lines.push(`  %% Enum: ${enumType.name}: ${enumType.values.join(', ')}`);
+  }
+  if (enums.length > 0) lines.push('');
 
   // ─── Domain comments ───
   const domainTablesMap = new Map<string, string[]>();
@@ -52,7 +58,8 @@ export function serializeToMermaidER(
 
     for (const field of table.fields) {
       // Mermaid format: type name [PK|FK|UK] ["comment"]
-      const mermaidType = formatMermaidType(field.type);
+      const fieldTypeLabel = field.type === 'enum' ? (field.enumName || 'enum') : field.type;
+      const mermaidType = formatMermaidType(fieldTypeLabel);
       let constraint = '';
       if (field.isPrimaryKey) constraint = ' PK';
       else if (field.isForeignKey) constraint = ' FK';

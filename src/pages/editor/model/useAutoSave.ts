@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import type { Table, Relation, Domain, ProjectSettings } from './types';
+import type { Table, Relation, Domain, EnumType, ProjectSettings } from './types';
 import type { ProjectData } from '@/shared/types/project';
 import { saveProject } from '@/shared/lib/project-storage';
 
@@ -9,6 +9,7 @@ interface UseAutoSaveOptions {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
   settings: ProjectSettings;
   projectName: string;
   projectDescription: string;
@@ -25,6 +26,7 @@ export function useAutoSave({
   tables,
   relations,
   domains,
+  enums,
   settings,
   projectName,
   projectDescription,
@@ -34,6 +36,7 @@ export function useAutoSave({
   const relationsRef = useRef(relations);
   const domainsRef = useRef(domains);
   const settingsRef = useRef(settings);
+  const enumsRef = useRef(enums);
   const projectNameRef = useRef(projectName);
   const projectDescriptionRef = useRef(projectDescription);
   const projectDataRef = useRef(projectData);
@@ -42,6 +45,7 @@ export function useAutoSave({
   useEffect(() => { tablesRef.current = tables; }, [tables]);
   useEffect(() => { relationsRef.current = relations; }, [relations]);
   useEffect(() => { domainsRef.current = domains; }, [domains]);
+  useEffect(() => { enumsRef.current = enums; }, [enums]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => { projectNameRef.current = projectName; }, [projectName]);
   useEffect(() => { projectDescriptionRef.current = projectDescription; }, [projectDescription]);
@@ -57,7 +61,7 @@ export function useAutoSave({
       ...current,
       name: projectNameRef.current || current.name,
       description: projectDescriptionRef.current,
-      schema: { tables: tablesRef.current, relations: relationsRef.current, domains: domainsRef.current },
+      schema: { tables: tablesRef.current, relations: relationsRef.current, domains: domainsRef.current, enums: enumsRef.current },
       settings: settingsRef.current,
       snapshot,
       updatedAt: new Date().toISOString(),
@@ -78,7 +82,7 @@ export function useAutoSave({
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [tables, relations, domains, settings, projectName, projectDescription, persistToStorage, projectId]);
+  }, [tables, relations, domains, enums, settings, projectName, projectDescription, persistToStorage, projectId]);
 
   return { persistToStorage, projectDataRef };
 }

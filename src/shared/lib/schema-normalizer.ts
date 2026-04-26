@@ -2,6 +2,7 @@ import {
   ALL_FIELD_TYPES,
   DEFAULT_PROJECT_SETTINGS,
   type Domain,
+  type EnumType,
   type Field,
   type FieldType,
   type ProjectSettings,
@@ -33,10 +34,13 @@ function normalizeFieldType(value: unknown): FieldType {
 
 function normalizeField(value: unknown, index: number): Field {
   const record = isRecord(value) ? value : {};
+  const type = normalizeFieldType(record.type);
   return {
     id: asString(record.id, `field_${index}`),
     name: asString(record.name, `field_${index}`),
-    type: normalizeFieldType(record.type),
+    type,
+    enumId: type === 'enum' ? asString(record.enumId) || undefined : undefined,
+    enumName: type === 'enum' ? asString(record.enumName) || undefined : undefined,
     isPrimaryKey: asBoolean(record.isPrimaryKey),
     isNullable: asBoolean(record.isNullable, true),
     isForeignKey: asBoolean(record.isForeignKey),
@@ -55,6 +59,22 @@ function normalizeDomain(value: unknown, index: number): Domain {
     id: asString(record.id, `domain_${index}`),
     name: asString(record.name, `Domain ${index + 1}`),
     color: asString(record.color, '#6366f1'),
+  };
+}
+
+function normalizeEnumType(value: unknown, index: number): EnumType {
+  const record = isRecord(value) ? value : {};
+  const rawValues = Array.isArray(record.values) ? record.values : [];
+  const values = rawValues
+    .map((item) => asString(item).trim())
+    .filter((item) => item.length > 0);
+  const uniqueValues = Array.from(new Set(values));
+
+  return {
+    id: asString(record.id, `enum_${index}`),
+    name: asString(record.name, `Enum${index + 1}`),
+    values: uniqueValues,
+    description: asString(record.description) || undefined,
   };
 }
 
@@ -130,14 +150,29 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
 
   const tables = dedupeTableNames(uniqueById((Array.isArray(record.tables) ? record.tables : []).map(normalizeTable)));
   const domains = uniqueById((Array.isArray(record.domains) ? record.domains : []).map(normalizeDomain));
+  const enums = uniqueById((Array.isArray(record.enums) ? record.enums : []).map(normalizeEnumType));
 
   const tableById = new Map(tables.map((table) => [table.id, table]));
   const domainIdSet = new Set(domains.map((domain) => domain.id));
+  const enumById = new Map(enums.map((enumType) => [enumType.id, enumType]));
+  const enumByName = new Map(enums.map((enumType) => [enumType.name.toLowerCase(), enumType]));
 
   const normalizedTables = tables.map((table) => ({
     ...table,
     domainId: table.domainId && domainIdSet.has(table.domainId) ? table.domainId : undefined,
-    fields: uniqueById(table.fields),
+    fields: uniqueById(table.fields).map((field) => {
+      if (field.type !== 'enum') {
+        return { ...field, enumId: undefined, enumName: undefined };
+      }
+
+      const matchedById = field.enumId ? enumById.get(field.enumId) : undefined;
+      const matchedByName = field.enumName ? enumByName.get(field.enumName.toLowerCase()) : undefined;
+      const matched = matchedById ?? matchedByName;
+      if (!matched) {
+        return { ...field, enumId: undefined, enumName: undefined };
+      }
+      return { ...field, enumId: matched.id, enumName: matched.name };
+    }),
   }));
 
   const relations = uniqueById((Array.isArray(record.relations) ? record.relations : []).map(normalizeRelation)).filter((relation) => {
@@ -154,6 +189,7 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
     tables: normalizedTables,
     relations,
     domains,
+    enums,
   };
 }
 
@@ -190,6 +226,7 @@ export function normalizeProjectData(input: unknown): ProjectData | null {
       tables: schema.tables,
       relations: schema.relations,
       domains: schema.domains ?? [],
+      enums: schema.enums ?? [],
     },
     settings: normalizeSettings(input.settings),
   };
@@ -198,4 +235,5 @@ export interface NormalizedSchema {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
 }

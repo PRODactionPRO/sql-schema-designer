@@ -52,6 +52,8 @@ export interface Field {
   id: string;
   name: string;
   type: FieldType;
+  enumId?: string;
+  enumName?: string;
   isPrimaryKey: boolean;
   isNullable: boolean;
   isForeignKey: boolean;
@@ -67,6 +69,13 @@ export interface Domain {
   id: string;
   name: string;
   color: string;
+}
+
+export interface EnumType {
+  id: string;
+  name: string;
+  values: string[];
+  description?: string;
 }
 
 export interface Table {
@@ -95,6 +104,7 @@ export interface Schema {
   tables: Table[];
   relations: Relation[];
   domains?: Domain[];
+  enums?: EnumType[];
 }
 
 // Serialization format identifier
@@ -157,6 +167,16 @@ export function areTypesCompatible(type1: FieldType, type2: FieldType): boolean 
 
 export type TypeCompatibility = 'exact' | 'compatible' | 'warning' | 'forbidden';
 
+type CompatibilityFieldLike = Pick<Field, 'type' | 'enumId' | 'enumName'>;
+type CompatibilityInput = FieldType | CompatibilityFieldLike;
+
+function toCompatibilityField(input: CompatibilityInput): CompatibilityFieldLike {
+  if (typeof input === 'string') {
+    return { type: input };
+  }
+  return input;
+}
+
 /**
  * Cross-group casts that PostgreSQL supports via explicit CAST.
  * These produce a "warning" level — the link is allowed but risky.
@@ -177,7 +197,23 @@ const CASTABLE_CROSS_GROUPS = new Set<string>([
 ]);
 
 /** Get detailed compatibility level between two types for FK linking */
-export function getTypeCompatibility(type1: FieldType, type2: FieldType): TypeCompatibility {
+export function getTypeCompatibility(
+  input1: CompatibilityInput,
+  input2: CompatibilityInput,
+): TypeCompatibility {
+  const left = toCompatibilityField(input1);
+  const right = toCompatibilityField(input2);
+  const type1 = left.type;
+  const type2 = right.type;
+
+  // Enum fields are compatible only with the same enum type.
+  if (type1 === 'enum' || type2 === 'enum') {
+    if (type1 !== 'enum' || type2 !== 'enum') return 'forbidden';
+    if (left.enumId && right.enumId) return left.enumId === right.enumId ? 'exact' : 'forbidden';
+    if (left.enumName && right.enumName) return left.enumName.toLowerCase() === right.enumName.toLowerCase() ? 'exact' : 'forbidden';
+    return 'forbidden';
+  }
+
   if (type1 === type2) return 'exact';
   const g1 = getTypeGroup(type1);
   const g2 = getTypeGroup(type2);

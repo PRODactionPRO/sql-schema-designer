@@ -70,7 +70,7 @@ export function EditorPage() {
   }
 
   const initialData: SchemaStoreInitialData | undefined = projectData
-    ? { tables: projectData.schema.tables, relations: projectData.schema.relations, domains: projectData.schema.domains }
+    ? { tables: projectData.schema.tables, relations: projectData.schema.relations, domains: projectData.schema.domains, enums: projectData.schema.enums ?? [] }
     : undefined;
 
   const initialSettings = projectData?.settings ?? DEFAULT_PROJECT_SETTINGS;
@@ -110,6 +110,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     tables,
     relations,
     domains,
+    enums,
     selectedTableId,
     selectedTableIds,
     selectedRelation,
@@ -140,6 +141,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     importFromFormat,
     getTableColor,
     assignDomainToTables,
+    addEnum,
+    updateEnum,
+    deleteEnum,
     reorderTables,
     undo,
     redo,
@@ -181,6 +185,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   // ── Auto-save ──
   const { persistToStorage, projectDataRef } = useAutoSave({
     projectId, projectData, tables, relations, domains, settings, projectName, projectDescription,
+    enums,
   });
 
   // ── Snapshot capture ──
@@ -199,7 +204,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     toggleCodeMode, handleCodeChange, handleCodeSync,
     handleTableDoubleClick, handleOpenInCodeEditor,
   } = useCodeMode({
-    tables, relations, domains, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, importFromFormat,
+    tables, relations, domains, enums, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, importFromFormat,
   });
 
   // ── Save handler (defined before keyboard shortcuts) ──
@@ -274,9 +279,11 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       if (exists) { toast.info('Relation already exists'); return; }
       const targetField = toTable.fields.find(f => f.id === toFieldId);
       if (targetField) {
-        const compat = getTypeCompatibility(sourceField.type, targetField.type);
+        const compat = getTypeCompatibility(sourceField, targetField);
         if (compat === 'forbidden') {
-          toast.error(`Incompatible types: ${sourceField.type} and ${targetField.type} cannot be linked.`, { duration: 5000 });
+          const sourceTypeLabel = sourceField.type === 'enum' ? sourceField.enumName || 'enum' : sourceField.type;
+          const targetTypeLabel = targetField.type === 'enum' ? targetField.enumName || 'enum' : targetField.type;
+          toast.error(`Incompatible types: ${sourceTypeLabel} and ${targetTypeLabel} cannot be linked.`, { duration: 5000 });
           return;
         }
         if (compat === 'warning') {
@@ -293,7 +300,17 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       toast.success('Relation created');
     } else {
       const newFieldName = `${fromTable.name}_${sourceField.name}`;
-      const newFieldId = addField(toTableId, { name: newFieldName, type: sourceField.type, isPrimaryKey: false, isNullable: true, isForeignKey: true, foreignKeyTable: fromTable.name, foreignKeyField: sourceField.name });
+      const newFieldId = addField(toTableId, {
+        name: newFieldName,
+        type: sourceField.type,
+        enumId: sourceField.enumId,
+        enumName: sourceField.enumName,
+        isPrimaryKey: false,
+        isNullable: true,
+        isForeignKey: true,
+        foreignKeyTable: fromTable.name,
+        foreignKeyField: sourceField.name,
+      });
       addRelation({ fromTableId: toTableId, fromFieldId: newFieldId, toTableId: fromTableId, toFieldId: fromFieldId, type: '1:N' });
       toast.success(`Created field "${newFieldName}" with FK relation`);
     }
@@ -312,7 +329,10 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   }, [deleteTables]);
 
   // ── FK-aware field type change ──
-  const handleFieldTypeChange = useCallback((tableId: string, fieldId: string, newType: FieldType) => {
+  const handleFieldTypeChange = useCallback((tableId: string, fieldId: string, newType: FieldType, enumInfo?: { enumId?: string; enumName?: string }) => {
+    const table = tables.find(t => t.id === tableId);
+    const field = table?.fields.find(f => f.id === fieldId);
+
     // Find relations where this field is the REFERENCED (target) field
     const affected = relations
       .filter(r => r.toTableId === tableId && r.toFieldId === fieldId)
@@ -324,17 +344,20 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
 
     if (affected.length === 0) {
       // No FK references — just change
-      updateField(tableId, fieldId, { type: newType });
+      const selectedEnum = enums[0];
+      updateField(tableId, fieldId, {
+        type: newType,
+        enumId: newType === 'enum' ? enumInfo?.enumId || field?.enumId || selectedEnum?.id : undefined,
+        enumName: newType === 'enum' ? enumInfo?.enumName || field?.enumName || selectedEnum?.name : undefined,
+      });
       return;
     }
 
     // Find the current type
-    const table = tables.find(t => t.id === tableId);
-    const field = table?.fields.find(f => f.id === fieldId);
     if (!field) { updateField(tableId, fieldId, { type: newType }); return; }
 
     setFkTypeChangeDialog({ tableId, fieldId, newType, oldType: field.type, affectedRelations: affected });
-  }, [tables, relations, updateField]);
+  }, [tables, relations, updateField, enums]);
 
   const handleFkTypeChangeConfirm = useCallback((cascade: boolean) => {
     if (!fkTypeChangeDialog) return;
@@ -446,6 +469,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               <Sidebar
                 tables={tables}
                 domains={domains}
+                enums={enums}
                 selectedTableId={selectedTableId}
                 selectedTableIds={selectedTableIds}
                 collapsed={false}
@@ -456,6 +480,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 onAddDomain={(name) => addDomain(name)}
                 onUpdateDomain={updateDomain}
                 onDeleteDomain={deleteDomain}
+                onAddEnum={(name, values) => addEnum(name, values)}
+                onUpdateEnum={updateEnum}
+                onDeleteEnum={deleteEnum}
                 onAssignDomain={handleAssignDomain}
                 onRemoveFromDomain={(tableId: string) => updateTableDomain(tableId, undefined)}
                 getTableColor={getTableColor}
@@ -512,6 +539,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               table={selectedTable}
               tables={tables}
               domains={domains}
+              enums={enums}
               relations={relations}
               collapsed={rightCollapsed}
               selectedTableIds={selectedTableIds}
@@ -524,7 +552,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               onUpdateField={(fieldId, updates) => {
                 if (!selectedTableId) return;
                 if (updates.type) {
-                  handleFieldTypeChange(selectedTableId, fieldId, updates.type);
+                  handleFieldTypeChange(selectedTableId, fieldId, updates.type, { enumId: updates.enumId, enumName: updates.enumName });
                 } else {
                   updateField(selectedTableId, fieldId, updates);
                 }

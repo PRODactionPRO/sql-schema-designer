@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { Table, Field, FieldType, Relation, Domain } from '../model/types';
-import { ALL_FIELD_TYPES } from '../model/types';
+import type { Table, Field, FieldType, Relation, Domain, EnumType } from '../model/types';
+import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
 import {
   Plus, Trash2, Key, Link, PanelRightClose, PanelRight,
   Info, X, MessageSquare, Hash, Type, ToggleLeft, Calendar,
@@ -58,6 +58,7 @@ interface TableDetailsPanelProps {
   table: Table | null;
   tables: Table[];
   domains: Domain[];
+  enums: EnumType[];
   relations: Relation[];
   collapsed: boolean;
   selectedTableIds: Set<string>;
@@ -89,7 +90,7 @@ function Tip({ children, label }: { children: React.ReactNode; label: string }) 
 }
 
 export function TableDetailsPanel({
-  table, tables, domains, relations, collapsed, onToggleCollapse,
+  table, tables, domains, enums, relations, collapsed, onToggleCollapse,
   onUpdateTableName, onUpdateTableDescription, onUpdateTableDomain,
   onAddField, onUpdateField, onDeleteField, onAddRelation, onDeleteRelation,
   enabledFieldTypes,
@@ -101,6 +102,7 @@ export function TableDetailsPanel({
   const [isAddingField, setIsAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldType, setNewFieldType] = useState<FieldType>('varchar');
+  const [newFieldEnumId, setNewFieldEnumId] = useState<string>('');
   const [moreOpenFieldId, setMoreOpenFieldId] = useState<string | null>(null);
   const [fieldComments, setFieldComments] = useState<Record<string, string>>({});
   const moreBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -233,9 +235,19 @@ export function TableDetailsPanel({
 
   const handleAddField = () => {
     if (newFieldName.trim()) {
-      onAddField({ name: newFieldName.trim(), type: newFieldType, isPrimaryKey: false, isNullable: true, isForeignKey: false });
+      const enumType = enums.find(e => e.id === newFieldEnumId);
+      onAddField({
+        name: newFieldName.trim(),
+        type: newFieldType,
+        enumId: newFieldType === 'enum' ? enumType?.id : undefined,
+        enumName: newFieldType === 'enum' ? enumType?.name : undefined,
+        isPrimaryKey: false,
+        isNullable: true,
+        isForeignKey: false,
+      });
       setNewFieldName('');
       setNewFieldType('varchar');
+      setNewFieldEnumId('');
       setIsAddingField(false);
     }
   };
@@ -261,6 +273,24 @@ export function TableDetailsPanel({
     const existingRel = getFieldRelation(fieldId);
     if (existingRel) onDeleteRelation(existingRel.id);
     onUpdateField(fieldId, { isForeignKey: false, foreignKeyTable: undefined, foreignKeyField: undefined });
+  };
+
+  const handleFieldTypeChange = (field: Field, value: FieldType) => {
+    if (value !== 'enum') {
+      onUpdateField(field.id, { type: value, enumId: undefined, enumName: undefined });
+      return;
+    }
+    const fallbackEnum = enums[0];
+    onUpdateField(field.id, {
+      type: value,
+      enumId: field.enumId || fallbackEnum?.id,
+      enumName: field.enumName || fallbackEnum?.name,
+    });
+  };
+
+  const getFieldTypeLabel = (field: Field) => {
+    if (field.type !== 'enum') return field.type;
+    return field.enumName || 'enum';
   };
 
   return (
@@ -339,11 +369,11 @@ export function TableDetailsPanel({
                     />
 
                     {/* Type selector */}
-                    <Select value={field.type} onValueChange={(value) => onUpdateField(field.id, { type: value as FieldType })}>
+                    <Select value={field.type} onValueChange={(value) => handleFieldTypeChange(field, value as FieldType)}>
                       <SelectTrigger className={`h-6 w-[90px] text-xs border-none rounded px-1.5 gap-0.5 flex-shrink-0 ${dk ? 'bg-[#313244] hover:bg-[#45475a] text-[#cdd6f4]' : 'bg-gray-100 hover:bg-gray-200'}`}>
                         <span className="flex items-center gap-1 truncate">
                           {getTypeIcon(field.type)}
-                          <span className="truncate">{field.type}</span>
+                          <span className="truncate">{getFieldTypeLabel(field)}</span>
                         </span>
                       </SelectTrigger>
                       <SelectContent className="bg-gray-900 border-gray-700 text-white">
@@ -357,6 +387,26 @@ export function TableDetailsPanel({
                         ))}
                       </SelectContent>
                     </Select>
+                    {field.type === 'enum' && (
+                      <Select
+                        value={field.enumId || ''}
+                        onValueChange={(enumId) => {
+                          const enumType = enums.find(e => e.id === enumId);
+                          onUpdateField(field.id, { enumId, enumName: enumType?.name });
+                        }}
+                      >
+                        <SelectTrigger className={`h-6 w-[120px] text-xs border-none rounded px-1.5 gap-0.5 flex-shrink-0 ${dk ? 'bg-[#313244] hover:bg-[#45475a] text-[#cdd6f4]' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                          <SelectValue placeholder="Select enum" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                          {enums.map(enumType => (
+                            <SelectItem key={enumType.id} value={enumType.id} className="text-gray-200 focus:bg-gray-800 focus:text-white">
+                              {enumType.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
 
                     {/* Icon buttons */}
                     <div className="flex items-center gap-0 flex-shrink-0">
@@ -439,6 +489,7 @@ export function TableDetailsPanel({
                     <div className={`ml-2 mb-1 p-2 rounded-lg border ${dk ? 'bg-[#313244] border-[#45475a]' : 'bg-gray-50 border-gray-200'}`}>
                       <FKSelector
                         tables={otherTables}
+                        sourceField={field}
                         darkMode={dk}
                         onSelect={(tableId, fieldId) => {
                           handleSetForeignKey(field.id, tableId, fieldId);
@@ -539,6 +590,18 @@ export function TableDetailsPanel({
                     ))}
                   </SelectContent>
                 </Select>
+                {newFieldType === 'enum' && (
+                  <Select value={newFieldEnumId} onValueChange={setNewFieldEnumId}>
+                    <SelectTrigger className="h-7 w-[120px] text-xs"><SelectValue placeholder="Enum..." /></SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                      {enums.map(enumType => (
+                        <SelectItem key={enumType.id} value={enumType.id} className="text-gray-200 focus:bg-gray-800 focus:text-white">
+                          {enumType.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="flex gap-2">
                 <Button onClick={handleAddField} size="sm" className="flex-1 h-7">Add</Button>
@@ -552,7 +615,7 @@ export function TableDetailsPanel({
   );
 }
 
-function FKSelector({ tables, darkMode, onSelect }: { tables: Table[]; darkMode?: boolean; onSelect: (tableId: string, fieldId: string) => void; }) {
+function FKSelector({ tables, sourceField, darkMode, onSelect }: { tables: Table[]; sourceField: Field; darkMode?: boolean; onSelect: (tableId: string, fieldId: string) => void; }) {
   const [selectedTableId, setSelectedTableId] = useState('');
   const selectedTable = tables.find(t => t.id === selectedTableId);
   const selectCls = darkMode
@@ -575,7 +638,9 @@ function FKSelector({ tables, darkMode, onSelect }: { tables: Table[]; darkMode?
           className={selectCls}
         >
           <option value="">Select field...</option>
-          {selectedTable.fields.map(f => <option key={f.id} value={f.id}>{f.isPrimaryKey ? '🔑 ' : ''}{f.name} ({f.type})</option>)}
+          {selectedTable.fields
+            .filter(f => getTypeCompatibility(sourceField, f) !== 'forbidden')
+            .map(f => <option key={f.id} value={f.id}>{f.isPrimaryKey ? '🔑 ' : ''}{f.name} ({f.type === 'enum' ? f.enumName || 'enum' : f.type})</option>)}
         </select>
       )}
     </div>

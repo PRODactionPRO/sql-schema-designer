@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Table, Field, Relation, Schema, RelationType, Domain } from './types';
+import type { Table, Field, Relation, Schema, RelationType, Domain, EnumType } from './types';
 import { DOMAIN_COLORS } from './types';
 import { getSerializer } from '../lib/serializers';
 import { deepClone } from '@/shared/lib/json';
@@ -11,12 +11,14 @@ export interface SchemaStoreInitialData {
   tables?: Table[];
   relations?: Relation[];
   domains?: Domain[];
+  enums?: EnumType[];
 }
 
 interface HistorySnapshot {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
 }
 
 const MAX_HISTORY = 50;
@@ -80,6 +82,7 @@ interface SchemaState {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
 
   // UI state (not tracked)
   selectedTableId: string | null;
@@ -129,6 +132,11 @@ interface SchemaState {
   deleteDomain: (id: string) => void;
   assignDomainToTables: (domainId: string, tableIds: string[]) => void;
 
+  // Enum CRUD
+  addEnum: (name: string, values?: string[]) => EnumType;
+  updateEnum: (id: string, updates: Partial<Omit<EnumType, 'id'>>) => void;
+  deleteEnum: (id: string) => void;
+
   // Multi-select
   toggleTableSelection: (id: string, additive: boolean) => void;
   selectTablesInRect: (rect: { x: number; y: number; w: number; h: number }) => void;
@@ -152,16 +160,17 @@ interface SchemaState {
 
 // ── Helpers ──
 
-function snapshot(state: { tables: Table[]; relations: Relation[]; domains: Domain[] }): HistorySnapshot {
+function snapshot(state: { tables: Table[]; relations: Relation[]; domains: Domain[]; enums: EnumType[] }): HistorySnapshot {
   return {
     tables: deepClone(state.tables),
     relations: deepClone(state.relations),
     domains: deepClone(state.domains),
+    enums: deepClone(state.enums),
   };
 }
 
 function withHistory(
-  state: Pick<SchemaState, 'tables' | 'relations' | 'domains' | '_past'>,
+  state: Pick<SchemaState, 'tables' | 'relations' | 'domains' | 'enums' | '_past'>,
   next: Partial<SchemaState>,
 ): Partial<SchemaState> {
   const past = [...state._past, snapshot(state)].slice(-MAX_HISTORY);
@@ -180,6 +189,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   tables: DEFAULT_TABLES,
   relations: DEFAULT_RELATIONS,
   domains: [],
+  enums: [],
   selectedTableId: DEFAULT_TABLES[0]?.id ?? null,
   selectedTableIds: new Set<string>(),
   selectedRelation: null,
@@ -192,14 +202,17 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       tables: data?.tables ?? DEFAULT_TABLES,
       relations: data?.relations ?? DEFAULT_RELATIONS,
       domains: data?.domains ?? [],
+      enums: data?.enums ?? [],
     });
     const tables = normalized.tables;
     const relations = normalized.relations;
     const domains = normalized.domains ?? [];
+    const enums = normalized.enums ?? [];
     set({
       tables,
       relations,
       domains,
+      enums,
       selectedTableId: tables.length > 0 ? tables[0]?.id ?? null : null,
       selectedTableIds: new Set(),
       selectedRelation: null,
@@ -210,27 +223,29 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   // ── Undo / Redo ──
   undo: () => {
-    const { _past, _future, tables, relations, domains } = get();
+    const { _past, _future, tables, relations, domains, enums } = get();
     if (_past.length === 0) return;
     const prev = _past[_past.length - 1];
     set({
       tables: prev.tables,
       relations: prev.relations,
       domains: prev.domains,
+      enums: prev.enums,
       _past: _past.slice(0, -1),
-      _future: [..._future, snapshot({ tables, relations, domains })],
+      _future: [..._future, snapshot({ tables, relations, domains, enums })],
     });
   },
 
   redo: () => {
-    const { _past, _future, tables, relations, domains } = get();
+    const { _past, _future, tables, relations, domains, enums } = get();
     if (_future.length === 0) return;
     const next = _future[_future.length - 1];
     set({
       tables: next.tables,
       relations: next.relations,
       domains: next.domains,
-      _past: [..._past, snapshot({ tables, relations, domains })],
+      enums: next.enums,
+      _past: [..._past, snapshot({ tables, relations, domains, enums })],
       _future: _future.slice(0, -1),
     });
   },
@@ -351,10 +366,24 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   updateField: (tableId, fieldId, updates) => {
     const state = get();
+    const normalizedUpdates: Partial<Field> = { ...updates };
+    if (normalizedUpdates.type && normalizedUpdates.type !== 'enum') {
+      normalizedUpdates.enumId = undefined;
+      normalizedUpdates.enumName = undefined;
+    }
+    if (normalizedUpdates.type === 'enum') {
+      if (normalizedUpdates.enumId) {
+        const enumType = state.enums.find(e => e.id === normalizedUpdates.enumId);
+        normalizedUpdates.enumName = enumType?.name;
+      } else if (normalizedUpdates.enumName) {
+        const enumType = state.enums.find(e => e.name.toLowerCase() === normalizedUpdates.enumName?.toLowerCase());
+        normalizedUpdates.enumId = enumType?.id;
+      }
+    }
     set(withHistory(state, {
       tables: state.tables.map(t =>
         t.id === tableId
-          ? { ...t, fields: t.fields.map(f => f.id === fieldId ? { ...f, ...updates } : f) }
+          ? { ...t, fields: t.fields.map(f => f.id === fieldId ? { ...f, ...normalizedUpdates } : f) }
           : t
       ),
     }));
@@ -426,6 +455,68 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     const idSet = new Set(tableIds);
     set(withHistory(state, {
       tables: state.tables.map(t => idSet.has(t.id) ? { ...t, domainId } : t),
+    }));
+  },
+
+  // ── Enum CRUD ──
+  addEnum: (name, values = []) => {
+    const state = get();
+    const existingNames = new Set(state.enums.map(e => e.name.toLowerCase()));
+    let finalName = name.trim() || 'Enum';
+    if (existingNames.has(finalName.toLowerCase())) {
+      let suffix = 2;
+      while (existingNames.has(`${finalName}_${suffix}`.toLowerCase())) suffix += 1;
+      finalName = `${finalName}_${suffix}`;
+    }
+    const uniqueValues = Array.from(new Set(values.map(v => v.trim()).filter(Boolean)));
+    const nextEnum: EnumType = {
+      id: nextId(),
+      name: finalName,
+      values: uniqueValues,
+    };
+    set(withHistory(state, {
+      enums: [...state.enums, nextEnum],
+    }));
+    return nextEnum;
+  },
+
+  updateEnum: (id, updates) => {
+    const state = get();
+    const prevEnum = state.enums.find(e => e.id === id);
+    if (!prevEnum) return;
+    const nextNameRaw = updates.name?.trim();
+    const nextName = nextNameRaw && nextNameRaw.length > 0 ? nextNameRaw : prevEnum.name;
+    const uniqueValues = updates.values
+      ? Array.from(new Set(updates.values.map(v => v.trim()).filter(Boolean)))
+      : prevEnum.values;
+
+    set(withHistory(state, {
+      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues } : e),
+      tables: state.tables.map(table => ({
+        ...table,
+        fields: table.fields.map(field => {
+          if (field.enumId !== id) return field;
+          return { ...field, enumName: nextName };
+        }),
+      })),
+    }));
+  },
+
+  deleteEnum: (id) => {
+    const state = get();
+    const enumFieldIds = new Set(
+      state.tables.flatMap(table => table.fields.filter(field => field.enumId === id).map(field => field.id)),
+    );
+    set(withHistory(state, {
+      enums: state.enums.filter(e => e.id !== id),
+      tables: state.tables.map(table => ({
+        ...table,
+        fields: table.fields.map(field => {
+          if (field.enumId !== id) return field;
+          return { ...field, type: 'varchar', enumId: undefined, enumName: undefined, isForeignKey: false, foreignKeyField: undefined, foreignKeyTable: undefined };
+        }),
+      })),
+      relations: state.relations.filter(rel => !enumFieldIds.has(rel.fromFieldId) && !enumFieldIds.has(rel.toFieldId)),
     }));
   },
 
@@ -561,8 +652,8 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   // ─ Import/Export ──
   exportToFormat: (formatId) => {
-    const { tables, relations, domains } = get();
-    const schema: Schema = { tables, relations, domains };
+    const { tables, relations, domains, enums } = get();
+    const schema: Schema = { tables, relations, domains, enums };
     const serializer = getSerializer(formatId);
     if (!serializer) throw new Error(`Unknown format: ${formatId}`);
     return serializer.serialize(schema);
@@ -597,6 +688,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       tables: dedupedTables,
       relations: schema.relations,
       domains: schema.domains ?? state.domains,
+      enums: schema.enums ?? state.enums,
       selectedTableId: dedupedTables.length > 0 ? dedupedTables[0].id : null,
       selectedRelation: null,
       selectedTableIds: new Set(),

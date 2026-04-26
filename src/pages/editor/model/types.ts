@@ -7,6 +7,7 @@ export {
   ALL_FIELD_TYPES,
   type Field,
   type Domain,
+  type EnumType,
   type Table,
   type RelationType,
   type Relation,

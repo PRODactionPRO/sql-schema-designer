@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
-import type { Table, Domain } from '../model/types';
+import type { Table, Domain, EnumType } from '../model/types';
 import { DOMAIN_COLORS } from '../model/types';
-import { Search, MoreVertical, Plus, Palette, X, PanelLeftClose, PanelLeft, ArrowUpAZ, ArrowDownAZ, GripVertical, SlidersHorizontal, Group, Check } from 'lucide-react';
+import { Search, MoreVertical, Plus, Palette, X, PanelLeftClose, PanelLeft, ArrowUpAZ, ArrowDownAZ, GripVertical, SlidersHorizontal, Group, Check, Tag } from 'lucide-react';
 import { Input } from '@/shared/ui/input';
 import { Button } from '@/shared/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 interface SidebarProps {
   tables: Table[];
   domains: Domain[];
+  enums: EnumType[];
   selectedTableId: string | null;
   selectedTableIds: Set<string>;
   collapsed: boolean;
@@ -19,6 +20,9 @@ interface SidebarProps {
   onAddDomain: (name: string) => void;
   onUpdateDomain: (id: string, updates: Partial<Omit<Domain, 'id'>>) => void;
   onDeleteDomain: (id: string) => void;
+  onAddEnum: (name: string, values: string[]) => void;
+  onUpdateEnum: (id: string, updates: Partial<Omit<EnumType, 'id'>>) => void;
+  onDeleteEnum: (id: string) => void;
   onAssignDomain: (domainId: string, tableIds: string[]) => void;
   onRemoveFromDomain: (tableId: string) => void;
   getTableColor: (table: Table) => string;
@@ -28,7 +32,7 @@ interface SidebarProps {
   onClearMultiSelection: () => void;
 }
 
-type TabType = 'tables' | 'domains';
+type TabType = 'tables' | 'domains' | 'enums';
 type SortMode = 'none' | 'asc' | 'desc';
 
 function sortTables(tables: Table[], mode: SortMode): Table[] {
@@ -46,8 +50,8 @@ interface TableGroup {
 }
 
 export function Sidebar({
-  tables, domains, selectedTableId, selectedTableIds, collapsed, onToggleCollapse,
-  onTableSelect, onTableDelete, onAddTable, onAddDomain, onUpdateDomain, onDeleteDomain,
+  tables, domains, enums, selectedTableId, selectedTableIds, collapsed, onToggleCollapse,
+  onTableSelect, onTableDelete, onAddTable, onAddDomain, onUpdateDomain, onDeleteDomain, onAddEnum, onUpdateEnum, onDeleteEnum,
   onAssignDomain, onRemoveFromDomain, getTableColor, onToggleTableSelection, onReorderTables, onCenterOnTable, onClearMultiSelection,
 }: SidebarProps) {
   const [activeTab, setActiveTab] = useState<TabType>('tables');
@@ -57,6 +61,9 @@ export function Sidebar({
   const [newTableName, setNewTableName] = useState('');
   const [isAddingDomain, setIsAddingDomain] = useState(false);
   const [newDomainName, setNewDomainName] = useState('');
+  const [isAddingEnum, setIsAddingEnum] = useState(false);
+  const [newEnumName, setNewEnumName] = useState('');
+  const [newEnumValues, setNewEnumValues] = useState('');
   const [editingDomainId, setEditingDomainId] = useState<string | null>(null);
   const [renamingDomainId, setRenamingDomainId] = useState<string | null>(null);
   const [renamingDomainName, setRenamingDomainName] = useState('');
@@ -237,6 +244,15 @@ export function Sidebar({
   const handleAddDomain = () => {
     if (newDomainName.trim()) { onAddDomain(newDomainName.trim()); setNewDomainName(''); setIsAddingDomain(false); }
   };
+  const handleAddEnum = () => {
+    const name = newEnumName.trim();
+    if (!name) return;
+    const values = newEnumValues.split(',').map(v => v.trim()).filter(Boolean);
+    onAddEnum(name, values);
+    setNewEnumName('');
+    setNewEnumValues('');
+    setIsAddingEnum(false);
+  };
 
   const hasMultiSelection = selectedTableIds.size > 0;
   const isDragEnabled = sortMode === 'none' && !groupByDomain && !searchQuery;
@@ -304,6 +320,9 @@ export function Sidebar({
             </button>
             <button onClick={() => setActiveTab('domains')} className={`px-3 py-1.5 text-xs rounded-t transition-colors flex items-center gap-1 ${activeTab === 'domains' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
               <Palette className="size-3" /> Domains
+            </button>
+            <button onClick={() => setActiveTab('enums')} className={`px-3 py-1.5 text-xs rounded-t transition-colors flex items-center gap-1 ${activeTab === 'enums' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+              <Tag className="size-3" /> Enums
             </button>
           </div>
           <div className="flex items-center gap-0.5">
@@ -429,8 +448,7 @@ export function Sidebar({
               </button>
             )}
           </>
-        ) : (
-          /* Domains Tab */
+        ) : activeTab === 'domains' ? (
           <>
             {domains.map(domain => {
               const domainTableCount = tables.filter(t => t.domainId === domain.id).length;
@@ -543,6 +561,69 @@ export function Sidebar({
             )}
             {domains.length === 0 && !isAddingDomain && (
               <div className="px-3 py-6 text-center text-xs text-gray-400">Domains help organize tables<br />into logical groups</div>
+            )}
+          </>
+        ) : (
+          <>
+            {enums.map(enumType => (
+              <div key={enumType.id} className="px-3 py-2 border-b border-gray-100 hover:bg-gray-50">
+                <div className="flex items-center justify-between gap-2">
+                  <Input
+                    value={enumType.name}
+                    onChange={(e) => onUpdateEnum(enumType.id, { name: e.target.value })}
+                    className="h-7 text-sm font-medium"
+                  />
+                  <button
+                    onClick={() => onDeleteEnum(enumType.id)}
+                    className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                    title="Delete enum"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+                <Input
+                  value={enumType.values.join(', ')}
+                  onChange={(e) => {
+                    const values = e.target.value.split(',').map(v => v.trim()).filter(Boolean);
+                    onUpdateEnum(enumType.id, { values });
+                  }}
+                  placeholder="value1, value2, value3"
+                  className="h-7 text-xs mt-1"
+                />
+              </div>
+            ))}
+
+            {isAddingEnum ? (
+              <div className="px-3 py-2 border-t border-gray-200">
+                <Input
+                  type="text"
+                  placeholder="Enum name..."
+                  value={newEnumName}
+                  onChange={(e) => setNewEnumName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddEnum(); if (e.key === 'Escape') { setIsAddingEnum(false); setNewEnumName(''); setNewEnumValues(''); } }}
+                  autoFocus
+                  className="mb-2 h-8 text-sm"
+                />
+                <Input
+                  type="text"
+                  placeholder="Values (comma-separated)..."
+                  value={newEnumValues}
+                  onChange={(e) => setNewEnumValues(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddEnum(); if (e.key === 'Escape') { setIsAddingEnum(false); setNewEnumName(''); setNewEnumValues(''); } }}
+                  className="mb-2 h-8 text-sm"
+                />
+                <div className="flex gap-2">
+                  <Button onClick={handleAddEnum} size="sm" className="flex-1 h-7">Add</Button>
+                  <Button onClick={() => { setIsAddingEnum(false); setNewEnumName(''); setNewEnumValues(''); }} variant="outline" size="sm" className="flex-1 h-7">Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setIsAddingEnum(true)} className="w-full px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-200">
+                <Plus className="size-3.5" /> Add Enum
+              </button>
+            )}
+            {enums.length === 0 && !isAddingEnum && (
+              <div className="px-3 py-6 text-center text-xs text-gray-400">Enums define controlled values<br />for enum-typed fields</div>
             )}
           </>
         )}

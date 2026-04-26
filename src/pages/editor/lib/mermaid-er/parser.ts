@@ -11,13 +11,14 @@
  *   %% Domain: <name> (<#color>): table1, table2
  */
 
-import type { Table, Field, Relation, Domain, FieldType, RelationType } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType, FieldType, RelationType } from '../../model/types';
 import { ALL_FIELD_TYPES } from '../../model/types';
 
 export interface ParseResult {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
   errors: ParseError[];
 }
 
@@ -85,6 +86,7 @@ export function parseMermaidER(source: string): ParseResult {
   const tables: Table[] = [];
   const relations: Relation[] = [];
   const domains: Domain[] = [];
+  const enums: EnumType[] = [];
   const errors: ParseError[] = [];
 
   const tableMap = new Map<string, Table>();
@@ -109,6 +111,15 @@ export function parseMermaidER(source: string): ParseResult {
     if (domainComment) {
       const tableNames = domainComment[3].split(',').map(s => s.trim()).filter(Boolean);
       domainDefs.push({ name: domainComment[1], color: domainComment[2], tableNames });
+      i++;
+      continue;
+    }
+
+    // Enum comment: %% Enum: ChatRole: system, user, assistant
+    const enumComment = line.match(/^%%\s*Enum:\s*(\w+)\s*:\s*(.+)$/i);
+    if (enumComment) {
+      const values = enumComment[2].split(',').map(s => s.trim()).filter(Boolean);
+      enums.push({ id: genId('enum'), name: enumComment[1], values: Array.from(new Set(values)) });
       i++;
       continue;
     }
@@ -139,7 +150,7 @@ export function parseMermaidER(source: string): ParseResult {
         if (fline === '}') break;
         if (!fline || fline.startsWith('%%')) continue;
 
-        const parsed = parseMermaidFieldLine(fline, flineNum);
+        const parsed = parseMermaidFieldLine(fline, flineNum, enums);
         if (parsed.error) {
           errors.push(parsed.error);
           continue;
@@ -231,7 +242,7 @@ export function parseMermaidER(source: string): ParseResult {
     }
   }
 
-  return { tables, relations, domains, errors };
+  return { tables, relations, domains, enums, errors };
 }
 
 // ─── Field line parser ───
@@ -241,7 +252,7 @@ interface FieldParseResult {
   error: ParseError | null;
 }
 
-function parseMermaidFieldLine(line: string, lineNum: number): FieldParseResult {
+function parseMermaidFieldLine(line: string, lineNum: number, enums: EnumType[]): FieldParseResult {
   // Mermaid format: type fieldName [PK|FK|UK] ["comment"]
   let comment = '';
   let rest = line;
@@ -260,7 +271,8 @@ function parseMermaidFieldLine(line: string, lineNum: number): FieldParseResult 
   const fieldName = tokens[1];
 
   const fieldType = normaliseType(rawType);
-  if (!fieldType) {
+  const enumType = enums.find(e => e.name.toLowerCase() === rawType.toLowerCase());
+  if (!fieldType && !enumType) {
     return { field: null, error: { line: lineNum, message: `Unknown type "${rawType}"` } };
   }
 
@@ -297,7 +309,9 @@ function parseMermaidFieldLine(line: string, lineNum: number): FieldParseResult 
   const field: Field = {
     id: genId('fld'),
     name: fieldName,
-    type: fieldType,
+    type: enumType ? 'enum' : fieldType!,
+    enumId: enumType?.id,
+    enumName: enumType?.name,
     isPrimaryKey,
     isNullable,
     isForeignKey,

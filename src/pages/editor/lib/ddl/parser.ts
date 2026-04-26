@@ -16,12 +16,13 @@
  *   -- line comments
  */
 
-import type { Table, Field, Relation, Domain, FieldType, RelationType } from '../../model/types';
+import type { Table, Field, Relation, Domain, EnumType, FieldType, RelationType } from '../../model/types';
 
 export interface ParseResult {
   tables: Table[];
   relations: Relation[];
   domains: Domain[];
+  enums: EnumType[];
   errors: ParseError[];
 }
 
@@ -97,10 +98,10 @@ const TYPE_MAP: Record<string, FieldType> = {
   'xml': 'xml',
 };
 
-function parseFieldType(sqlType: string): FieldType {
+function parseFieldType(sqlType: string): FieldType | null {
   // Remove parenthesized arguments like (255) or (10,2)
   const normalized = sqlType.toLowerCase().replace(/\s*\([^)]*\)/, '').trim();
-  return TYPE_MAP[normalized] || 'text';
+  return TYPE_MAP[normalized] || null;
 }
 
 // ─── Main parser ────────────────────────────────────────────
@@ -109,8 +110,10 @@ export function parseDDL(source: string): ParseResult {
   const tables: Table[] = [];
   const relations: Relation[] = [];
   const domains: Domain[] = [];
+  const enums: EnumType[] = [];
   const errors: ParseError[] = [];
   const tableMap = new Map<string, Table>();
+  const enumByName = new Map<string, EnumType>();
 
   // Track deferred FK constraints (from ALTER TABLE or table-level CONSTRAINT)
   const deferredFKs: {
@@ -139,6 +142,24 @@ export function parseDDL(source: string): ParseResult {
     }
 
     // ─── CREATE TABLE ───
+    const enumMatch = trimmed.match(new RegExp(`^CREATE\\s+TYPE\\s+(${IDENT})\\s+AS\\s+ENUM\\s*\\((.+)\\)`, 'i'));
+    if (enumMatch) {
+      const enumName = unquoteIdent(enumMatch[1]);
+      const values = enumMatch[2]
+        .split(',')
+        .map((raw) => raw.trim().replace(/^'/, '').replace(/'$/, '').replace(/''/g, "'"))
+        .filter(Boolean);
+      const enumType: EnumType = {
+        id: genId('enum'),
+        name: enumName,
+        values: Array.from(new Set(values)),
+      };
+      enums.push(enumType);
+      enumByName.set(enumName.toLowerCase(), enumType);
+      i++;
+      continue;
+    }
+
     const createMatch = trimmed.match(
       new RegExp(`^CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:(${IDENT})\\.)?(${IDENT})\\s*\\(`, 'i')
     );
@@ -275,6 +296,8 @@ export function parseDDL(source: string): ParseResult {
         const restUpper = rest.toUpperCase();
 
         const fieldType = parseFieldType(rawType);
+        const enumType = enumByName.get(rawType.replace(/^"/, '').replace(/"$/, '').toLowerCase());
+        const resolvedType = enumType ? 'enum' : (fieldType || 'text');
         const isPK = restUpper.includes('PRIMARY KEY');
         const isNotNull = restUpper.includes('NOT NULL') || isPK;
         const isUnique = restUpper.includes('UNIQUE');
@@ -295,7 +318,9 @@ export function parseDDL(source: string): ParseResult {
         const field: Field = {
           id: genId('fld'),
           name: colName,
-          type: fieldType,
+          type: resolvedType,
+          enumId: enumType?.id,
+          enumName: enumType?.name,
           isPrimaryKey: isPK,
           isNullable: !isNotNull,
           isForeignKey,
@@ -416,7 +441,7 @@ export function parseDDL(source: string): ParseResult {
     });
   }
 
-  return { tables, relations, domains, errors };
+  return { tables, relations, domains, enums, errors };
 }
 
 // ─── Helper: split string by commas at top-level (respecting parentheses) ───
