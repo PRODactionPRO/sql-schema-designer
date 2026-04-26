@@ -3,13 +3,21 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
+  "workspaces": [
+    "apps/api"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "check": "npm run typecheck && npm run lint && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run build",
+    "api:dev": "npm run start:dev --workspace api",
+    "api:build": "npm run build --workspace api",
+    "api:start": "npm run start --workspace api",
+    "api:migrate": "npm run prisma:migrate --workspace api",
+    "api:generate": "npm run prisma:generate --workspace api"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",

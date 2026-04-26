@@ -7,6 +7,16 @@ This is a code bundle for Визуальный редактор модели д�
 - `npm i` — install dependencies
 - `npm run dev` — start dev server
 
+## Backend API (NestJS + Prisma + Postgres)
+
+- `docker compose up -d postgres` — start local Postgres (`localhost:5433`)
+- `npm run api:migrate` — apply Prisma migrations
+- `npm run api:dev` — start API (`http://localhost:3000/api`)
+
+Auth endpoints:
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+
 ## Quality gates
 
 - `npm run typecheck`

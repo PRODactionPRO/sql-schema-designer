@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', 'src/imports/pasted_text/**/*'],
+    ignores: ['dist', 'node_modules', 'apps/**', 'src/imports/pasted_text/**/*'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -16,6 +16,9 @@ export default tseslint.config(
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: globals.browser,
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     plugins: {
       'react-hooks': reactHooks,
