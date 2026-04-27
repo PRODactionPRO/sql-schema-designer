@@ -9,6 +9,8 @@ import { useProjectsStore } from '../model/useProjectsStore';
 import { SchemaPreview } from './SchemaPreview';
 import type { ProjectData } from '../model/types';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
+import { useRequireAuth } from '@/shared/auth/guard';
+import { useAuthStore } from '@/shared/auth/store';
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -25,9 +27,11 @@ function formatDate(iso: string): string {
 }
 
 export function ProjectsPage() {
+  const { isAuthenticated } = useRequireAuth();
+  const clearSession = useAuthStore((s) => s.clearSession);
+  const user = useAuthStore((s) => s.user);
   const {
     projects,
-    reloadProjects,
     createProject,
     deleteProject,
     duplicateProject,
@@ -54,9 +58,9 @@ export function ProjectsPage() {
     return projects.filter(p => p.name.toLowerCase().includes(q));
   }, [projects, searchQuery]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const name = `Untitled Schema ${projects.length + 1}`;
-    const project = createProject(name);
+    const project = await createProject(name);
     navigate(`/project/${project.id}`);
   };
 
@@ -71,16 +75,16 @@ export function ProjectsPage() {
     setEditName(p.name);
   };
 
-  const confirmRename = () => {
+  const confirmRename = async () => {
     if (editingId && editName.trim()) {
-      renameProject(editingId, editName.trim());
+      await renameProject(editingId, editName.trim());
     }
     setEditingId(null);
   };
 
-  const handleDuplicate = (id: string, e: React.MouseEvent) => {
+  const handleDuplicate = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const copy = duplicateProject(id);
+    const copy = await duplicateProject(id);
     if (copy) toast.success(`Duplicated as "${copy.name}"`);
   };
 
@@ -89,9 +93,9 @@ export function ProjectsPage() {
     setDeleteConfirmId(id);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (deleteConfirmId) {
-      deleteProject(deleteConfirmId);
+      await deleteProject(deleteConfirmId);
       setDeleteConfirmId(null);
       toast.success('Project deleted');
     }
@@ -122,8 +126,13 @@ export function ProjectsPage() {
     reader.onload = () => {
       try {
         const content = reader.result as string;
-        const project = importProjectFile(content);
-        toast.success(`Imported "${project.name}"`);
+        importProjectFile(content)
+          .then((project) => {
+            toast.success(`Imported "${project.name}"`);
+          })
+          .catch((err) => {
+            toast.error(err instanceof Error ? err.message : 'Failed to import project');
+          });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to import project');
       }
@@ -142,6 +151,10 @@ export function ProjectsPage() {
     }
   };
 
+  if (!isAuthenticated) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -153,10 +166,20 @@ export function ProjectsPage() {
             </div>
             <div>
               <h1 className="text-xl text-gray-900" style={{ fontWeight: 600 }}>Schema Designer</h1>
-              <p className="text-xs text-gray-500">Visual database modeling tool</p>
+              <p className="text-xs text-gray-500">Visual database modeling tool{user?.email ? ` • ${user.email}` : ''}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                clearSession();
+                navigate('/auth', { replace: true });
+              }}
+              className="px-3 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+              style={{ fontWeight: 500 }}
+            >
+              Logout
+            </button>
             <button
               onClick={handleImportClick}
               className="flex items-center gap-2 px-3 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm"
