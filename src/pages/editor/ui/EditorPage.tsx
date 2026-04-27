@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useSchemaStore } from '../model/useSchemaStore';
@@ -7,8 +8,9 @@ import type { SchemaStoreInitialData } from '../model/useSchemaStore';
 import type { ProjectSettings } from '../model/types';
 import { DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '../model/types';
 import type { ProjectData } from '@/shared/types/project';
-import { loadProjectById } from '@/shared/lib/project-storage';
+import { getProjectById, updateProject } from '@/shared/api/projects';
 import { useEditorStoreSelectors } from '../model/useEditorStoreSelectors';
+import { useRequireAuth } from '@/shared/auth/guard';
 
 // ── Extracted hooks ──
 import { useEditorKeyboardShortcuts } from '../model/useEditorKeyboardShortcuts';
@@ -36,32 +38,29 @@ import { Button } from '@/shared/ui/button';
 import { Code, PanelLeft } from 'lucide-react';
 import type { FieldType } from '../model/types';
 
-function loadProjectFromStorage(id: string): ProjectData | null {
-  return loadProjectById(id);
-}
-
 export function EditorPage() {
+  const { isAuthenticated } = useRequireAuth();
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const [projectData, setProjectData] = useState<ProjectData | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const projectQuery = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: async () => {
+      if (!projectId) return null;
+      return getProjectById(projectId);
+    },
+    enabled: Boolean(projectId) && isAuthenticated,
+  });
+
+  const projectData = (projectQuery.data as ProjectData | null | undefined) ?? null;
 
   useEffect(() => {
-    if (!projectId) {
-      setLoaded(true);
-      return;
-    }
-    const data = loadProjectFromStorage(projectId);
-    if (!data) {
+    if (projectQuery.isError) {
       toast.error('Project not found');
       navigate('/');
-      return;
     }
-    setProjectData(data);
-    setLoaded(true);
-  }, [projectId, navigate]);
+  }, [navigate, projectQuery.isError]);
 
-  if (!loaded) {
+  if (!isAuthenticated || projectQuery.isLoading) {
     return (
       <div className="size-full flex items-center justify-center bg-gray-100">
         <div className="text-gray-400 text-sm">Loading...</div>
@@ -97,6 +96,14 @@ interface EditorPageInnerProps {
 
 function EditorPageInner({ projectId, projectData, initialData, initialSettings }: EditorPageInnerProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const updateProjectMutation = useMutation({
+    mutationFn: async (project: ProjectData) => updateProject(project),
+    onSuccess: async (updated) => {
+      await queryClient.setQueryData(['project', updated.id], updated);
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
 
   // Initialize store synchronously
   const initialized = useRef(false);
@@ -182,19 +189,34 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     else { setLeftCollapsed(true); setRightCollapsed(true); }
   }, [isMaximized]);
 
-  // ── Auto-save ──
-  const { persistToStorage, projectDataRef } = useAutoSave({
-    projectId, projectData, tables, relations, domains, settings, projectName, projectDescription,
-    enums,
-  });
-
   // ── Snapshot capture ──
   const {
     snapshotCaptureMode, isCapturing, currentSnapshot, canvasContainerRef,
     startCapture, saveSnapshot, cancelCapture,
   } = useSnapshotCapture({
-    projectId, projectDataRef, leftCollapsed, rightCollapsed, setLeftCollapsed, setRightCollapsed,
+    initialSnapshot: projectData?.snapshot,
+    leftCollapsed,
+    rightCollapsed,
+    setLeftCollapsed,
+    setRightCollapsed,
     onDone: () => setTimeout(() => setIsSettingsOpen(true), 200),
+  });
+
+  // ── Auto-save ──
+  const { persistToStorage } = useAutoSave({
+    projectId,
+    projectData,
+    tables,
+    relations,
+    domains,
+    settings,
+    projectName,
+    projectDescription,
+    enums,
+    currentSnapshot,
+    persistProject: async (project) => {
+      await updateProjectMutation.mutateAsync(project);
+    },
   });
 
   // ── Code mode ──
@@ -208,17 +230,27 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   });
 
   // ── Save handler (defined before keyboard shortcuts) ──
-  const handleSave = useCallback(() => {
-    if (projectId) { persistToStorage(); toast.success('Project saved'); }
-    else { toast.success('Schema saved'); }
+  const handleSave = useCallback(async () => {
+    if (projectId) {
+      await persistToStorage();
+      toast.success('Project saved');
+      return;
+    }
+
+    toast.success('Schema saved');
   }, [projectId, persistToStorage]);
 
-  const handleBack = () => { if (projectId) persistToStorage(); navigate('/'); };
+  const handleBack = useCallback(async () => {
+    if (projectId) {
+      await persistToStorage();
+    }
+    navigate('/');
+  }, [navigate, persistToStorage, projectId]);
 
   // ── Keyboard shortcuts ──
   useEditorKeyboardShortcuts({
     undo, redo, codeMode, onToggleMaximize: handleToggleMaximize,
-    onSave: handleSave,
+    onSave: () => { void handleSave(); },
     onExport: () => setIsExportModalOpen(true),
     onImport: () => setIsImportModalOpen(true),
     onZoomToFit: () => zoomToFitRef.current?.(),
@@ -384,9 +416,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         <Toolbar
           onExport={() => setIsExportModalOpen(true)}
           onImport={() => setIsImportModalOpen(true)}
-          onSave={handleSave}
+          onSave={() => { void handleSave(); }}
           onSettings={() => setIsSettingsOpen(true)}
-          onBack={projectId ? handleBack : undefined}
+          onBack={projectId ? (() => { void handleBack(); }) : undefined}
           projectName={projectName || undefined}
           onRename={projectId ? setProjectName : undefined}
           darkMode={darkMode}

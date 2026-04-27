@@ -1,12 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
 import { toPng } from 'html-to-image';
 import { toast } from 'sonner';
-import type { ProjectData } from '@/shared/types/project';
-import { saveProject } from '@/shared/lib/project-storage';
 
 interface UseSnapshotCaptureOptions {
-  projectId: string | null;
-  projectDataRef: React.MutableRefObject<ProjectData | null>;
+  initialSnapshot?: string;
   leftCollapsed: boolean;
   rightCollapsed: boolean;
   setLeftCollapsed: (v: boolean) => void;
@@ -15,8 +12,7 @@ interface UseSnapshotCaptureOptions {
 }
 
 export function useSnapshotCapture({
-  projectId,
-  projectDataRef,
+  initialSnapshot,
   leftCollapsed,
   rightCollapsed,
   setLeftCollapsed,
@@ -25,9 +21,7 @@ export function useSnapshotCapture({
 }: UseSnapshotCaptureOptions) {
   const [snapshotCaptureMode, setSnapshotCaptureMode] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [currentSnapshot, setCurrentSnapshot] = useState<string | undefined>(
-    projectDataRef.current?.snapshot,
-  );
+  const [currentSnapshot, setCurrentSnapshot] = useState<string | undefined>(initialSnapshot);
   const preCaptureState = useRef<{ left: boolean; right: boolean } | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
@@ -82,14 +76,6 @@ export function useSnapshotCapture({
       })
         .then((dataUrl) => {
           setCurrentSnapshot(dataUrl);
-          if (projectId) {
-            const current = projectDataRef.current;
-            if (current) {
-              const updated = { ...current, snapshot: dataUrl, updatedAt: new Date().toISOString() };
-              saveProject(updated);
-              projectDataRef.current = updated;
-            }
-          }
           restorePanels();
           setSnapshotCaptureMode(false);
           setIsCapturing(false);
@@ -103,7 +89,7 @@ export function useSnapshotCapture({
           setIsCapturing(false);
         });
     });
-  }, [projectId, projectDataRef, restorePanels, onDone]);
+  }, [restorePanels, onDone]);
 
   const cancelCapture = useCallback(() => {
     restorePanels();

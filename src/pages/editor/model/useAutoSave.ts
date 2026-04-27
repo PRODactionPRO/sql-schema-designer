@@ -14,6 +14,7 @@ interface UseAutoSaveOptions {
   projectName: string;
   projectDescription: string;
   currentSnapshot?: string;
+  persistProject?: (project: ProjectData) => Promise<void>;
 }
 
 /**
@@ -31,6 +32,7 @@ export function useAutoSave({
   projectName,
   projectDescription,
   currentSnapshot,
+  persistProject,
 }: UseAutoSaveOptions) {
   const tablesRef = useRef(tables);
   const relationsRef = useRef(relations);
@@ -52,7 +54,7 @@ export function useAutoSave({
   useEffect(() => { projectDataRef.current = projectData; }, [projectData]);
   useEffect(() => { currentSnapshotRef.current = currentSnapshot; }, [currentSnapshot]);
 
-  const persistToStorage = useCallback(() => {
+  const persistToStorage = useCallback(async () => {
     if (!projectId) return;
     const current = projectDataRef.current;
     if (!current) return;
@@ -66,9 +68,13 @@ export function useAutoSave({
       snapshot,
       updatedAt: new Date().toISOString(),
     };
-    saveProject(updated);
+    if (persistProject) {
+      await persistProject(updated);
+    } else {
+      saveProject(updated);
+    }
     projectDataRef.current = updated;
-  }, [projectId]);
+  }, [projectId, persistProject]);
 
   // Debounced auto-save
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,12 +83,12 @@ export function useAutoSave({
     if (!projectId) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      persistToStorage();
+      void persistToStorage();
     }, 800);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [tables, relations, domains, enums, settings, projectName, projectDescription, persistToStorage, projectId]);
+  }, [tables, relations, domains, enums, settings, projectName, projectDescription, currentSnapshot, persistToStorage, projectId]);
 
   return { persistToStorage, projectDataRef };
 }
