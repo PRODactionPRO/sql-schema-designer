@@ -18,12 +18,14 @@ export class UsersService {
     email: string;
     passwordHash: string;
     name?: string;
+    role?: string;
   }): Promise<User> {
     return this.prisma.user.create({
       data: {
         email: payload.email,
         passwordHash: payload.passwordHash,
         name: payload.name,
+        role: payload.role,
       },
     });
   }

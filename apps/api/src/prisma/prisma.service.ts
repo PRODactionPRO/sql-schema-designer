@@ -5,8 +5,12 @@ import { PrismaClient } from '@prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit {
   constructor(configService: ConfigService) {
+    const databaseUrl =
+      process.env.DATABASE_URL ??
+      configService.get<string>('database.url') ??
+      'postgresql://postgres:postgres@localhost:5433/sql_schema_designer?schema=public';
     super({
-      datasourceUrl: configService.get<string>('DATABASE_URL'),
+      datasourceUrl: databaseUrl,
     });
   }
 
