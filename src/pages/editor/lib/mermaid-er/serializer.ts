@@ -70,6 +70,7 @@ export function serializeToMermaidER(
       if (field.defaultValue) comments.push(field.defaultValue);
       if ((!field.isNullable || field.isNotNull) && !field.isPrimaryKey) comments.push('NOT NULL');
       if (field.isIndexed) comments.push('INDEXED');
+      if (field.comment?.trim()) comments.push(`COMMENT=${field.comment.trim().replace(/"/g, '\\"').replace(/\n+/g, ' | ')}`);
       const comment = comments.length > 0 ? ` "${comments.join(', ')}"` : '';
 
       lines.push(`    ${mermaidType} ${field.name}${constraint}${comment}`);

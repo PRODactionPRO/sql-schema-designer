@@ -9,6 +9,8 @@ import type { ProjectSettings } from '../model/types';
 import { DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '../model/types';
 import type { ProjectData } from '@/shared/types/project';
 import { getProjectById, updateProject } from '@/shared/api/projects';
+import { createProjectRevision, deleteProjectRevision, getProjectRevisions, restoreProjectRevision, type ProjectRevision } from '@/shared/api/revisions';
+import { normalizeSchema } from '@/shared/lib/schema-normalizer';
 import { useEditorStoreSelectors } from '../model/useEditorStoreSelectors';
 import { useRequireAuth } from '@/shared/auth/guard';
 
@@ -35,8 +37,12 @@ import { DiffModal } from './DiffModal';
 import { downloadFile } from '@/shared/lib/download';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
-import { Code, PanelLeft } from 'lucide-react';
+import { AlertTriangle, Code, PanelLeft } from 'lucide-react';
 import type { FieldType } from '../model/types';
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
 
 export function EditorPage() {
   const { isAuthenticated } = useRequireAuth();
@@ -165,12 +171,20 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(288);
+  const [leftCodeWidth, setLeftCodeWidth] = useState(420);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  const [resizingSide, setResizingSide] = useState<'left' | 'right' | null>(null);
   const [settings, setSettings] = useState<ProjectSettings>(initialSettings);
   const [projectName, setProjectName] = useState(projectData?.name || '');
   const [projectDescription, setProjectDescription] = useState(projectData?.description || '');
   const [highlightRelations, setHighlightRelations] = useState(false);
   const [isValidationOpen, setIsValidationOpen] = useState(false);
   const [isDiffOpen, setIsDiffOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<'properties' | 'history'>('properties');
+  const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
+  const [isRevisionPreview, setIsRevisionPreview] = useState(false);
+  const [previewRevisionNumber, setPreviewRevisionNumber] = useState<number | null>(null);
   const [fkTypeChangeDialog, setFkTypeChangeDialog] = useState<{
     tableId: string;
     fieldId: string;
@@ -182,6 +196,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   const canvasViewportRef = useRef<{ pan: { x: number; y: number }; zoom: number; width: number; height: number } | null>(null);
   const centerOnTableRef = useRef<((tableId: string) => void) | null>(null);
   const zoomToFitRef = useRef<(() => void) | null>(null);
+  const lastAutoRevisionRef = useRef<number>(Date.now());
+  const draftBeforePreviewRef = useRef<{
+    tables: typeof tables;
+    relations: typeof relations;
+    domains: typeof domains;
+    enums: typeof enums;
+    settings: ProjectSettings;
+  } | null>(null);
 
   const isMaximized = leftCollapsed && rightCollapsed;
   const handleToggleMaximize = useCallback(() => {
@@ -219,6 +241,15 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     },
   });
 
+  const revisionsQuery = useQuery({
+    queryKey: ['project-revisions', projectId],
+    queryFn: async () => {
+      if (!projectId) return [] as ProjectRevision[];
+      return getProjectRevisions(projectId);
+    },
+    enabled: Boolean(projectId),
+  });
+
   // ── Code mode ──
   const {
     codeMode, codeModeAnimating, codeValue, codeErrors,
@@ -229,23 +260,167 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     tables, relations, domains, enums, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, importFromFormat,
   });
 
+  useEffect(() => {
+    if (!resizingSide || snapshotCaptureMode) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const viewportWidth = window.innerWidth;
+      if (resizingSide === 'left') {
+        const width = Math.max(120, Math.min(event.clientX, viewportWidth - 120));
+        if (codeMode) setLeftCodeWidth(width);
+        else setLeftSidebarWidth(width);
+      } else {
+        const width = Math.max(120, Math.min(viewportWidth - event.clientX, viewportWidth - 120));
+        setRightPanelWidth(width);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setResizingSide(null);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [codeMode, resizingSide, snapshotCaptureMode]);
+
+  const buildSchemaJson = useCallback(() => ({
+    tables,
+    relations,
+    domains,
+    enums,
+    settings,
+    snapshot: currentSnapshot,
+  }), [tables, relations, domains, enums, settings, currentSnapshot]);
+
   // ── Save handler (defined before keyboard shortcuts) ──
   const handleSave = useCallback(async () => {
+    if (isRevisionPreview) {
+      toast.info('Сначала выйдите из режима предпросмотра версии');
+      return;
+    }
     if (projectId) {
       await persistToStorage();
+      await createProjectRevision(projectId, {
+        schemaJson: buildSchemaJson(),
+        comment: 'Manual save',
+      });
+      await revisionsQuery.refetch();
       toast.success('Project saved');
       return;
     }
 
     toast.success('Schema saved');
-  }, [projectId, persistToStorage]);
+  }, [buildSchemaJson, isRevisionPreview, projectId, persistToStorage, revisionsQuery]);
 
   const handleBack = useCallback(async () => {
     if (projectId) {
       await persistToStorage();
+      await createProjectRevision(projectId, {
+        schemaJson: buildSchemaJson(),
+        comment: 'Exit autosave',
+      });
     }
     navigate('/');
-  }, [navigate, persistToStorage, projectId]);
+  }, [buildSchemaJson, navigate, persistToStorage, projectId]);
+
+  const handleOpenVersions = useCallback(async () => {
+    clearMultiSelection();
+    setSelectedTableId(null);
+    setSelectedRelation(null);
+    setPanelMode('history');
+    if (projectId) {
+      await revisionsQuery.refetch();
+    }
+  }, [clearMultiSelection, projectId, revisionsQuery, setSelectedRelation, setSelectedTableId]);
+
+  const applyRevisionSchema = useCallback((revision: ProjectRevision) => {
+    const schemaJson = toRecord(revision.schemaJson);
+    const schemaSource = toRecord(schemaJson.schema ?? schemaJson);
+    const schema = normalizeSchema(schemaSource);
+    useSchemaStore.getState().initialize({
+      tables: schema.tables,
+      relations: schema.relations,
+      domains: schema.domains,
+      enums: schema.enums,
+    });
+
+    const settingsRaw = toRecord(schemaJson.settings);
+    const autoSaveIntervalSecRaw = Number(settingsRaw.autoSaveIntervalSec ?? DEFAULT_PROJECT_SETTINGS.autoSaveIntervalSec);
+    setSettings({
+      ...DEFAULT_PROJECT_SETTINGS,
+      ...settingsRaw,
+      autoSaveIntervalSec: Number.isFinite(autoSaveIntervalSecRaw)
+        ? Math.max(15, Math.min(autoSaveIntervalSecRaw, 3600))
+        : DEFAULT_PROJECT_SETTINGS.autoSaveIntervalSec,
+    });
+  }, []);
+
+  const handleSelectRevision = useCallback((revisionId: string) => {
+    const revision = revisionsQuery.data?.find((item) => item.id === revisionId);
+    if (!revision) return;
+    if (!draftBeforePreviewRef.current) {
+      draftBeforePreviewRef.current = {
+        tables,
+        relations,
+        domains,
+        enums,
+        settings,
+      };
+    }
+    setSelectedRevisionId(revision.id);
+    setPreviewRevisionNumber(revision.revision);
+    setIsRevisionPreview(true);
+    applyRevisionSchema(revision);
+    toast.success(`Предпросмотр ревизии r${revision.revision}`);
+  }, [applyRevisionSchema, revisionsQuery.data, tables, relations, domains, enums, settings]);
+
+  const handleCancelRevisionPreview = useCallback(() => {
+    if (!draftBeforePreviewRef.current) return;
+    useSchemaStore.getState().initialize({
+      tables: draftBeforePreviewRef.current.tables,
+      relations: draftBeforePreviewRef.current.relations,
+      domains: draftBeforePreviewRef.current.domains,
+      enums: draftBeforePreviewRef.current.enums,
+    });
+    setSettings(draftBeforePreviewRef.current.settings);
+    draftBeforePreviewRef.current = null;
+    setIsRevisionPreview(false);
+    setPreviewRevisionNumber(null);
+    setSelectedRevisionId(null);
+    toast.success('Возврат к текущему рабочему состоянию');
+  }, []);
+
+  const handleApplyRevisionPreview = useCallback(async () => {
+    if (!projectId || previewRevisionNumber === null) return;
+    await restoreProjectRevision(projectId, previewRevisionNumber);
+    await persistToStorage();
+    await revisionsQuery.refetch();
+    draftBeforePreviewRef.current = null;
+    setIsRevisionPreview(false);
+    setPreviewRevisionNumber(null);
+    setSelectedRevisionId(null);
+    toast.success(`Ревизия r${previewRevisionNumber} применена как текущая`);
+  }, [persistToStorage, previewRevisionNumber, projectId, revisionsQuery]);
+
+  const handleDeleteRevision = useCallback(async (revisionId: string) => {
+    if (!projectId) return;
+    await deleteProjectRevision(projectId, revisionId);
+    if (selectedRevisionId === revisionId) {
+      setSelectedRevisionId(null);
+    }
+    await revisionsQuery.refetch();
+    toast.success('Версия удалена');
+  }, [projectId, revisionsQuery, selectedRevisionId]);
 
   // ── Keyboard shortcuts ──
   useEditorKeyboardShortcuts({
@@ -263,7 +438,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   });
 
   const darkMode = codeMode;
-  const selectedTable = selectedTableIds.size > 1 ? null : (tables.find(t => t.id === selectedTableId) || null);
+  const selectedTable = panelMode === 'history'
+    ? null
+    : (selectedTableIds.size > 1 ? null : (tables.find(t => t.id === selectedTableId) || null));
 
   // ── Export handlers ──
   const handleExportJSON = () => { downloadFile(exportToFormat('json'), 'schema.json', 'application/json'); toast.success('Schema exported to JSON'); };
@@ -409,6 +586,24 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
 
   const relationToolbarPosition = getRelationMidpoint();
 
+  useEffect(() => {
+    if (!projectId || isRevisionPreview) return;
+
+    const intervalMs = Math.max(15, settings.autoSaveIntervalSec) * 1000;
+    const timer = window.setInterval(async () => {
+      if (Date.now() - lastAutoRevisionRef.current < intervalMs - 250) return;
+      await persistToStorage();
+      await createProjectRevision(projectId, {
+        schemaJson: buildSchemaJson(),
+        comment: 'Periodic autosave',
+      });
+      lastAutoRevisionRef.current = Date.now();
+      await revisionsQuery.refetch();
+    }, intervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [buildSchemaJson, isRevisionPreview, persistToStorage, projectId, revisionsQuery, settings.autoSaveIntervalSec]);
+
   return (
     <div className={`size-full flex flex-col transition-colors duration-300 ${darkMode ? 'bg-[#11111b]' : 'bg-gray-100'}`}>
       {/* Toolbar */}
@@ -418,6 +613,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           onImport={() => setIsImportModalOpen(true)}
           onSave={() => { void handleSave(); }}
           onSettings={() => setIsSettingsOpen(true)}
+          onVersions={() => { void handleOpenVersions(); }}
           onBack={projectId ? (() => { void handleBack(); }) : undefined}
           projectName={projectName || undefined}
           onRename={projectId ? setProjectName : undefined}
@@ -435,19 +631,25 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             selectedTableId={snapshotCaptureMode ? null : selectedTableId}
             selectedTableIds={snapshotCaptureMode ? new Set() : selectedTableIds}
             selectedRelation={snapshotCaptureMode ? null : selectedRelation}
-            onTableSelect={setSelectedTableId}
-            onTablePositionChange={updateTablePosition}
-            onTableDelete={deleteTable}
-            onFieldClick={(tableId) => setSelectedTableId(tableId)}
+            onTableSelect={(tableId) => {
+              setPanelMode('properties');
+              setSelectedTableId(tableId);
+            }}
+            onTablePositionChange={isRevisionPreview ? (() => {}) : updateTablePosition}
+            onTableDelete={isRevisionPreview ? (() => {}) : deleteTable}
+            onFieldClick={(tableId) => {
+              setPanelMode('properties');
+              setSelectedTableId(tableId);
+            }}
             onRelationSelect={setSelectedRelation}
-            onFieldTypeChange={handleFieldTypeChange}
-            onCreateRelation={handleCreateRelation}
-            onAutoLayout={autoLayout}
+            onFieldTypeChange={isRevisionPreview ? (() => {}) : handleFieldTypeChange}
+            onCreateRelation={isRevisionPreview ? (() => {}) : handleCreateRelation}
+            onAutoLayout={isRevisionPreview ? (() => {}) : autoLayout}
             onToggleTableSelection={toggleTableSelection}
             onSelectTablesInRect={selectTablesInRect}
             onClearMultiSelection={clearMultiSelection}
-            onMoveSelectedTables={moveSelectedTables}
-            onDeleteTables={handleDeleteTables}
+            onMoveSelectedTables={isRevisionPreview ? (() => {}) : moveSelectedTables}
+            onDeleteTables={isRevisionPreview ? (() => {}) : handleDeleteTables}
             getTableColor={getTableColor}
             lineType={settings.lineType}
             enabledFieldTypes={settings.enabledFieldTypes}
@@ -456,14 +658,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             zoomToFitRef={zoomToFitRef}
             darkMode={darkMode}
             onTableDoubleClick={handleTableDoubleClick}
-            onAddTable={(pos) => addTable('new_table', pos)}
+            onAddTable={isRevisionPreview ? (() => {}) : ((pos) => addTable('new_table', pos))}
             onToggleMaximize={handleToggleMaximize}
-            onUpdateField={(tableId, fieldId, updates) => updateField(tableId, fieldId, updates)}
-            onDeleteField={(tableId, fieldId) => deleteField(tableId, fieldId)}
-            onAssignDomain={handleAssignDomain}
+            onUpdateField={isRevisionPreview ? (() => {}) : ((tableId, fieldId, updates) => updateField(tableId, fieldId, updates))}
+            onDeleteField={isRevisionPreview ? (() => {}) : ((tableId, fieldId) => deleteField(tableId, fieldId))}
+            onAssignDomain={isRevisionPreview ? (() => {}) : handleAssignDomain}
             highlightRelations={highlightRelations}
             onOpenInCodeEditor={handleOpenInCodeEditor}
-            onPushHistory={pushHistory}
+            onPushHistory={isRevisionPreview ? (() => {}) : pushHistory}
           />
         </div>
 
@@ -472,8 +674,8 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           className="absolute left-0 top-0 h-full z-20 overflow-hidden transition-[width] duration-[280ms] ease-in-out"
           style={{
             width: codeMode
-              ? (leftCollapsed ? '40px' : '420px')
-              : (leftCollapsed ? '40px' : '288px'),
+              ? (leftCollapsed ? '40px' : `${leftCodeWidth}px`)
+              : (leftCollapsed ? '40px' : `${leftSidebarWidth}px`),
             transform: snapshotCaptureMode ? 'translateX(-100%)' : 'translateX(0)',
             pointerEvents: snapshotCaptureMode ? 'none' : 'auto',
           }}
@@ -482,7 +684,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           <div
             className="h-full transition-transform duration-[280ms] ease-in-out"
             style={{
-              width: codeMode ? '420px' : '288px',
+              width: `${codeMode ? leftCodeWidth : leftSidebarWidth}px`,
               transform: leftCollapsed ? 'translateX(-100%)' : 'translateX(0)',
             }}
           >
@@ -506,20 +708,23 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 selectedTableIds={selectedTableIds}
                 collapsed={false}
                 onToggleCollapse={() => setLeftCollapsed(true)}
-                onTableSelect={setSelectedTableId}
-                onTableDelete={deleteTable}
-                onAddTable={addTable}
-                onAddDomain={(name) => addDomain(name)}
-                onUpdateDomain={updateDomain}
-                onDeleteDomain={deleteDomain}
-                onAddEnum={(name, values) => addEnum(name, values)}
-                onUpdateEnum={updateEnum}
-                onDeleteEnum={deleteEnum}
-                onAssignDomain={handleAssignDomain}
-                onRemoveFromDomain={(tableId: string) => updateTableDomain(tableId, undefined)}
+                onTableSelect={(tableId) => {
+                  setPanelMode('properties');
+                  setSelectedTableId(tableId);
+                }}
+                onTableDelete={isRevisionPreview ? (() => {}) : deleteTable}
+                onAddTable={isRevisionPreview ? (() => {}) : addTable}
+                onAddDomain={isRevisionPreview ? (() => {}) : ((name) => addDomain(name))}
+                onUpdateDomain={isRevisionPreview ? (() => {}) : updateDomain}
+                onDeleteDomain={isRevisionPreview ? (() => {}) : deleteDomain}
+                onAddEnum={isRevisionPreview ? (() => {}) : ((name, values) => addEnum(name, values))}
+                onUpdateEnum={isRevisionPreview ? (() => {}) : updateEnum}
+                onDeleteEnum={isRevisionPreview ? (() => {}) : deleteEnum}
+                onAssignDomain={isRevisionPreview ? (() => {}) : handleAssignDomain}
+                onRemoveFromDomain={isRevisionPreview ? (() => {}) : ((tableId: string) => updateTableDomain(tableId, undefined))}
                 getTableColor={getTableColor}
                 onToggleTableSelection={toggleTableSelection}
-                onReorderTables={reorderTables}
+                onReorderTables={isRevisionPreview ? (() => {}) : reorderTables}
                 onCenterOnTable={(tableId) => centerOnTableRef.current?.(tableId)}
                 onClearMultiSelection={clearMultiSelection}
               />
@@ -548,13 +753,22 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               boxShadow: codeMode ? '4px 0 24px rgba(0,0,0,0.3)' : '4px 0 16px rgba(0,0,0,0.08)',
             }} />
           )}
+          {!snapshotCaptureMode && !leftCollapsed && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize left panel"
+              onMouseDown={(e) => { e.preventDefault(); setResizingSide('left'); }}
+              className={`absolute top-0 right-0 h-full w-1 cursor-col-resize transition-colors ${resizingSide === 'left' ? 'bg-blue-500/50' : 'hover:bg-blue-500/35'}`}
+            />
+          )}
         </div>
 
         {/* Right panel — translateX keeps content pinned to right edge */}
         <div
           className="absolute right-0 top-0 h-full z-20 overflow-hidden transition-[width] duration-[280ms] ease-in-out"
           style={{
-            width: rightCollapsed ? '40px' : '320px',
+            width: rightCollapsed ? '40px' : `${rightPanelWidth}px`,
             transform: snapshotCaptureMode ? 'translateX(100%)' : 'translateX(0)',
             pointerEvents: snapshotCaptureMode ? 'none' : 'auto',
           }}
@@ -563,11 +777,12 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           <div
             className="absolute right-0 top-0 h-full transition-transform duration-[280ms] ease-in-out"
             style={{
-              width: '320px',
+              width: `${rightPanelWidth}px`,
               transform: rightCollapsed ? 'translateX(calc(100% - 40px))' : 'translateX(0)',
             }}
           >
             <TableDetailsPanel
+              mode={panelMode}
               table={selectedTable}
               tables={tables}
               domains={domains}
@@ -577,11 +792,12 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               selectedTableIds={selectedTableIds}
               onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
               darkMode={codeMode}
-              onUpdateTableName={(name) => { if (selectedTableId) updateTableName(selectedTableId, name); }}
-              onUpdateTableDescription={(desc) => { if (selectedTableId) updateTableDescription(selectedTableId, desc); }}
-              onUpdateTableDomain={(domainId) => { if (selectedTableId) updateTableDomain(selectedTableId, domainId); }}
-              onAddField={(field) => { if (selectedTableId) addField(selectedTableId, field); }}
+              onUpdateTableName={(name) => { if (!isRevisionPreview && selectedTableId) updateTableName(selectedTableId, name); }}
+              onUpdateTableDescription={(desc) => { if (!isRevisionPreview && selectedTableId) updateTableDescription(selectedTableId, desc); }}
+              onUpdateTableDomain={(domainId) => { if (!isRevisionPreview && selectedTableId) updateTableDomain(selectedTableId, domainId); }}
+              onAddField={(field) => { if (!isRevisionPreview && selectedTableId) addField(selectedTableId, field); }}
               onUpdateField={(fieldId, updates) => {
+                if (isRevisionPreview) return;
                 if (!selectedTableId) return;
                 if (updates.type) {
                   handleFieldTypeChange(selectedTableId, fieldId, updates.type, { enumId: updates.enumId, enumName: updates.enumName });
@@ -589,18 +805,37 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateField(selectedTableId, fieldId, updates);
                 }
               }}
-              onDeleteField={(fieldId) => { if (selectedTableId) deleteField(selectedTableId, fieldId); }}
-              onAddRelation={(relation) => addRelation(relation)}
-              onDeleteRelation={(relationId) => deleteRelation(relationId)}
+              onDeleteField={(fieldId) => { if (!isRevisionPreview && selectedTableId) deleteField(selectedTableId, fieldId); }}
+              onAddRelation={(relation) => { if (!isRevisionPreview) addRelation(relation); }}
+              onDeleteRelation={(relationId) => { if (!isRevisionPreview) deleteRelation(relationId); }}
               enabledFieldTypes={settings.enabledFieldTypes}
-              onBulkAssignDomain={handleAssignDomain}
-              onBulkDelete={handleDeleteTables}
+              onBulkAssignDomain={isRevisionPreview ? undefined : handleAssignDomain}
+              onBulkDelete={isRevisionPreview ? undefined : handleDeleteTables}
+              revisions={(revisionsQuery.data ?? []).map((item) => ({
+                id: item.id,
+                revision: item.revision,
+                comment: item.comment,
+                createdAt: item.createdAt,
+              }))}
+              selectedRevisionId={selectedRevisionId}
+              isRevisionsLoading={revisionsQuery.isLoading || revisionsQuery.isFetching}
+              onSelectRevision={handleSelectRevision}
+              onDeleteRevision={(revisionId) => { void handleDeleteRevision(revisionId); }}
             />
           </div>
+          {!snapshotCaptureMode && !rightCollapsed && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize right panel"
+              onMouseDown={(e) => { e.preventDefault(); setResizingSide('right'); }}
+              className={`absolute top-0 left-0 h-full w-1 cursor-col-resize transition-colors ${resizingSide === 'right' ? 'bg-blue-500/50' : 'hover:bg-blue-500/35'}`}
+            />
+          )}
         </div>
 
         {/* Canvas toolbar */}
-        {!snapshotCaptureMode && (
+        {!snapshotCaptureMode && !isRevisionPreview && (
           <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
             <div className="pointer-events-auto inline-block relative left-1/2 -translate-x-1/2 bottom-4">
               <CanvasToolbar
@@ -623,8 +858,26 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           </div>
         )}
 
+        {/* Revision preview bar */}
+        {!snapshotCaptureMode && isRevisionPreview && (
+          <div className="absolute bottom-0 left-0 right-0 z-30 pointer-events-none">
+            <div className="pointer-events-auto inline-flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-300 bg-amber-50 shadow-md relative left-1/2 -translate-x-1/2 bottom-4">
+              <AlertTriangle className="size-4 text-amber-700" />
+              <span className="text-sm text-amber-900">
+                Предпросмотр ревизии {previewRevisionNumber ? `r${previewRevisionNumber}` : ''}. Редактирование отключено.
+              </span>
+              <Button size="sm" variant="outline" onClick={() => { void handleCancelRevisionPreview(); }}>
+                Вернуться к текущей
+              </Button>
+              <Button size="sm" onClick={() => { void handleApplyRevisionPreview(); }}>
+                Применить
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Relation toolbar */}
-        {selectedRelation && relationToolbarPosition && !snapshotCaptureMode && (
+        {selectedRelation && relationToolbarPosition && !snapshotCaptureMode && !isRevisionPreview && (
           <RelationToolbar
             relation={selectedRelation}
             position={relationToolbarPosition}

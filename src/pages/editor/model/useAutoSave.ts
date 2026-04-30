@@ -68,10 +68,10 @@ export function useAutoSave({
       snapshot,
       updatedAt: new Date().toISOString(),
     };
+    // Always keep local recovery copy even when backend persistence is enabled.
+    saveProject(updated);
     if (persistProject) {
       await persistProject(updated);
-    } else {
-      saveProject(updated);
     }
     projectDataRef.current = updated;
   }, [projectId, persistProject]);

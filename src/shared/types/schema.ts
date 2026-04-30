@@ -34,6 +34,7 @@ export type FieldType =
   | 'circle'
   | 'xml'
   | 'array'
+  | 'vector'
   | 'enum';
 
 export const ALL_FIELD_TYPES: FieldType[] = [
@@ -45,13 +46,14 @@ export const ALL_FIELD_TYPES: FieldType[] = [
   'decimal', 'numeric', 'real', 'double precision', 'money',
   'bytea', 'inet', 'cidr', 'macaddr',
   'point', 'line', 'polygon', 'circle',
-  'xml', 'array', 'enum'
+  'xml', 'array', 'vector', 'enum'
 ];
 
 export interface Field {
   id: string;
   name: string;
   type: FieldType;
+  comment?: string;
   enumId?: string;
   enumName?: string;
   isPrimaryKey: boolean;
@@ -115,11 +117,13 @@ export type LineType = 'curved' | 'orthogonal' | 'straight';
 export interface ProjectSettings {
   lineType: LineType;
   enabledFieldTypes: FieldType[];
+  autoSaveIntervalSec: number;
 }
 
 export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   lineType: 'curved',
   enabledFieldTypes: [...ALL_FIELD_TYPES],
+  autoSaveIntervalSec: 60,
 };
 
 // Default domain colors
@@ -147,6 +151,7 @@ const TYPE_COMPATIBILITY_GROUPS: Record<string, FieldType[]> = {
   geometric: ['point', 'line', 'polygon', 'circle'],
   xml: ['xml'],
   array: ['array'],
+  vector: ['vector'],
   enum: ['enum'],
 };
 

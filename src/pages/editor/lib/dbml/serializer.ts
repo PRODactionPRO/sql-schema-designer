@@ -100,6 +100,7 @@ function buildFieldAttrs(field: Field): string[] {
   if (!field.isNullable && !field.isPrimaryKey) attrs.push('not null');
   if (field.isNotNull && field.isNullable && !field.isPrimaryKey) attrs.push('not null');
   if (field.defaultValue) attrs.push(`default: '${field.defaultValue}'`);
+  if (field.comment?.trim()) attrs.push(`note: '${field.comment.trim().replace(/'/g, "\\'").replace(/\n+/g, ' | ')}'`);
   return attrs;
 }
 

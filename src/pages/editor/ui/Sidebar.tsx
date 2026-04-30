@@ -310,7 +310,7 @@ export function Sidebar({
   }
 
   return (
-    <div className="w-72 bg-white/95 backdrop-blur-sm flex flex-col h-full rounded-r-lg">
+    <div className="w-full bg-white/95 backdrop-blur-sm flex flex-col h-full rounded-r-lg">
       {/* Header with tabs */}
       <div className="border-b border-gray-200">
         <div className="flex items-center justify-between px-3 pt-2">

@@ -192,6 +192,7 @@ const TYPE_CATEGORY: Record<string, { icon: string; category: string }> = {
   'circle': { icon: '⭕', category: 'Geometric' },
   'xml': { icon: '📄', category: 'Markup' },
   'array': { icon: '📋', category: 'Collection' },
+  'vector': { icon: '🧠', category: 'AI/Embeddings' },
   'enum': { icon: '📑', category: 'Enum' },
 };
 

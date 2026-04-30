@@ -325,6 +325,7 @@ function parseDBMLFieldLine(line: string, lineNum: number, enums: EnumType[]): F
   let isNullable = true;
   let isUnique = false;
   let defaultValue: string | undefined;
+  let comment: string | undefined;
   let ref: { table: string; field: string; type: RelationType } | null = null;
 
   if (attrStr) {
@@ -342,6 +343,8 @@ function parseDBMLFieldLine(line: string, lineNum: number, enums: EnumType[]): F
         isNullable = true;
       } else if (lower.startsWith('default:')) {
         defaultValue = attr.slice(8).trim().replace(/^['"`]|['"`]$/g, '');
+      } else if (lower.startsWith('note:')) {
+        comment = attr.slice(5).trim().replace(/^['"`]|['"`]$/g, '');
       } else if (lower.startsWith('ref:')) {
         // ref: > table.field or ref: - table.field
         const refStr = attr.slice(4).trim();
@@ -368,6 +371,7 @@ function parseDBMLFieldLine(line: string, lineNum: number, enums: EnumType[]): F
     isForeignKey: false,
     isUnique,
     defaultValue,
+    comment,
   };
 
   return { field, ref, error: null };

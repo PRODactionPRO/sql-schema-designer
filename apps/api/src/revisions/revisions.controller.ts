@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -52,5 +53,14 @@ export class RevisionsController {
       user.userId,
       user.userId,
     );
+  }
+
+  @Delete(':revisionId')
+  remove(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Param('revisionId') revisionId: string,
+  ) {
+    return this.revisionsService.remove(projectId, revisionId, user.userId);
   }
 }

@@ -96,6 +96,7 @@ const TYPE_MAP: Record<string, FieldType> = {
   'circle': 'circle',
   'money': 'money',
   'xml': 'xml',
+  'vector': 'vector',
 };
 
 function parseFieldType(sqlType: string): FieldType | null {
@@ -215,7 +216,7 @@ export function parseDDL(source: string): ParseResult {
       const tableInlineFKs: { fieldName: string; refTable: string; refField: string; defLine: number }[] = [];
 
       for (const colDef of columnDefs) {
-        const col = colDef.text.trim();
+        let col = colDef.text.trim();
         if (!col) continue;
         // Approximate line number within the body
         const colLine = startLine + colDef.approxLine + 1;
@@ -269,6 +270,13 @@ export function parseDDL(source: string): ParseResult {
 
         // ─── Parse column definition ───
         // Pattern: column_name TYPE_EXPRESSION [modifiers...]
+        let inlineComment: string | undefined;
+        const inlineCommentMatch = col.match(/\/\*\s*([\s\S]*?)\s*\*\/\s*$/);
+        if (inlineCommentMatch) {
+          inlineComment = inlineCommentMatch[1].trim();
+          col = col.slice(0, inlineCommentMatch.index).trim();
+        }
+
         const colHeadMatch = col.match(new RegExp(`^\\s*(${IDENT})\\s+(.+)$`, 'i'));
         if (!colHeadMatch) {
           // Don't report errors for empty/whitespace-only
@@ -319,6 +327,7 @@ export function parseDDL(source: string): ParseResult {
           id: genId('fld'),
           name: colName,
           type: resolvedType,
+          comment: inlineComment || undefined,
           enumId: enumType?.id,
           enumName: enumType?.name,
           isPrimaryKey: isPK,
