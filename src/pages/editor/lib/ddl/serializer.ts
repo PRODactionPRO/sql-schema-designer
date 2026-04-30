@@ -15,7 +15,7 @@
  *   );
  */
 
-import type { Table, Field, Relation, Domain, EnumType, FieldType } from '../../model/types';
+import type { Table, Relation, Domain, EnumType, FieldType } from '../../model/types';
 
 export function serializeToDDL(
   tables: Table[],
@@ -74,6 +74,10 @@ export function serializeToDDL(
         def += ` REFERENCES ${fk.toTableName}(${fk.toFieldName})`;
       }
 
+      if (field.comment?.trim()) {
+        def += ` /* ${field.comment.trim().replace(/\*\//g, '* /').replace(/\n+/g, ' | ')} */`;
+      }
+
       fieldDefs.push(def);
     }
 
@@ -127,6 +131,7 @@ function mapTypeToSQL(type: FieldType, enumName?: string): string {
     'money': 'MONEY',
     'xml': 'XML',
     'array': 'TEXT[]',
+    'vector': 'VECTOR',
     'enum': enumName ? `"${enumName}"` : 'TEXT',
   };
   return map[type] || type.toUpperCase();

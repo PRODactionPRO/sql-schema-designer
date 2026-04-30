@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered } from 'lucide-react';
+import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap } from 'lucide-react';
 import type { Field, FieldType, Table, TypeCompatibility } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
@@ -39,6 +39,7 @@ const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   xml: <FileCode className="size-3.5" />,
   array: <List className="size-3.5" />,
   enum: <Tag className="size-3.5" />,
+  vector: <Zap className="size-3.5" />,
 };
 
 function getTypeIcon(type: string) {

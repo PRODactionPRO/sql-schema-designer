@@ -111,4 +111,23 @@ export class RevisionsService {
 
     return newRevision;
   }
+
+  async remove(projectId: string, revisionId: string, ownerId: string) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+
+    const revision = await this.prisma.projectRevision.findFirst({
+      where: { id: revisionId, projectId },
+      select: { id: true },
+    });
+
+    if (!revision) {
+      throw new NotFoundException('Revision not found');
+    }
+
+    await this.prisma.projectRevision.delete({
+      where: { id: revisionId },
+    });
+
+    return { success: true };
+  }
 }

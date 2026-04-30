@@ -6,7 +6,7 @@ import {
   Plus, Trash2, Key, Link, PanelRightClose, PanelRight,
   Info, X, MessageSquare, Hash, Type, ToggleLeft, Calendar,
   Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag,
-  Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Zap,
+  Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Zap, History,
 } from 'lucide-react';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
@@ -48,6 +48,7 @@ const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   xml: <FileCode className="size-3.5" />,
   array: <List className="size-3.5" />,
   enum: <Tag className="size-3.5" />,
+  vector: <Zap className="size-3.5" />,
 };
 
 function getTypeIcon(type: string) {
@@ -55,6 +56,7 @@ function getTypeIcon(type: string) {
 }
 
 interface TableDetailsPanelProps {
+  mode?: 'properties' | 'history';
   table: Table | null;
   tables: Table[];
   domains: Domain[];
@@ -75,6 +77,11 @@ interface TableDetailsPanelProps {
   enabledFieldTypes?: FieldType[];
   onBulkAssignDomain?: (domainId: string, tableIds: string[]) => void;
   onBulkDelete?: (tableIds: string[]) => void;
+  revisions?: Array<{ id: string; revision: number; comment: string | null; createdAt: string }>;
+  selectedRevisionId?: string | null;
+  isRevisionsLoading?: boolean;
+  onSelectRevision?: (revisionId: string) => void;
+  onDeleteRevision?: (revisionId: string) => void;
 }
 
 // Tooltip wrapper
@@ -90,6 +97,7 @@ function Tip({ children, label }: { children: React.ReactNode; label: string }) 
 }
 
 export function TableDetailsPanel({
+  mode = 'properties',
   table, tables, domains, enums, relations, collapsed, onToggleCollapse,
   onUpdateTableName, onUpdateTableDescription, onUpdateTableDomain,
   onAddField, onUpdateField, onDeleteField, onAddRelation, onDeleteRelation,
@@ -97,6 +105,11 @@ export function TableDetailsPanel({
   selectedTableIds,
   onBulkAssignDomain,
   onBulkDelete,
+  revisions = [],
+  selectedRevisionId,
+  isRevisionsLoading = false,
+  onSelectRevision,
+  onDeleteRevision,
   darkMode,
 }: TableDetailsPanelProps) {
   const [isAddingField, setIsAddingField] = useState(false);
@@ -104,10 +117,10 @@ export function TableDetailsPanel({
   const [newFieldType, setNewFieldType] = useState<FieldType>('varchar');
   const [newFieldEnumId, setNewFieldEnumId] = useState<string>('');
   const [moreOpenFieldId, setMoreOpenFieldId] = useState<string | null>(null);
-  const [fieldComments, setFieldComments] = useState<Record<string, string>>({});
   const moreBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const [fkDropdownFieldId, setFkDropdownFieldId] = useState<string | null>(null);
+  const [revisionToDelete, setRevisionToDelete] = useState<{ id: string; revision: number } | null>(null);
 
   const availableTypes = enabledFieldTypes && enabledFieldTypes.length > 0
     ? ALL_FIELD_TYPES.filter(t => enabledFieldTypes.includes(t))
@@ -162,10 +175,94 @@ export function TableDetailsPanel({
   }
 
   if (!table) {
+    if (mode === 'history') {
+      return (
+        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
+          <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
+            <span className={`text-xs ${textMuted} px-2 flex items-center gap-1.5`}>
+              <History className="size-3.5" />
+              История версий
+            </span>
+            <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
+              <PanelRightClose className="size-3.5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Загрузка истории...</div>}
+            {!isRevisionsLoading && revisions.length === 0 && (
+              <div className={`text-sm ${textSecondary} px-2 py-3`}>История версий пока пуста.</div>
+            )}
+            {!isRevisionsLoading && revisions.map((revision) => {
+              const isActive = selectedRevisionId === revision.id;
+              return (
+                <div
+                  key={revision.id}
+                  className={`group relative w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                    isActive
+                      ? (dk ? 'border-blue-500 bg-blue-500/10' : 'border-blue-300 bg-blue-50')
+                      : (dk ? 'border-[#313244] hover:bg-[#313244]/70' : 'border-gray-200 hover:bg-gray-50')
+                  }`}
+                >
+                  <button type="button" onClick={() => onSelectRevision?.(revision.id)} className="w-full text-left">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">r{revision.revision}</span>
+                      <span className={`text-[11px] ${textSecondary}`}>{new Date(revision.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div className={`text-xs mt-1 ${textSecondary}`}>{revision.comment || 'Без комментария'}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setRevisionToDelete({ id: revision.id, revision: revision.revision });
+                    }}
+                    className={`absolute right-2 bottom-2 size-7 rounded-md border items-center justify-center hidden group-hover:flex ${
+                      dk
+                        ? 'border-red-500/50 text-red-300 bg-red-500/10 hover:bg-red-500/20'
+                        : 'border-red-300 text-red-600 bg-white hover:bg-red-50'
+                    }`}
+                    title="Удалить версию"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          {revisionToDelete && createPortal(
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45">
+              <div className={`w-[340px] rounded-xl border p-4 shadow-xl ${dk ? 'bg-[#1e1e2e] border-[#45475a]' : 'bg-white border-gray-200'}`}>
+                <div className={`text-sm font-semibold ${dk ? 'text-[#cdd6f4]' : 'text-gray-900'}`}>Удалить версию r{revisionToDelete.revision}?</div>
+                <div className={`text-xs mt-2 ${dk ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
+                  Действие необратимо. Версия будет удалена из истории.
+                </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setRevisionToDelete(null)}>
+                    Отмена
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      onDeleteRevision?.(revisionToDelete.id);
+                      setRevisionToDelete(null);
+                    }}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    Удалить
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
+        </div>
+      );
+    }
+
     // Multi-selection view
     if (selectedTableIds.size > 1) {
       return (
-        <div className={`w-80 ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
+        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
           <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
             <span className={`text-xs ${textMuted} px-2`}>Bulk Actions</span>
             <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
@@ -219,7 +316,7 @@ export function TableDetailsPanel({
     }
 
     return (
-      <div className={`w-80 ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
+      <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
         <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
           <span className={`text-xs ${textMuted} px-2`}>Properties</span>
           <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
@@ -294,7 +391,7 @@ export function TableDetailsPanel({
   };
 
   return (
-    <div className={`w-80 ${panelBg} backdrop-blur-sm flex flex-col h-full overflow-hidden rounded-l-lg ${textPrimary}`}>
+    <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full overflow-hidden rounded-l-lg ${textPrimary}`}>
       {/* Header */}
       <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
         <span className={`text-xs ${textMuted} px-2`}>Properties</span>
@@ -536,8 +633,8 @@ export function TableDetailsPanel({
                               Comment <MessageSquare className="size-3" />
                             </label>
                             <textarea
-                              value={fieldComments[field.id] || ''}
-                              onChange={(e) => setFieldComments(prev => ({ ...prev, [field.id]: e.target.value }))}
+                              value={field.comment || ''}
+                              onChange={(e) => onUpdateField(field.id, { comment: e.target.value || undefined })}
                               placeholder="Optional description for this column"
                               className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />

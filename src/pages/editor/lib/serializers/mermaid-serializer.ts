@@ -342,6 +342,7 @@ function parseMermaidType(raw: string): FieldType {
     'interval': 'interval',
     'money': 'money',
     'xml': 'xml',
+    'vector': 'vector',
     'string': 'text',
     'number': 'integer',
   };

@@ -39,6 +39,7 @@ function normalizeField(value: unknown, index: number): Field {
     id: asString(record.id, `field_${index}`),
     name: asString(record.name, `field_${index}`),
     type,
+    comment: asString(record.comment) || undefined,
     enumId: type === 'enum' ? asString(record.enumId) || undefined : undefined,
     enumName: type === 'enum' ? asString(record.enumName) || undefined : undefined,
     isPrimaryKey: asBoolean(record.isPrimaryKey),
@@ -200,10 +201,13 @@ function normalizeSettings(value: unknown): ProjectSettings {
   const enabledFieldTypes = enabledFieldTypesRaw
     .map((item) => asString(item) as FieldType)
     .filter((item): item is FieldType => ALL_FIELD_TYPES.includes(item));
+  const autoSaveIntervalSecRaw = asNumber(record.autoSaveIntervalSec, DEFAULT_PROJECT_SETTINGS.autoSaveIntervalSec);
+  const autoSaveIntervalSec = Math.max(15, Math.min(autoSaveIntervalSecRaw, 3600));
 
   return {
     lineType: lineType === 'curved' || lineType === 'orthogonal' || lineType === 'straight' ? lineType : DEFAULT_PROJECT_SETTINGS.lineType,
     enabledFieldTypes: enabledFieldTypes.length > 0 ? enabledFieldTypes : [...DEFAULT_PROJECT_SETTINGS.enabledFieldTypes],
+    autoSaveIntervalSec,
   };
 }
 

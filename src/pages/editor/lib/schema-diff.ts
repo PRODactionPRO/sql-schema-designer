@@ -176,7 +176,7 @@ const TYPE_SQL: Record<string, string> = {
   'double precision': 'DOUBLE PRECISION', 'bytea': 'BYTEA', 'inet': 'INET',
   'cidr': 'CIDR', 'macaddr': 'MACADDR', 'interval': 'INTERVAL', 'point': 'POINT',
   'line': 'LINE', 'polygon': 'POLYGON', 'circle': 'CIRCLE', 'money': 'MONEY',
-  'xml': 'XML', 'array': 'TEXT[]', 'enum': 'TEXT',
+  'xml': 'XML', 'array': 'TEXT[]', 'vector': 'VECTOR', 'enum': 'TEXT',
 };
 
 function sqlType(type: string): string {

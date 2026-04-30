@@ -281,6 +281,7 @@ function parseMermaidFieldLine(line: string, lineNum: number, enums: EnumType[])
   let isUnique = false;
   let isForeignKey = false;
   let defaultValue: string | undefined;
+  let fieldComment: string | undefined;
 
   for (let j = 2; j < tokens.length; j++) {
     const upper = tokens[j].toUpperCase();
@@ -291,15 +292,18 @@ function parseMermaidFieldLine(line: string, lineNum: number, enums: EnumType[])
 
   if (comment) {
     // Parse comma-separated comment tokens
-    const commentTokens = comment.split(',').map(s => s.trim().toUpperCase());
-    for (const tok of commentTokens) {
+    const commentTokens = comment.split(',').map(s => s.trim());
+    for (const rawTok of commentTokens) {
+      const tok = rawTok.toUpperCase();
       if (tok === 'NOT NULL') {
         isNullable = false;
       } else if (tok === 'INDEXED') {
         // Will be set on field below
+      } else if (tok.startsWith('COMMENT=')) {
+        fieldComment = rawTok.slice(8).trim();
       } else if (tok) {
-        defaultValue = comment; // If it's not a recognized keyword, treat whole as default
-        break;
+        // Treat unknown token as a default literal and continue
+        defaultValue = rawTok;
       }
     }
   }
@@ -318,6 +322,7 @@ function parseMermaidFieldLine(line: string, lineNum: number, enums: EnumType[])
     isUnique,
     isIndexed: isIndexedFlag,
     defaultValue,
+    comment: fieldComment,
   };
 
   return { field, error: null };

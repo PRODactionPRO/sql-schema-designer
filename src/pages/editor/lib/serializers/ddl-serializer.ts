@@ -256,6 +256,7 @@ function mapTypeToSQL(type: FieldType): string {
     'money': 'MONEY',
     'xml': 'XML',
     'array': 'TEXT[]',
+    'vector': 'VECTOR',
     'enum': 'TEXT',
   };
   return map[type] || type.toUpperCase();
@@ -307,6 +308,7 @@ function parseFieldType(sqlType: string): FieldType {
     'circle': 'circle',
     'money': 'money',
     'xml': 'xml',
+    'vector': 'vector',
   };
   return map[normalized] || 'text';
 }

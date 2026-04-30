@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileDown, FileUp, Save, Settings, Database, ArrowLeft, Pencil, Check, X } from 'lucide-react';
+import { FileDown, FileUp, Save, Settings, Database, ArrowLeft, Pencil, Check, X, History } from 'lucide-react';
 import { Button } from '@/shared/ui/button';
 
 interface ToolbarProps {
@@ -7,13 +7,14 @@ interface ToolbarProps {
   onImport: () => void;
   onSave: () => void;
   onSettings: () => void;
+  onVersions: () => void;
   onBack?: () => void;
   projectName?: string;
   onRename?: (name: string) => void;
   darkMode?: boolean;
 }
 
-export function Toolbar({ onExport, onImport, onSave, onSettings, onBack, projectName, onRename, darkMode }: ToolbarProps) {
+export function Toolbar({ onExport, onImport, onSave, onSettings, onVersions, onBack, projectName, onRename, darkMode }: ToolbarProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
 
@@ -57,11 +58,15 @@ export function Toolbar({ onExport, onImport, onSave, onSettings, onBack, projec
         </div>
         
         <div className="flex items-center gap-2 ml-4">
-          <Button variant="ghost" size="sm" onClick={onSettings} className={darkMode ? 'text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-[#313244]' : ''}>
-            <Settings className="size-4 mr-1" />
-            Settings
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={onSettings} className={darkMode ? 'text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-[#313244]' : ''}>
+          <Settings className="size-4 mr-1" />
+          Settings
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onVersions} className={darkMode ? 'text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-[#313244]' : ''}>
+          <History className="size-4 mr-1" />
+          История версий
+        </Button>
+      </div>
       </div>
 
       {/* Center Section */}

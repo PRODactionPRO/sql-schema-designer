@@ -8,7 +8,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
     const databaseUrl =
       process.env.DATABASE_URL ??
       configService.get<string>('database.url') ??
-      'postgresql://postgres:postgres@localhost:5433/sql_schema_designer?schema=public';
+      'postgresql://postgres:postgres@localhost:5434/sql_schema_designer?schema=public';
     super({
       datasourceUrl: databaseUrl,
     });

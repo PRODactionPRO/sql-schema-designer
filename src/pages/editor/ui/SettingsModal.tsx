@@ -7,6 +7,7 @@ import {
   Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe,
   MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign,
   Network, Hexagon, Ruler, Box, Database, Camera, ImageIcon,
+  Zap,
 } from 'lucide-react';
 
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -43,6 +44,7 @@ const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   xml: <FileCode className="size-4" />,
   array: <List className="size-4" />,
   enum: <Tag className="size-4" />,
+  vector: <Zap className="size-4" />,
 };
 
 const TYPE_CATEGORIES: { label: string; types: FieldType[] }[] = [
@@ -54,7 +56,7 @@ const TYPE_CATEGORIES: { label: string; types: FieldType[] }[] = [
   { label: 'JSON', types: ['json', 'jsonb'] },
   { label: 'Binary & Network', types: ['bytea', 'inet', 'cidr', 'macaddr'] },
   { label: 'Geometry', types: ['point', 'line', 'polygon', 'circle'] },
-  { label: 'Other', types: ['xml', 'array', 'enum'] },
+  { label: 'Other', types: ['xml', 'array', 'vector', 'enum'] },
 ];
 
 interface SettingsModalProps {
@@ -182,6 +184,13 @@ export function SettingsModal({
     }
   };
 
+  const handleAutoSaveIntervalBlur = (value: number) => {
+    const normalized = Number.isFinite(value) ? Math.max(15, Math.min(value, 3600)) : 60;
+    const updated = { ...localSettings, autoSaveIntervalSec: normalized };
+    setLocalSettings(updated);
+    onUpdateSettings(updated);
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] bg-gray-900 border-gray-700 text-white flex flex-col overflow-hidden">
@@ -259,6 +268,27 @@ export function SettingsModal({
                   className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="Project name..."
                 />
+              </div>
+
+              <div>
+                <label className="text-sm text-gray-400 mb-2 block">Autosave interval (seconds)</label>
+                <input
+                  type="number"
+                  min={15}
+                  max={3600}
+                  step={5}
+                  value={localSettings.autoSaveIntervalSec}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setLocalSettings((prev) => ({
+                      ...prev,
+                      autoSaveIntervalSec: Number.isFinite(next) ? next : prev.autoSaveIntervalSec,
+                    }));
+                  }}
+                  onBlur={(e) => handleAutoSaveIntervalBlur(Number(e.target.value))}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-500 mt-1">Range: 15-3600 sec. Used for periodic revision snapshots.</p>
               </div>
 
               {/* Description */}

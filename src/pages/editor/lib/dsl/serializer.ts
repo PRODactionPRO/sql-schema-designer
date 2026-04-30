@@ -2,7 +2,7 @@
  * DSL Serializer — converts schema objects into our custom DSL text.
  */
 
-import type { Table, Field, Relation, Domain, EnumType } from '../../model/types';
+import type { Table, Relation, Domain, EnumType } from '../../model/types';
 
 export function serializeToDSL(
   tables: Table[],
@@ -55,7 +55,8 @@ export function serializeToDSL(
         parts.push(`-> ${fk.toTableName}.${fk.toFieldName}`);
       }
 
-      lines.push(parts.join(' '));
+      const inlineComment = field.comment?.trim() ? ` // ${field.comment.trim().replace(/\n+/g, ' | ')}` : '';
+      lines.push(`${parts.join(' ')}${inlineComment}`);
     }
 
     lines.push('}');

@@ -252,11 +252,17 @@ interface FieldParseResult {
 }
 
 function parseFieldLine(line: string, lineNum: number, enums: EnumType[]): FieldParseResult {
+  const { code, comment } = splitInlineComment(line);
+  const parsedLine = code.trim();
+  if (!parsedLine) {
+    return { field: null, fk: null, error: { line: lineNum, message: `Field needs at least name and type: "${line}"` } };
+  }
+
   // Tokenise — respect quoted default values
   const tokens: string[] = [];
   let current = '';
   let inQuote = false;
-  for (const ch of line) {
+  for (const ch of parsedLine) {
     if (ch === '"' || ch === "'") {
       inQuote = !inQuote;
       current += ch;
@@ -347,7 +353,27 @@ function parseFieldLine(line: string, lineNum: number, enums: EnumType[]): Field
     isUnique,
     isIndexed,
     defaultValue,
+    comment: comment || undefined,
   };
 
   return { field, fk, error: null };
+}
+
+function splitInlineComment(line: string): { code: string; comment: string } {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length - 1; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    if (ch === '"' && !inSingle) inDouble = !inDouble;
+    if (!inSingle && !inDouble && ch === '/' && next === '/') {
+      return {
+        code: line.slice(0, i),
+        comment: line.slice(i + 2).trim(),
+      };
+    }
+  }
+
+  return { code: line, comment: '' };
 }
