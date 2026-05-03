@@ -4,13 +4,13 @@ import type { Schema, Table, Field, Relation, FieldType } from '../../model/type
 /**
  * Supabase RLS Policies Serializer
  *
- * Export: генерирует полный SQL с helper-функциями, включением RLS и политиками
- *         на основе визуальной схемы (таблицы, поля, FK-связи).
+ * Export: generates full SQL with helper functions, RLS enabling, and policies
+ *         based on the visual schema (tables, columns, FK relations).
  *
- * Import: парсит Supabase RLS SQL и восстанавливает:
- *   - Таблицы из `alter table ... enable row level security`
- *   - Колонки из тел политик и helper-функций
- *   - FK-связи из helper-функций, policy bodies и column naming conventions
+ * Import: parses Supabase RLS SQL and reconstructs:
+ *   - Tables from `alter table ... enable row level security`
+ *   - Columns from policy bodies and helper functions
+ *   - FK relations from helper functions, policy bodies, and column naming conventions
  */
 export const supabaseRlsSerializer: SchemaSerializer = {
   id: 'supabase-rls',

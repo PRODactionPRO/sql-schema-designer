@@ -305,7 +305,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   // ── Save handler (defined before keyboard shortcuts) ──
   const handleSave = useCallback(async () => {
     if (isRevisionPreview) {
-      toast.info('Сначала выйдите из режима предпросмотра версии');
+      toast.info('Exit revision preview mode first');
       return;
     }
     if (projectId) {
@@ -381,7 +381,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     setPreviewRevisionNumber(revision.revision);
     setIsRevisionPreview(true);
     applyRevisionSchema(revision);
-    toast.success(`Предпросмотр ревизии r${revision.revision}`);
+    toast.success(`Revision r${revision.revision} preview enabled`);
   }, [applyRevisionSchema, revisionsQuery.data, tables, relations, domains, enums, settings]);
 
   const handleCancelRevisionPreview = useCallback(() => {
@@ -397,7 +397,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     setIsRevisionPreview(false);
     setPreviewRevisionNumber(null);
     setSelectedRevisionId(null);
-    toast.success('Возврат к текущему рабочему состоянию');
+    toast.success('Returned to current working state');
   }, []);
 
   const handleApplyRevisionPreview = useCallback(async () => {
@@ -409,7 +409,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     setIsRevisionPreview(false);
     setPreviewRevisionNumber(null);
     setSelectedRevisionId(null);
-    toast.success(`Ревизия r${previewRevisionNumber} применена как текущая`);
+    toast.success(`Revision r${previewRevisionNumber} was applied as current`);
   }, [persistToStorage, previewRevisionNumber, projectId, revisionsQuery]);
 
   const handleDeleteRevision = useCallback(async (revisionId: string) => {
@@ -419,7 +419,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       setSelectedRevisionId(null);
     }
     await revisionsQuery.refetch();
-    toast.success('Версия удалена');
+    toast.success('Version deleted');
   }, [projectId, revisionsQuery, selectedRevisionId]);
 
   // ── Keyboard shortcuts ──
@@ -864,13 +864,13 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             <div className="pointer-events-auto inline-flex items-center gap-3 px-4 py-3 rounded-xl border border-amber-300 bg-amber-50 shadow-md relative left-1/2 -translate-x-1/2 bottom-4">
               <AlertTriangle className="size-4 text-amber-700" />
               <span className="text-sm text-amber-900">
-                Предпросмотр ревизии {previewRevisionNumber ? `r${previewRevisionNumber}` : ''}. Редактирование отключено.
+                Revision preview {previewRevisionNumber ? `r${previewRevisionNumber}` : ''}. Editing is disabled.
               </span>
               <Button size="sm" variant="outline" onClick={() => { void handleCancelRevisionPreview(); }}>
-                Вернуться к текущей
+                Return to current
               </Button>
               <Button size="sm" onClick={() => { void handleApplyRevisionPreview(); }}>
-                Применить
+                Apply
               </Button>
             </div>
           </div>

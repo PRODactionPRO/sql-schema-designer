@@ -19,3 +19,9 @@ export function login(payload: { email: string; password: string }) {
     body: JSON.stringify(payload),
   }, { skipAuth: true });
 }
+
+export function loginDemo() {
+  return apiRequest<AuthResponse>('/auth/demo', {
+    method: 'POST',
+  }, { skipAuth: true });
+}

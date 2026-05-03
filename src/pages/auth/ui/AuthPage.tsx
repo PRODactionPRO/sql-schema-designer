@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Database, Lock, Mail, User } from 'lucide-react';
 import { toast } from 'sonner';
-import { login, register } from '@/shared/api/auth';
+import { login, loginDemo, register } from '@/shared/api/auth';
 import { useAuthStore } from '@/shared/auth/store';
 
 export function AuthPage() {
@@ -46,6 +46,18 @@ export function AuthPage() {
     event.preventDefault();
     authMutation.mutate();
   };
+
+  const demoMutation = useMutation({
+    mutationFn: loginDemo,
+    onSuccess: (data) => {
+      setSession({ token: data.accessToken, user: data.user });
+      toast.success('Demo session started');
+      navigate('/', { replace: true });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Demo login failed');
+    },
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -116,7 +128,7 @@ export function AuthPage() {
 
           <button
             type="submit"
-            disabled={authMutation.isPending}
+            disabled={authMutation.isPending || demoMutation.isPending}
             className="w-full h-10 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
           >
             {authMutation.isPending ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
@@ -124,8 +136,18 @@ export function AuthPage() {
 
           <button
             type="button"
+            onClick={() => demoMutation.mutate()}
+            disabled={authMutation.isPending || demoMutation.isPending}
+            className="w-full h-10 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {demoMutation.isPending ? 'Starting demo...' : 'Live Demo Access'}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-            className="w-full h-10 rounded-lg border border-gray-300 text-gray-700 text-sm hover:bg-gray-50"
+            disabled={authMutation.isPending || demoMutation.isPending}
+            className="w-full h-10 rounded-lg border border-gray-300 text-gray-700 text-sm hover:bg-gray-50 disabled:opacity-60"
           >
             {mode === 'login' ? 'Need account? Register' : 'Have account? Sign in'}
           </button>
