@@ -50,3 +50,18 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 - API: `GET /api/health`
 - Containers: `docker compose -f docker-compose.prod.yml ps`
 - Runtime usage: `docker stats --no-stream`
+
+## GitHub Actions auto-deploy
+`Deploy Production` workflow is configured to run automatically after successful `CI` on `main`.
+
+Required repository secrets:
+- `DEPLOY_HOST` (example: `212.118.55.241`)
+- `DEPLOY_USER` (example: `root`)
+- `DEPLOY_PATH` (example: `/opt/sql-schema-designer`)
+- `DEPLOY_SSH_PRIVATE_KEY` (private key content for server access)
+- `POSTGRES_PASSWORD`
+- `JWT_SECRET`
+- `CORS_ORIGINS` (example: `http://212.118.55.241`)
+- `DEMO_USER_EMAIL`
+- `DEMO_USER_NAME`
+- `DEMO_USER_PASSWORD`
