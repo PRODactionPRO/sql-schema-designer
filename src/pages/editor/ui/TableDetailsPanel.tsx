@@ -181,16 +181,16 @@ export function TableDetailsPanel({
           <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
             <span className={`text-xs ${textMuted} px-2 flex items-center gap-1.5`}>
               <History className="size-3.5" />
-              История версий
+              Version history
             </span>
             <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
               <PanelRightClose className="size-3.5" />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Загрузка истории...</div>}
+            {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Loading history...</div>}
             {!isRevisionsLoading && revisions.length === 0 && (
-              <div className={`text-sm ${textSecondary} px-2 py-3`}>История версий пока пуста.</div>
+              <div className={`text-sm ${textSecondary} px-2 py-3`}>Version history is empty.</div>
             )}
             {!isRevisionsLoading && revisions.map((revision) => {
               const isActive = selectedRevisionId === revision.id;
@@ -208,7 +208,7 @@ export function TableDetailsPanel({
                       <span className="text-sm font-medium">r{revision.revision}</span>
                       <span className={`text-[11px] ${textSecondary}`}>{new Date(revision.createdAt).toLocaleString()}</span>
                     </div>
-                    <div className={`text-xs mt-1 ${textSecondary}`}>{revision.comment || 'Без комментария'}</div>
+                    <div className={`text-xs mt-1 ${textSecondary}`}>{revision.comment || 'No comment'}</div>
                   </button>
                   <button
                     type="button"
@@ -221,7 +221,7 @@ export function TableDetailsPanel({
                         ? 'border-red-500/50 text-red-300 bg-red-500/10 hover:bg-red-500/20'
                         : 'border-red-300 text-red-600 bg-white hover:bg-red-50'
                     }`}
-                    title="Удалить версию"
+                    title="Delete version"
                   >
                     <Trash2 className="size-3.5" />
                   </button>
@@ -232,13 +232,13 @@ export function TableDetailsPanel({
           {revisionToDelete && createPortal(
             <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45">
               <div className={`w-[340px] rounded-xl border p-4 shadow-xl ${dk ? 'bg-[#1e1e2e] border-[#45475a]' : 'bg-white border-gray-200'}`}>
-                <div className={`text-sm font-semibold ${dk ? 'text-[#cdd6f4]' : 'text-gray-900'}`}>Удалить версию r{revisionToDelete.revision}?</div>
+                <div className={`text-sm font-semibold ${dk ? 'text-[#cdd6f4]' : 'text-gray-900'}`}>Delete version r{revisionToDelete.revision}?</div>
                 <div className={`text-xs mt-2 ${dk ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
-                  Действие необратимо. Версия будет удалена из истории.
+                  This action cannot be undone. The version will be removed from history.
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setRevisionToDelete(null)}>
-                    Отмена
+                    Cancel
                   </Button>
                   <Button
                     size="sm"
@@ -248,7 +248,7 @@ export function TableDetailsPanel({
                     }}
                     className="bg-red-600 hover:bg-red-700 text-white"
                   >
-                    Удалить
+                    Delete
                   </Button>
                 </div>
               </div>

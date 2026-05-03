@@ -64,7 +64,7 @@ export function Toolbar({ onExport, onImport, onSave, onSettings, onVersions, on
         </Button>
         <Button variant="ghost" size="sm" onClick={onVersions} className={darkMode ? 'text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-[#313244]' : ''}>
           <History className="size-4 mr-1" />
-          История версий
+          Version history
         </Button>
       </div>
       </div>

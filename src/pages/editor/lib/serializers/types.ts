@@ -1,26 +1,26 @@
 import type { Schema } from '../../model/types';
 
 export interface SchemaSerializer {
-  /** Уникальный идентификатор формата */
+  /** Unique format identifier */
   id: string;
-  /** Человекочитаемое название */
+  /** Human-readable name */
   name: string;
-  /** Описание формата */
+  /** Format description */
   description: string;
-  /** Расширение файла */
+  /** File extension */
   fileExtension: string;
-  /** MIME тип */
+  /** MIME type */
   mimeType: string;
 
-  /** Сериализация схемы в строку */
+  /** Serialize schema to string */
   serialize(schema: Schema): string;
 
-  /** Десериализация строки в схему */
+  /** Deserialize string into schema */
   deserialize(content: string): Schema;
 
-  /** Поддерживает ли формат импорт */
+  /** Whether format supports import */
   canImport: boolean;
 
-  /** Поддерживает ли формат экспорт */
+  /** Whether format supports export */
   canExport: boolean;
 }
