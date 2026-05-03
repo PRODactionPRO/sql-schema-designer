@@ -33,7 +33,7 @@ jobs:
             | tr -d '\r' \
             > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keygen -l -f ~/.ssh/id_ed25519 >/dev/null
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
 
       - name: Add server to known_hosts
         shell: bash
