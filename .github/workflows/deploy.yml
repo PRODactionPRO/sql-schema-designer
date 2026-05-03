@@ -28,8 +28,12 @@ jobs:
         run: |
           set -euo pipefail
           install -m 700 -d ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" \
+            | sed 's/\\n/\n/g' \
+            | tr -d '\r' \
+            > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -l -f ~/.ssh/id_ed25519 >/dev/null
 
       - name: Add server to known_hosts
         shell: bash
