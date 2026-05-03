@@ -80,4 +80,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "curl -fsS http://127.0.0.1:3200/api/health"
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "
+            for i in \$(seq 1 24); do
+              if curl -fsS http://127.0.0.1:3200/api/health >/dev/null; then
+                echo 'Health check passed'
+                exit 0
+              fi
+              echo \"Health check retry \$i/24...\"
+              sleep 5
+            done
+            echo 'Health check failed after retries'
+            exit 1
+          "
