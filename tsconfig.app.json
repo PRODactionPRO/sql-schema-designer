@@ -18,6 +18,5 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src"],
-  "exclude": ["src/imports/pasted_text"]
+  "include": ["src"]
 }
