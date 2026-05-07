@@ -78,6 +78,8 @@ export interface EnumType {
   name: string;
   values: string[];
   description?: string;
+  position?: { x: number; y: number };
+  domainId?: string;
 }
 
 export interface Table {

@@ -3,7 +3,7 @@ import type { Table, Relation, Field, FieldType, RelationType, LineType, TypeCom
 import { getTypeCompatibility } from '../model/types';
 import { TableNode } from './TableNode';
 import type { DragFieldInfo } from './TableNode';
-import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash } from 'lucide-react';
+import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
 
 interface CanvasProps {
   tables: Table[];
@@ -41,6 +41,12 @@ interface CanvasProps {
   onOpenInCodeEditor?: (tableId: string, fieldId?: string) => void;
   highlightRelations?: boolean;
   onPushHistory?: () => void;
+  isEnumTableId?: (id: string) => boolean;
+  onAddEnumTable?: (position?: { x: number; y: number }) => void;
+  onReorderEnumValue?: (enumTableId: string, fromIndex: number, toIndex: number) => void;
+  onConvertTableToEnum?: (tableId: string) => void;
+  onAddFieldToTable?: (tableId: string) => void;
+  onValidateTable?: (tableId: string) => void;
 }
 
 const MIN_ZOOM = 0.2;
@@ -83,6 +89,12 @@ export function Canvas({
   onUpdateField, onDeleteField, onAssignDomain, onOpenInCodeEditor,
   highlightRelations,
   onPushHistory,
+  isEnumTableId,
+  onAddEnumTable,
+  onReorderEnumValue,
+  onConvertTableToEnum,
+  onAddFieldToTable,
+  onValidateTable,
 }: CanvasProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -99,7 +111,9 @@ export function Canvas({
   dragStateRef.current = dragState;
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  const [convertConfirmTableId, setConvertConfirmTableId] = useState<string | null>(null);
+  const [showDomainSubmenu, setShowDomainSubmenu] = useState(false);
 
   // Group drag state - use state for proper re-render triggers
   const [groupDragging, setGroupDragging] = useState(false);
@@ -199,6 +213,10 @@ export function Canvas({
       // Use ref to get the LATEST dragState (fixes timing issue)
       const ds = dragStateRef.current;
       if (ds?.targetTableId && onCreateRelation) {
+        if (isEnumTableId?.(ds.source.tableId)) {
+          setDragState(null);
+          return;
+        }
         onCreateRelation(ds.source.tableId, ds.source.fieldId, ds.targetTableId, ds.targetFieldId);
       }
       setDragState(null);
@@ -206,7 +224,7 @@ export function Canvas({
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
-  }, [dragState, onCreateRelation]);
+  }, [dragState, isEnumTableId, onCreateRelation]);
 
   // Rubber-band selection
   useEffect(() => {
@@ -252,14 +270,19 @@ export function Canvas({
   // Delete key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedTableIds.size > 0) {
+      if (e.key === 'Delete') {
         e.preventDefault();
-        setConfirmDelete(true);
+        if (selectedTableIds.size > 0) {
+          setPendingDeleteIds(Array.from(selectedTableIds));
+        } else if (selectedTableId) {
+          setPendingDeleteIds([selectedTableId]);
+        }
       }
       if (e.key === 'Escape') {
         onClearMultiSelection();
         setContextMenu(null);
-        setConfirmDelete(false);
+        setPendingDeleteIds(null);
+        setConvertConfirmTableId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -284,6 +307,7 @@ export function Canvas({
     const target = e.target as HTMLElement;
     if (target.closest('[data-table-id]')) return;
     setContextMenu(null);
+    setShowDomainSubmenu(false);
     if (!e.shiftKey) onClearMultiSelection();
     setSelectionRect({ startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY });
   };
@@ -298,6 +322,13 @@ export function Canvas({
     const worldY = (e.clientY - rect.top - pan.y) / zoom;
 
     const target = e.target as HTMLElement;
+    const isInCurrentSelection = (tableId: string) =>
+      selectedTableId === tableId || selectedTableIds.has(tableId);
+    const focusTableForContextMenu = (tableId: string) => {
+      if (isInCurrentSelection(tableId)) return;
+      onClearMultiSelection();
+      onTableSelect(tableId);
+    };
 
     // Check if right-clicked on a field
     const fieldEl = target.closest('[data-field-id]') as HTMLElement | null;
@@ -312,6 +343,7 @@ export function Canvas({
         setContextMenu({ x: e.clientX, y: e.clientY, type: 'multi-table' });
         return;
       }
+      focusTableForContextMenu(tableId);
 
       // Field context menu
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'field', tableId, fieldId });
@@ -326,6 +358,7 @@ export function Canvas({
         setContextMenu({ x: e.clientX, y: e.clientY, type: 'multi-table' });
         return;
       }
+      focusTableForContextMenu(tableId);
 
       // Single table context menu
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'table', tableId });
@@ -337,8 +370,9 @@ export function Canvas({
   };
 
   const handleConfirmDelete = () => {
-    onDeleteTables(Array.from(selectedTableIds));
-    setConfirmDelete(false);
+    if (!pendingDeleteIds || pendingDeleteIds.length === 0) return;
+    onDeleteTables(pendingDeleteIds);
+    setPendingDeleteIds(null);
     setContextMenu(null);
   };
 
@@ -346,13 +380,16 @@ export function Canvas({
     const table = tables.find(t => t.id === tableId);
     const otherTable = tables.find(t => t.id === otherTableId);
     if (!table || !otherTable) return null;
+    const isHeaderAnchor = fieldId === '__enum_header__';
     const fi = table.fields.findIndex(f => f.id === fieldId);
-    if (fi === -1) return null;
+    if (!isHeaderAnchor && fi === -1) return null;
     // Use drag override position if this table is being dragged
     const override = dragOverrideRef.current;
     const tPos = (override && override.tableId === tableId) ? override.pos : table.position;
     const oPos = (override && override.tableId === otherTableId) ? override.pos : otherTable.position;
-    const cy = tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
+    const cy = isHeaderAnchor
+      ? tPos.y + HEADER_HEIGHT / 2
+      : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
     const tcx = tPos.x + TABLE_WIDTH / 2;
     const ocx = oPos.x + TABLE_WIDTH / 2;
     return { x: ocx > tcx ? tPos.x + TABLE_WIDTH : tPos.x, y: cy };
@@ -490,14 +527,11 @@ export function Canvas({
   const handleTableNodeSelect = useCallback((tableId: string, e?: React.MouseEvent) => {
     if (e && (e.ctrlKey || e.metaKey || e.shiftKey)) {
       onToggleTableSelection(tableId, true);
-    } else if (selectedTableIds.has(tableId) && selectedTableIds.size > 1) {
-      // Don't deselect multi-selection on single click
-      return;
     } else {
       onClearMultiSelection();
       onTableSelect(tableId);
     }
-  }, [onTableSelect, onToggleTableSelection, onClearMultiSelection, selectedTableIds]);
+  }, [onTableSelect, onToggleTableSelection, onClearMultiSelection]);
 
   const handleGroupDragStart = useCallback((tableId: string, e: React.MouseEvent) => {
     // Allow group drag if this table is part of multi-selection
@@ -703,6 +737,14 @@ export function Canvas({
     onAddTable?.(pos);
   };
 
+  const handleCtxAddEnumTable = () => {
+    const pos = contextMenu?.worldX != null && contextMenu?.worldY != null
+      ? { x: contextMenu.worldX, y: contextMenu.worldY }
+      : undefined;
+    setContextMenu(null);
+    onAddEnumTable?.(pos);
+  };
+
   const handleCtxAutoLayout = () => {
     setContextMenu(null);
     onAutoLayout();
@@ -715,17 +757,38 @@ export function Canvas({
 
   const handleCtxDeleteTable = (tableId: string) => {
     setContextMenu(null);
+    setShowDomainSubmenu(false);
     onTableDelete(tableId);
   };
 
   const handleCtxDeleteMulti = () => {
     setContextMenu(null);
-    setConfirmDelete(true);
+    setShowDomainSubmenu(false);
+    setPendingDeleteIds(Array.from(selectedTableIds));
   };
 
   const handleCtxCodeMode = (tableId: string, fieldId?: string) => {
     setContextMenu(null);
+    setShowDomainSubmenu(false);
     onOpenInCodeEditor?.(tableId, fieldId);
+  };
+
+  const handleCtxAddField = (tableId: string) => {
+    setContextMenu(null);
+    setShowDomainSubmenu(false);
+    onAddFieldToTable?.(tableId);
+  };
+
+  const handleCtxValidate = (tableId: string) => {
+    setContextMenu(null);
+    setShowDomainSubmenu(false);
+    onValidateTable?.(tableId);
+  };
+
+  const handleCtxConvertToEnum = (tableId: string) => {
+    setContextMenu(null);
+    setShowDomainSubmenu(false);
+    setConvertConfirmTableId(tableId);
   };
 
   const handleCtxSetPK = (tableId: string, fieldId: string) => {
@@ -739,14 +802,41 @@ export function Canvas({
 
   const handleCtxDeleteField = (tableId: string, fieldId: string) => {
     setContextMenu(null);
+    setShowDomainSubmenu(false);
     onDeleteField?.(tableId, fieldId);
+  };
+
+  const handleCtxRequestDeleteTable = (tableId: string) => {
+    setContextMenu(null);
+    setShowDomainSubmenu(false);
+    setPendingDeleteIds([tableId]);
+  };
+
+  const getSafeMenuPosition = (x: number, y: number, menuHeight: number) => {
+    const menuW = 240;
+    const pad = 8;
+    const bottomSafe = 90;
+    let left = x;
+    let top = y;
+    if (left + menuW > window.innerWidth - pad) left = window.innerWidth - menuW - pad;
+    if (left < pad) left = pad;
+    if (top + menuHeight > window.innerHeight - bottomSafe) top = Math.max(pad, y - menuHeight);
+    if (top < pad) top = pad;
+    return { left, top };
   };
 
   // Render context menu content based on type
   const renderContextMenuContent = () => {
     if (!contextMenu) return null;
+    const menuHeightByType: Record<ContextMenuState['type'], number> = {
+      canvas: 190,
+      table: 310,
+      'multi-table': 260,
+      field: 180,
+    };
+    const safePos = getSafeMenuPosition(contextMenu.x, contextMenu.y, menuHeightByType[contextMenu.type] || 280);
     // Always dark/inverted style for context menus
-    const menuCls = 'fixed z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1.5 min-w-[200px]';
+    const menuCls = 'fixed z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1.5 min-w-[220px] select-none';
     const itemCls = 'w-full px-3 py-2 text-left text-sm flex items-center gap-2 text-gray-200 hover:bg-gray-800 hover:text-white transition-colors';
     const shortcutCls = 'ml-auto text-xs text-gray-500';
     const dangerCls = 'w-full px-3 py-2 text-left text-sm flex items-center gap-2 text-red-400 hover:bg-gray-800 hover:text-red-300 transition-colors';
@@ -756,9 +846,12 @@ export function Canvas({
     switch (contextMenu.type) {
       case 'canvas':
         return (
-          <div className={menuCls} style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={e => e.stopPropagation()}>
+          <div className={menuCls} style={safePos} onMouseDown={e => e.stopPropagation()}>
             <button className={itemCls} onClick={handleCtxAddTable}>
               <Plus className="size-3.5" /> Create table
+            </button>
+            <button className={itemCls} onClick={handleCtxAddEnumTable}>
+              <Tag className="size-3.5" /> Create ENAM table
             </button>
             <div className={separatorCls} />
             <button className={itemCls} onClick={handleCtxAutoLayout}>
@@ -772,25 +865,46 @@ export function Canvas({
 
       case 'table': {
         const tableId = contextMenu.tableId!;
+        const isEnumTable = !!isEnumTableId?.(tableId);
         return (
-          <div className={menuCls} style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={e => e.stopPropagation()}>
-            {domains.length > 0 && (
-              <>
-                <div className={labelCls}>Assign to domain</div>
-                {domains.map(d => (
-                  <button key={d.id} className={itemCls} onClick={() => { setContextMenu(null); onAssignDomain?.(d.id, [tableId]); }}>
-                    <span className="size-3 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
-                    {d.name}
-                  </button>
-                ))}
-                <div className={separatorCls} />
-              </>
+          <div className={menuCls} style={safePos} onMouseDown={e => e.stopPropagation()}>
+            {!isEnumTable && (
+              <button className={itemCls} onClick={() => handleCtxConvertToEnum(tableId)}>
+                <Tag className="size-3.5" /> Convert to enum
+              </button>
             )}
+            {domains.length > 0 && (
+              <div
+                className="relative"
+                onMouseEnter={() => setShowDomainSubmenu(true)}
+                onMouseLeave={() => setShowDomainSubmenu(false)}
+              >
+                <button className={itemCls}>
+                  <FolderPlus className="size-3.5" /> Add to domain
+                </button>
+                {showDomainSubmenu && (
+                  <div className="absolute left-full top-0 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1.5 min-w-[220px]">
+                    {domains.map(d => (
+                      <button key={d.id} className={itemCls} onClick={() => { setContextMenu(null); setShowDomainSubmenu(false); onAssignDomain?.(d.id, [tableId]); }}>
+                        <span className="size-3 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                        {d.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <button className={itemCls} onClick={() => handleCtxAddField(tableId)}>
+              <Plus className="size-3.5" /> Add field
+            </button>
+            <button className={itemCls} onClick={() => handleCtxValidate(tableId)}>
+              <Pencil className="size-3.5" /> Check for errors
+            </button>
             <button className={itemCls} onClick={() => handleCtxCodeMode(tableId)}>
               <Code className="size-3.5" /> Open in code editor
             </button>
             <div className={separatorCls} />
-            <button className={dangerCls} onClick={() => handleCtxDeleteTable(tableId)}>
+            <button className={dangerCls} onClick={() => handleCtxRequestDeleteTable(tableId)}>
               <Trash className="size-3.5" /> Delete table <span className={shortcutCls}>Del</span>
             </button>
           </div>
@@ -799,7 +913,7 @@ export function Canvas({
 
       case 'multi-table':
         return (
-          <div className={menuCls} style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={e => e.stopPropagation()}>
+          <div className={menuCls} style={safePos} onMouseDown={e => e.stopPropagation()}>
           {domains.length > 0 && (
             <>
               <div className={labelCls}>Assign {selectedTableIds.size} tables to domain</div>
@@ -825,7 +939,7 @@ export function Canvas({
         const field = table?.fields.find(f => f.id === fieldId);
         if (!field) return null;
         return (
-          <div className={menuCls} style={{ left: contextMenu.x, top: contextMenu.y }} onMouseDown={e => e.stopPropagation()}>
+          <div className={menuCls} style={safePos} onMouseDown={e => e.stopPropagation()}>
             <button className={itemCls} onClick={() => handleCtxSetPK(tableId, fieldId)}>
               <Key className="size-3.5" /> {field.isPrimaryKey ? 'Remove PK' : 'Set as PK'}
             </button>
@@ -905,9 +1019,25 @@ export function Canvas({
                 dragSourceFieldId={dragState?.source.fieldId}
                 onDoubleClick={onTableDoubleClick ? () => onTableDoubleClick(table.id) : undefined}
                 onUpdateField={onUpdateField ? (fieldId, updates) => onUpdateField(table.id, fieldId, updates) : undefined}
+                onDeleteField={onDeleteField ? (fieldId) => onDeleteField(table.id, fieldId) : undefined}
                 onDragEnd={onPushHistory}
                 onDragMove={handleTableDragMove}
                 onDragStop={handleTableDragStop}
+                isEnumTable={!!isEnumTableId?.(table.id)}
+                onReorderEnumValue={onReorderEnumValue ? ((fromIndex, toIndex) => onReorderEnumValue(table.id, fromIndex, toIndex)) : undefined}
+                onOpenContextMenu={(tableId, anchor) => {
+                  setShowDomainSubmenu(false);
+                  const isInCurrentSelection = selectedTableId === tableId || selectedTableIds.has(tableId);
+                  if (!isInCurrentSelection) {
+                    onClearMultiSelection();
+                    onTableSelect(tableId);
+                  }
+                  if (selectedTableIds.size > 1 && selectedTableIds.has(tableId)) {
+                    setContextMenu({ x: anchor.x, y: anchor.y, type: 'multi-table' });
+                    return;
+                  }
+                  setContextMenu({ x: anchor.x, y: anchor.y, type: 'table', tableId });
+                }}
               />
             );
           })}
@@ -923,26 +1053,46 @@ export function Canvas({
       {dragTooltip}
 
       {/* Context menu */}
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} onMouseDown={e => e.stopPropagation()} />
-          {renderContextMenuContent()}
-        </>
-      )}
+      {contextMenu && renderContextMenuContent()}
 
       {/* Delete confirmation modal */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setConfirmDelete(false)} onMouseDown={e => e.stopPropagation()}>
+      {pendingDeleteIds && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setPendingDeleteIds(null)} onMouseDown={e => e.stopPropagation()}>
           <div className={`rounded-xl shadow-2xl p-6 max-w-sm mx-4 ${
             darkMode ? 'bg-[#1e1e2e] text-[#cdd6f4]' : 'bg-white'
           }`} onClick={e => e.stopPropagation()}>
             <h3 className={`mb-2 ${darkMode ? 'text-[#cdd6f4]' : 'text-gray-900'}`} style={{ fontWeight: 600 }}>Confirm Deletion</h3>
             <p className={`text-sm mb-4 ${darkMode ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
-              Are you sure you want to delete {selectedTableIds.size} table{selectedTableIds.size > 1 ? 's' : ''}? This action cannot be undone.
+              Are you sure you want to delete {pendingDeleteIds.length} table{pendingDeleteIds.length > 1 ? 's' : ''}? This action cannot be undone.
             </p>
             <div className="flex gap-2 justify-end">
-              <button className={`px-4 py-2 text-sm rounded-lg ${darkMode ? 'text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-600 hover:bg-gray-100'}`} onClick={() => setConfirmDelete(false)}>Cancel</button>
+              <button className={`px-4 py-2 text-sm rounded-lg ${darkMode ? 'text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-600 hover:bg-gray-100'}`} onClick={() => setPendingDeleteIds(null)}>Cancel</button>
               <button className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg" onClick={handleConfirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {convertConfirmTableId && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setConvertConfirmTableId(null)} onMouseDown={e => e.stopPropagation()}>
+          <div className={`rounded-xl shadow-2xl p-6 max-w-sm mx-4 ${
+            darkMode ? 'bg-[#1e1e2e] text-[#cdd6f4]' : 'bg-white'
+          }`} onClick={e => e.stopPropagation()}>
+            <h3 className={`mb-2 ${darkMode ? 'text-[#cdd6f4]' : 'text-gray-900'}`} style={{ fontWeight: 600 }}>Confirm Conversion</h3>
+            <p className={`text-sm mb-4 ${darkMode ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
+              Convert this table to an ENUM table? Existing table links may change.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button className={`px-4 py-2 text-sm rounded-lg ${darkMode ? 'text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-600 hover:bg-gray-100'}`} onClick={() => setConvertConfirmTableId(null)}>Cancel</button>
+              <button
+                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+                onClick={() => {
+                  onConvertTableToEnum?.(convertConfirmTableId);
+                  setConvertConfirmTableId(null);
+                }}
+              >
+                Convert
+              </button>
             </div>
           </div>
         </div>
@@ -952,7 +1102,7 @@ export function Canvas({
       {selectedTableIds.size > 0 && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white rounded-lg px-4 py-1.5 text-xs shadow-lg flex items-center gap-3 z-30" onMouseDown={e => e.stopPropagation()}>
           <span>{selectedTableIds.size} table{selectedTableIds.size > 1 ? 's' : ''} selected</span>
-          <button onClick={() => setConfirmDelete(true)} className="hover:bg-blue-500 rounded p-1" title="Delete selected"><Trash2 className="size-3.5" /></button>
+          <button onClick={() => setPendingDeleteIds(Array.from(selectedTableIds))} className="hover:bg-blue-500 rounded p-1" title="Delete selected"><Trash2 className="size-3.5" /></button>
           <button onClick={onClearMultiSelection} className="hover:bg-blue-500 rounded px-2 py-0.5">Esc</button>
         </div>
       )}

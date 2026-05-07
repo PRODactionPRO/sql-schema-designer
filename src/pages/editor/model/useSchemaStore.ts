@@ -133,9 +133,11 @@ interface SchemaState {
   assignDomainToTables: (domainId: string, tableIds: string[]) => void;
 
   // Enum CRUD
-  addEnum: (name: string, values?: string[]) => EnumType;
+  addEnum: (name: string, values?: string[], position?: { x: number; y: number }) => EnumType;
   updateEnum: (id: string, updates: Partial<Omit<EnumType, 'id'>>) => void;
   deleteEnum: (id: string) => void;
+  updateEnumPosition: (id: string, position: { x: number; y: number }) => void;
+  reorderEnumValues: (id: string, fromIndex: number, toIndex: number) => void;
 
   // Multi-select
   toggleTableSelection: (id: string, additive: boolean) => void;
@@ -153,6 +155,8 @@ interface SchemaState {
   // Import/Export
   exportToFormat: (formatId: string) => string;
   importFromFormat: (formatId: string, content: string) => void;
+  exportSelectionForClipboard: (tableIds: string[], enumIds?: string[]) => string | null;
+  importSelectionFromClipboard: (content: string, offset?: { x: number; y: number }) => { insertedTableIds: string[]; insertedEnumIds: string[]; tables: number; enums: number; relations: number } | null;
 
   // Helpers
   getTableColor: (table: Table) => string;
@@ -180,6 +184,29 @@ function withHistory(
 let _idCounter = Date.now();
 function nextId(): string {
   return (++_idCounter).toString();
+}
+
+const CLIPBOARD_SCHEMA_TYPE = 'prodsql/canvas-selection';
+const CLIPBOARD_SCHEMA_VERSION = 1;
+
+interface ClipboardSelectionPayload {
+  type: typeof CLIPBOARD_SCHEMA_TYPE;
+  version: typeof CLIPBOARD_SCHEMA_VERSION;
+  tables: Table[];
+  relations: Relation[];
+  enums: EnumType[];
+}
+
+function getUniqueTableName(baseName: string, usedNames: Set<string>): string {
+  const cleanBase = baseName.trim() || 'table';
+  let candidate = cleanBase;
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${cleanBase}_${suffix}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
 }
 
 // ── Store ──
@@ -459,7 +486,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   },
 
   // ── Enum CRUD ──
-  addEnum: (name, values = []) => {
+  addEnum: (name, values = [], position) => {
     const state = get();
     const existingNames = new Set(state.enums.map(e => e.name.toLowerCase()));
     let finalName = name.trim() || 'Enum';
@@ -473,6 +500,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       id: nextId(),
       name: finalName,
       values: uniqueValues,
+      position: position || { x: 260, y: 140 },
     };
     set(withHistory(state, {
       enums: [...state.enums, nextEnum],
@@ -517,6 +545,32 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
         }),
       })),
       relations: state.relations.filter(rel => !enumFieldIds.has(rel.fromFieldId) && !enumFieldIds.has(rel.toFieldId)),
+    }));
+  },
+
+  updateEnumPosition: (id, position) => {
+    set(state => ({
+      enums: state.enums.map((e) => (e.id === id ? { ...e, position } : e)),
+    }));
+  },
+
+  reorderEnumValues: (id, fromIndex, toIndex) => {
+    const state = get();
+    const enumType = state.enums.find((e) => e.id === id);
+    if (!enumType) return;
+    if (
+      fromIndex < 0 || toIndex < 0 ||
+      fromIndex >= enumType.values.length ||
+      toIndex >= enumType.values.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    const nextValues = [...enumType.values];
+    const [moved] = nextValues.splice(fromIndex, 1);
+    nextValues.splice(toIndex, 0, moved);
+    set(withHistory(state, {
+      enums: state.enums.map((e) => (e.id === id ? { ...e, values: nextValues } : e)),
     }));
   },
 
@@ -693,6 +747,147 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       selectedRelation: null,
       selectedTableIds: new Set(),
     }));
+  },
+
+  exportSelectionForClipboard: (tableIds, enumIds = []) => {
+    const { tables, relations, enums } = get();
+    const idSet = new Set(tableIds);
+    const enumIdSet = new Set(enumIds);
+    const selectedTables = tables.filter(t => idSet.has(t.id));
+    // Auto-include enums referenced by copied table fields.
+    for (const table of selectedTables) {
+      for (const field of table.fields) {
+        if (field.type === 'enum' && field.enumId) enumIdSet.add(field.enumId);
+      }
+    }
+    const selectedEnums = enums.filter(e => enumIdSet.has(e.id));
+    if (selectedTables.length === 0 && selectedEnums.length === 0) return null;
+    const selectedRelations = relations.filter(r => idSet.has(r.fromTableId) && idSet.has(r.toTableId));
+    const payload: ClipboardSelectionPayload = {
+      type: CLIPBOARD_SCHEMA_TYPE,
+      version: CLIPBOARD_SCHEMA_VERSION,
+      tables: deepClone(selectedTables),
+      relations: deepClone(selectedRelations),
+      enums: deepClone(selectedEnums),
+    };
+    return JSON.stringify(payload);
+  },
+
+  importSelectionFromClipboard: (content, offset = { x: 64, y: 64 }) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return null;
+    }
+    const payload = parsed as Partial<ClipboardSelectionPayload>;
+    if (payload.type !== CLIPBOARD_SCHEMA_TYPE || payload.version !== CLIPBOARD_SCHEMA_VERSION) return null;
+    if (!Array.isArray(payload.tables) || !Array.isArray(payload.relations) || !Array.isArray(payload.enums)) return null;
+    if (payload.tables.length === 0 && payload.enums.length === 0) return null;
+
+    const state = get();
+    const sourceTables = deepClone(payload.tables);
+    const sourceRelations = deepClone(payload.relations);
+    const sourceEnums = deepClone(payload.enums);
+
+    const existingNames = new Set(state.tables.map(t => t.name.toLowerCase()));
+    const existingEnumNames = new Set(state.enums.map(e => e.name.toLowerCase()));
+    const tableIdMap = new Map<string, string>();
+    const tableNameMap = new Map<string, string>();
+    const fieldIdMap = new Map<string, string>();
+    const enumIdMap = new Map<string, string>();
+    const enumNameMap = new Map<string, string>();
+
+    const pastedEnums: EnumType[] = sourceEnums.map((sourceEnum) => {
+      const newEnumId = nextId();
+      enumIdMap.set(sourceEnum.id, newEnumId);
+      const uniqueEnumName = getUniqueTableName(sourceEnum.name, existingEnumNames);
+      enumNameMap.set(sourceEnum.name, uniqueEnumName);
+      return {
+        ...sourceEnum,
+        id: newEnumId,
+        name: uniqueEnumName,
+        position: sourceEnum.position
+          ? { x: sourceEnum.position.x + offset.x, y: sourceEnum.position.y + offset.y }
+          : { x: 260 + offset.x, y: 140 + offset.y },
+      };
+    });
+
+    const pastedTables: Table[] = sourceTables.map((sourceTable) => {
+      const newTableId = nextId();
+      tableIdMap.set(sourceTable.id, newTableId);
+
+      const uniqueName = getUniqueTableName(sourceTable.name, existingNames);
+      tableNameMap.set(sourceTable.name, uniqueName);
+
+      const newFields = sourceTable.fields.map((sourceField) => {
+        const newFieldId = nextId();
+        fieldIdMap.set(sourceField.id, newFieldId);
+        return { ...sourceField, id: newFieldId };
+      });
+
+      return {
+        ...sourceTable,
+        id: newTableId,
+        name: uniqueName,
+        position: {
+          x: sourceTable.position.x + offset.x,
+          y: sourceTable.position.y + offset.y,
+        },
+        fields: newFields,
+      };
+    });
+
+    for (const table of pastedTables) {
+      for (const field of table.fields) {
+        if (field.type === 'enum' && field.enumId) {
+          const remappedEnumId = enumIdMap.get(field.enumId);
+          if (remappedEnumId) {
+            field.enumId = remappedEnumId;
+            if (field.enumName) {
+              field.enumName = enumNameMap.get(field.enumName) ?? field.enumName;
+            }
+          }
+        }
+        if (!field.foreignKeyTable) continue;
+        const remappedName = tableNameMap.get(field.foreignKeyTable);
+        if (remappedName) field.foreignKeyTable = remappedName;
+      }
+    }
+
+    const pastedRelations: Relation[] = sourceRelations
+      .map((relation) => {
+        const mappedFromTableId = tableIdMap.get(relation.fromTableId);
+        const mappedToTableId = tableIdMap.get(relation.toTableId);
+        const mappedFromFieldId = fieldIdMap.get(relation.fromFieldId);
+        const mappedToFieldId = fieldIdMap.get(relation.toFieldId);
+        if (!mappedFromTableId || !mappedToTableId || !mappedFromFieldId || !mappedToFieldId) return null;
+        return {
+          ...relation,
+          id: nextId(),
+          fromTableId: mappedFromTableId,
+          toTableId: mappedToTableId,
+          fromFieldId: mappedFromFieldId,
+          toFieldId: mappedToFieldId,
+        };
+      })
+      .filter((relation): relation is Relation => relation !== null);
+
+    const insertedTableIds = pastedTables.map(t => t.id);
+    const insertedEnumIds = pastedEnums.map(e => e.id);
+    set(withHistory(state, {
+      tables: [...state.tables, ...pastedTables],
+      relations: [...state.relations, ...pastedRelations],
+      enums: [...state.enums, ...pastedEnums],
+      selectedTableId: insertedTableIds[0] ?? null,
+      selectedTableIds: new Set([
+        ...insertedTableIds,
+        ...insertedEnumIds.map(id => `enum::${id}`),
+      ]),
+      selectedRelation: null,
+    }));
+
+    return { insertedTableIds, insertedEnumIds, tables: pastedTables.length, enums: pastedEnums.length, relations: pastedRelations.length };
   },
 
   // ── Helpers ──

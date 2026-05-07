@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/shared/auth/store';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3200/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export class ApiError extends Error {
   status: number;

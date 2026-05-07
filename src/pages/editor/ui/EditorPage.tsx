@@ -40,6 +40,17 @@ import { Button } from '@/shared/ui/button';
 import { AlertTriangle, Code, PanelLeft } from 'lucide-react';
 import type { FieldType } from '../model/types';
 
+const ENUM_TABLE_PREFIX = 'enum::';
+const ENUM_HEADER_FIELD_ID = '__enum_header__';
+
+function isEnumTableId(id: string): boolean {
+  return id.startsWith(ENUM_TABLE_PREFIX);
+}
+
+function getEnumIdFromTableId(id: string): string {
+  return id.slice(ENUM_TABLE_PREFIX.length);
+}
+
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
@@ -129,6 +140,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     selectedRelation,
     setSelectedTableId,
     setSelectedRelation,
+    setSelectedTableIds,
     addTable,
     updateTablePosition,
     updateTableName,
@@ -152,11 +164,15 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     autoLayout,
     exportToFormat,
     importFromFormat,
+    exportSelectionForClipboard,
+    importSelectionFromClipboard,
     getTableColor,
     assignDomainToTables,
     addEnum,
     updateEnum,
     deleteEnum,
+    updateEnumPosition,
+    reorderEnumValues,
     reorderTables,
     undo,
     redo,
@@ -164,6 +180,43 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     pastLength,
     futureLength,
   } = useEditorStoreSelectors();
+
+  const enumCanvasTables = enums.map((enumType, index) => ({
+    id: `${ENUM_TABLE_PREFIX}${enumType.id}`,
+    name: enumType.name,
+    description: enumType.description,
+    fields: enumType.values.map((value, valueIndex) => ({
+      id: `${enumType.id}::value::${valueIndex}`,
+      name: value,
+      type: 'enum' as FieldType,
+      enumId: enumType.id,
+      enumName: enumType.name,
+      isPrimaryKey: false,
+      isNullable: false,
+      isForeignKey: false,
+    })),
+    position: enumType.position ?? { x: 260 + index * 40, y: 140 + index * 40 },
+    color: enumType.domainId
+      ? (domains.find((d) => d.id === enumType.domainId)?.color || '#0f766e')
+      : '#0f766e',
+    domainId: enumType.domainId,
+  }));
+
+  const enumCanvasRelations = tables.flatMap((table) => (
+    table.fields
+      .filter((field) => field.type === 'enum' && field.enumId)
+      .map((field) => ({
+        id: `enumrel::${table.id}::${field.id}::${field.enumId}`,
+        fromTableId: table.id,
+        fromFieldId: field.id,
+        toTableId: `${ENUM_TABLE_PREFIX}${field.enumId}`,
+        toFieldId: ENUM_HEADER_FIELD_ID,
+        type: '1:N' as const,
+      }))
+  ));
+
+  const canvasTables = [...tables, ...enumCanvasTables];
+  const canvasRelations = [...relations, ...enumCanvasRelations];
 
   // ── Local UI state ──
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -257,7 +310,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     toggleCodeMode, handleCodeChange, handleCodeSync,
     handleTableDoubleClick, handleOpenInCodeEditor,
   } = useCodeMode({
-    tables, relations, domains, enums, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, importFromFormat,
+    tables, relations, domains, enums, leftCollapsed, setLeftCollapsed, rightCollapsed, setRightCollapsed, importFromFormat, pushHistory,
   });
 
   useEffect(() => {
@@ -423,6 +476,46 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   }, [projectId, revisionsQuery, selectedRevisionId]);
 
   // ── Keyboard shortcuts ──
+  const handleCopySelection = useCallback(async () => {
+    const selectedIds = new Set<string>(selectedTableIds);
+    if (selectedTableId) selectedIds.add(selectedTableId);
+    if (selectedIds.size === 0) return;
+
+    const tableIds: string[] = [];
+    const enumIds: string[] = [];
+    for (const id of selectedIds) {
+      if (isEnumTableId(id)) enumIds.push(getEnumIdFromTableId(id));
+      else tableIds.push(id);
+    }
+
+    const payload = exportSelectionForClipboard(tableIds, enumIds);
+    if (!payload) return;
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      toast.success(`Copied ${selectedIds.size} object${selectedIds.size > 1 ? 's' : ''}`);
+    } catch {
+      toast.error('Cannot access clipboard in this browser context');
+    }
+  }, [exportSelectionForClipboard, selectedTableId, selectedTableIds]);
+
+  const handlePasteSelection = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      toast.error('Cannot read clipboard in this browser context');
+      return;
+    }
+
+    const result = importSelectionFromClipboard(text);
+    if (!result) {
+      toast.error('Clipboard does not contain copied canvas tables');
+      return;
+    }
+    toast.success(`Pasted ${result.tables} table${result.tables > 1 ? 's' : ''}, ${result.enums} enum${result.enums === 1 ? '' : 's'} and ${result.relations} relation${result.relations === 1 ? '' : 's'}`);
+  }, [importSelectionFromClipboard]);
+
   useEditorKeyboardShortcuts({
     undo, redo, codeMode, onToggleMaximize: handleToggleMaximize,
     onSave: () => { void handleSave(); },
@@ -435,12 +528,39 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     },
     onOpenValidation: () => setIsValidationOpen(true),
     onOpenDiff: () => setIsDiffOpen(true),
+    onCopy: () => { void handleCopySelection(); },
+    onPaste: () => { void handlePasteSelection(); },
   });
 
   const darkMode = codeMode;
+  const activeTableId = selectedTableId
+    ?? (selectedTableIds.size === 1 ? Array.from(selectedTableIds)[0] : null);
+
+  const selectedEnumType = activeTableId && isEnumTableId(activeTableId)
+    ? enums.find((e) => e.id === getEnumIdFromTableId(activeTableId)) || null
+    : null;
+
   const selectedTable = panelMode === 'history'
     ? null
-    : (selectedTableIds.size > 1 ? null : (tables.find(t => t.id === selectedTableId) || null));
+    : (selectedTableIds.size > 1
+      ? null
+      : (selectedEnumType
+        ? {
+            id: `${ENUM_TABLE_PREFIX}${selectedEnumType.id}`,
+            name: selectedEnumType.name,
+            description: selectedEnumType.description,
+            domainId: selectedEnumType.domainId,
+            fields: selectedEnumType.values.map((value, index) => ({
+              id: `${selectedEnumType.id}::value::${index}`,
+              name: value,
+              type: 'varchar' as FieldType,
+              isPrimaryKey: false,
+              isNullable: false,
+              isForeignKey: false,
+            })),
+            position: selectedEnumType.position ?? { x: 240, y: 140 },
+          }
+        : (tables.find(t => t.id === activeTableId) || null)));
 
   // ── Export handlers ──
   const handleExportJSON = () => { downloadFile(exportToFormat('json'), 'schema.json', 'application/json'); toast.success('Schema exported to JSON'); };
@@ -464,6 +584,21 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   };
 
   const handleCreateRelation = useCallback((fromTableId: string, fromFieldId: string, toTableId: string, toFieldId: string | null) => {
+    if (isEnumTableId(fromTableId)) return;
+    if (isEnumTableId(toTableId)) {
+      const enumId = getEnumIdFromTableId(toTableId);
+      const sourceTable = tables.find(t => t.id === fromTableId);
+      const sourceField = sourceTable?.fields.find(f => f.id === fromFieldId);
+      const enumType = enums.find(e => e.id === enumId);
+      if (!sourceField || !enumType) return;
+      updateField(fromTableId, fromFieldId, {
+        type: 'enum',
+        enumId,
+        enumName: enumType.name,
+      });
+      toast.success(`Field "${sourceField.name}" linked to ENAM "${enumType.name}"`);
+      return;
+    }
     const fromTable = tables.find(t => t.id === fromTableId);
     const toTable = tables.find(t => t.id === toTableId);
     if (!fromTable || !toTable) return;
@@ -523,19 +658,59 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       addRelation({ fromTableId: toTableId, fromFieldId: newFieldId, toTableId: fromTableId, toFieldId: fromFieldId, type: '1:N' });
       toast.success(`Created field "${newFieldName}" with FK relation`);
     }
-  }, [tables, relations, updateField, addField, addRelation]);
+  }, [tables, relations, enums, updateField, addField, addRelation]);
 
   const handleAssignDomain = useCallback((domainId: string, tableIds: string[]) => {
-    assignDomainToTables(domainId, tableIds);
-    clearMultiSelection();
+    const enumTableIds = tableIds.filter(isEnumTableId);
+    const regularTableIds = tableIds.filter((id) => !isEnumTableId(id));
+
+    if (regularTableIds.length > 0) {
+      assignDomainToTables(domainId, regularTableIds);
+    }
+
+    for (const enumTableId of enumTableIds) {
+      updateEnum(getEnumIdFromTableId(enumTableId), { domainId });
+    }
+
     const domain = domains.find(d => d.id === domainId);
-    toast.success(`Assigned ${tableIds.length} table${tableIds.length > 1 ? 's' : ''} to ${domain?.name || 'domain'}`);
-  }, [assignDomainToTables, clearMultiSelection, domains]);
+    const total = regularTableIds.length + enumTableIds.length;
+    toast.success(`Assigned ${total} table${total > 1 ? 's' : ''} to ${domain?.name || 'domain'}`);
+  }, [assignDomainToTables, domains, updateEnum]);
 
   const handleDeleteTables = useCallback((ids: string[]) => {
     deleteTables(ids);
     toast.success(`Deleted ${ids.length} table${ids.length > 1 ? 's' : ''}`);
   }, [deleteTables]);
+
+  const handleSelectEntitiesInRect = useCallback((rect: { x: number; y: number; w: number; h: number }) => {
+    const selected = new Set<string>();
+    for (const table of canvasTables) {
+      const tx = table.position.x;
+      const ty = table.position.y;
+      const tw = 280;
+      const th = 40 + table.fields.length * 36;
+      if (tx < rect.x + rect.w && tx + tw > rect.x && ty < rect.y + rect.h && ty + th > rect.y) {
+        selected.add(table.id);
+      }
+    }
+    setSelectedTableIds(selected);
+  }, [canvasTables, setSelectedTableIds]);
+
+  const handleMoveSelectedEntities = useCallback((dx: number, dy: number) => {
+    for (const id of selectedTableIds) {
+      if (isEnumTableId(id)) {
+        const enumId = getEnumIdFromTableId(id);
+        const enumType = enums.find((e) => e.id === enumId);
+        if (!enumType) continue;
+        const pos = enumType.position ?? { x: 260, y: 140 };
+        updateEnumPosition(enumId, { x: pos.x + dx, y: pos.y + dy });
+        continue;
+      }
+      const table = tables.find((t) => t.id === id);
+      if (!table) continue;
+      updateTablePosition(id, { x: table.position.x + dx, y: table.position.y + dy });
+    }
+  }, [selectedTableIds, enums, tables, updateEnumPosition, updateTablePosition]);
 
   // ── FK-aware field type change ──
   const handleFieldTypeChange = useCallback((tableId: string, fieldId: string, newType: FieldType, enumInfo?: { enumId?: string; enumName?: string }) => {
@@ -553,11 +728,15 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
 
     if (affected.length === 0) {
       // No FK references — just change
-      const selectedEnum = enums[0];
+      const isCanvasTypeSwitchToEnum = newType === 'enum' && !enumInfo;
       updateField(tableId, fieldId, {
         type: newType,
-        enumId: newType === 'enum' ? enumInfo?.enumId || field?.enumId || selectedEnum?.id : undefined,
-        enumName: newType === 'enum' ? enumInfo?.enumName || field?.enumName || selectedEnum?.name : undefined,
+        enumId: newType === 'enum'
+          ? (isCanvasTypeSwitchToEnum ? field?.enumId : (enumInfo?.enumId || field?.enumId))
+          : undefined,
+        enumName: newType === 'enum'
+          ? (isCanvasTypeSwitchToEnum ? field?.enumName : (enumInfo?.enumName || field?.enumName))
+          : undefined,
       });
       return;
     }
@@ -625,8 +804,8 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         {/* Canvas */}
         <div ref={canvasContainerRef} className="absolute inset-0 z-0">
           <Canvas
-            tables={tables}
-            relations={relations}
+            tables={canvasTables}
+            relations={canvasRelations}
             domains={domains}
             selectedTableId={snapshotCaptureMode ? null : selectedTableId}
             selectedTableIds={snapshotCaptureMode ? new Set() : selectedTableIds}
@@ -635,21 +814,44 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               setPanelMode('properties');
               setSelectedTableId(tableId);
             }}
-            onTablePositionChange={isRevisionPreview ? (() => {}) : updateTablePosition}
-            onTableDelete={isRevisionPreview ? (() => {}) : deleteTable}
+            onTablePositionChange={isRevisionPreview ? (() => {}) : ((tableId, position) => {
+              if (isEnumTableId(tableId)) {
+                updateEnumPosition(getEnumIdFromTableId(tableId), position);
+                return;
+              }
+              updateTablePosition(tableId, position);
+            })}
+            onTableDelete={isRevisionPreview ? (() => {}) : ((tableId) => {
+              if (isEnumTableId(tableId)) {
+                deleteEnum(getEnumIdFromTableId(tableId));
+                return;
+              }
+              deleteTable(tableId);
+            })}
             onFieldClick={(tableId) => {
               setPanelMode('properties');
               setSelectedTableId(tableId);
             }}
-            onRelationSelect={setSelectedRelation}
+            onRelationSelect={(relation) => {
+              if (relation.id.startsWith('enumrel::')) {
+                setSelectedRelation(null);
+                return;
+              }
+              setSelectedRelation(relation);
+            }}
             onFieldTypeChange={isRevisionPreview ? (() => {}) : handleFieldTypeChange}
             onCreateRelation={isRevisionPreview ? (() => {}) : handleCreateRelation}
             onAutoLayout={isRevisionPreview ? (() => {}) : autoLayout}
             onToggleTableSelection={toggleTableSelection}
-            onSelectTablesInRect={selectTablesInRect}
+            onSelectTablesInRect={handleSelectEntitiesInRect}
             onClearMultiSelection={clearMultiSelection}
-            onMoveSelectedTables={isRevisionPreview ? (() => {}) : moveSelectedTables}
-            onDeleteTables={isRevisionPreview ? (() => {}) : handleDeleteTables}
+            onMoveSelectedTables={isRevisionPreview ? (() => {}) : handleMoveSelectedEntities}
+            onDeleteTables={isRevisionPreview ? (() => {}) : ((ids) => {
+              const enumIds = ids.filter(isEnumTableId).map(getEnumIdFromTableId);
+              const tableIds = ids.filter((id) => !isEnumTableId(id));
+              for (const enumId of enumIds) deleteEnum(enumId);
+              if (tableIds.length > 0) handleDeleteTables(tableIds);
+            })}
             getTableColor={getTableColor}
             lineType={settings.lineType}
             enabledFieldTypes={settings.enabledFieldTypes}
@@ -659,6 +861,44 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             darkMode={darkMode}
             onTableDoubleClick={handleTableDoubleClick}
             onAddTable={isRevisionPreview ? (() => {}) : ((pos) => addTable('new_table', pos))}
+            isEnumTableId={isEnumTableId}
+            onAddEnumTable={isRevisionPreview ? (() => {}) : ((pos) => {
+              addEnum('new_enum', ['value_1', 'value_2'], pos);
+            })}
+            onReorderEnumValue={isRevisionPreview ? (() => {}) : ((enumTableId, fromIndex, toIndex) => {
+              reorderEnumValues(getEnumIdFromTableId(enumTableId), fromIndex, toIndex);
+            })}
+            onConvertTableToEnum={isRevisionPreview ? (() => {}) : ((tableId) => {
+              const table = tables.find((t) => t.id === tableId);
+              if (!table) return;
+              const values = table.fields
+                .filter((f) => !f.isPrimaryKey)
+                .map((f) => f.name.trim())
+                .filter(Boolean);
+              const enumType = addEnum(table.name, values.length > 0 ? values : ['value_1'], table.position);
+              if (table.domainId) {
+                updateEnum(enumType.id, { domainId: table.domainId });
+              }
+              deleteTable(tableId);
+              toast.success(`Table "${table.name}" converted to ENAM "${enumType.name}"`);
+            })}
+            onAddFieldToTable={isRevisionPreview ? (() => {}) : ((tableId) => {
+              if (isEnumTableId(tableId)) {
+                const enumId = getEnumIdFromTableId(tableId);
+                const enumType = enums.find((e) => e.id === enumId);
+                if (!enumType) return;
+                updateEnum(enumId, { values: [...enumType.values, `value_${enumType.values.length + 1}`] });
+                return;
+              }
+              addField(tableId, {
+                name: 'new_field',
+                type: 'varchar',
+                isPrimaryKey: false,
+                isNullable: true,
+                isForeignKey: false,
+              });
+            })}
+            onValidateTable={() => setIsValidationOpen(true)}
             onToggleMaximize={handleToggleMaximize}
             onUpdateField={isRevisionPreview ? (() => {}) : ((tableId, fieldId, updates) => updateField(tableId, fieldId, updates))}
             onDeleteField={isRevisionPreview ? (() => {}) : ((tableId, fieldId) => deleteField(tableId, fieldId))}
@@ -703,8 +943,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               <Sidebar
                 tables={tables}
                 domains={domains}
-                enums={enums}
-                selectedTableId={selectedTableId}
+                selectedTableId={selectedTableId && isEnumTableId(selectedTableId) ? null : selectedTableId}
                 selectedTableIds={selectedTableIds}
                 collapsed={false}
                 onToggleCollapse={() => setLeftCollapsed(true)}
@@ -717,9 +956,6 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 onAddDomain={isRevisionPreview ? (() => {}) : ((name) => addDomain(name))}
                 onUpdateDomain={isRevisionPreview ? (() => {}) : updateDomain}
                 onDeleteDomain={isRevisionPreview ? (() => {}) : deleteDomain}
-                onAddEnum={isRevisionPreview ? (() => {}) : ((name, values) => addEnum(name, values))}
-                onUpdateEnum={isRevisionPreview ? (() => {}) : updateEnum}
-                onDeleteEnum={isRevisionPreview ? (() => {}) : deleteEnum}
                 onAssignDomain={isRevisionPreview ? (() => {}) : handleAssignDomain}
                 onRemoveFromDomain={isRevisionPreview ? (() => {}) : ((tableId: string) => updateTableDomain(tableId, undefined))}
                 getTableColor={getTableColor}
@@ -792,20 +1028,77 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               selectedTableIds={selectedTableIds}
               onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
               darkMode={codeMode}
-              onUpdateTableName={(name) => { if (!isRevisionPreview && selectedTableId) updateTableName(selectedTableId, name); }}
-              onUpdateTableDescription={(desc) => { if (!isRevisionPreview && selectedTableId) updateTableDescription(selectedTableId, desc); }}
-              onUpdateTableDomain={(domainId) => { if (!isRevisionPreview && selectedTableId) updateTableDomain(selectedTableId, domainId); }}
-              onAddField={(field) => { if (!isRevisionPreview && selectedTableId) addField(selectedTableId, field); }}
+              onUpdateTableName={(name) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  updateEnum(getEnumIdFromTableId(activeTableId), { name });
+                  return;
+                }
+                updateTableName(activeTableId, name);
+              }}
+              onUpdateTableDescription={(desc) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  updateEnum(getEnumIdFromTableId(activeTableId), { description: desc });
+                  return;
+                }
+                updateTableDescription(activeTableId, desc);
+              }}
+              onUpdateTableDomain={(domainId) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  updateEnum(getEnumIdFromTableId(activeTableId), { domainId });
+                  return;
+                }
+                updateTableDomain(activeTableId, domainId);
+              }}
+              onAddField={(field) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  const enumId = getEnumIdFromTableId(activeTableId);
+                  const enumType = enums.find((e) => e.id === enumId);
+                  if (!enumType) return;
+                  updateEnum(enumId, { values: [...enumType.values, field.name] });
+                  return;
+                }
+                addField(activeTableId, field);
+              }}
               onUpdateField={(fieldId, updates) => {
                 if (isRevisionPreview) return;
-                if (!selectedTableId) return;
+                if (!activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  const enumId = getEnumIdFromTableId(activeTableId);
+                  const enumType = enums.find((e) => e.id === enumId);
+                  if (!enumType) return;
+                  const index = Number(fieldId.split('::value::')[1] ?? -1);
+                  if (index < 0 || index >= enumType.values.length) return;
+                  const nextValues = [...enumType.values];
+                  if (typeof updates.name === 'string') {
+                    nextValues[index] = updates.name;
+                    updateEnum(enumId, { values: nextValues });
+                  }
+                  return;
+                }
                 if (updates.type) {
-                  handleFieldTypeChange(selectedTableId, fieldId, updates.type, { enumId: updates.enumId, enumName: updates.enumName });
+                  handleFieldTypeChange(activeTableId, fieldId, updates.type, { enumId: updates.enumId, enumName: updates.enumName });
                 } else {
-                  updateField(selectedTableId, fieldId, updates);
+                  updateField(activeTableId, fieldId, updates);
                 }
               }}
-              onDeleteField={(fieldId) => { if (!isRevisionPreview && selectedTableId) deleteField(selectedTableId, fieldId); }}
+              onDeleteField={(fieldId) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  const enumId = getEnumIdFromTableId(activeTableId);
+                  const enumType = enums.find((e) => e.id === enumId);
+                  if (!enumType) return;
+                  const index = Number(fieldId.split('::value::')[1] ?? -1);
+                  if (index < 0 || index >= enumType.values.length) return;
+                  const nextValues = enumType.values.filter((_, i) => i !== index);
+                  updateEnum(enumId, { values: nextValues });
+                  return;
+                }
+                deleteField(activeTableId, fieldId);
+              }}
               onAddRelation={(relation) => { if (!isRevisionPreview) addRelation(relation); }}
               onDeleteRelation={(relationId) => { if (!isRevisionPreview) deleteRelation(relationId); }}
               enabledFieldTypes={settings.enabledFieldTypes}
@@ -821,6 +1114,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               isRevisionsLoading={revisionsQuery.isLoading || revisionsQuery.isFetching}
               onSelectRevision={handleSelectRevision}
               onDeleteRevision={(revisionId) => { void handleDeleteRevision(revisionId); }}
+              isEnumTable={!!selectedEnumType}
             />
           </div>
           {!snapshotCaptureMode && !rightCollapsed && (
