@@ -77,6 +77,7 @@ export interface EnumType {
   id: string;
   name: string;
   values: string[];
+  valueComments?: Array<string | undefined>;
   description?: string;
   position?: { x: number; y: number };
   domainId?: string;

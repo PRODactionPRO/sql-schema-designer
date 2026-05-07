@@ -458,13 +458,25 @@ export function TableDetailsPanel({
               return (
                 <div key={field.id} className="relative">
                   {isEnumTable ? (
-                    <div className={`flex items-center gap-2 py-1.5 px-1 rounded ${rowHover}`}>
+                    <>
+                    <div className={`flex items-center gap-2 py-1.5 px-1 rounded ${rowHover} group/row`}>
                       <input
                         type="text"
                         value={field.name}
                         onChange={(e) => onUpdateField(field.id, { name: e.target.value })}
                         className={`flex-1 min-w-0 text-sm bg-transparent border-none outline-none px-1.5 py-1 rounded truncate ${dk ? 'hover:bg-[#313244] focus:bg-[#313244] text-[#cdd6f4]' : 'hover:bg-gray-100 focus:bg-gray-100'} focus:ring-1 focus:ring-blue-400`}
                       />
+                      <Tip label="Value details">
+                        <button
+                          ref={el => {
+                            moreBtnRefs.current[field.id] = el;
+                          }}
+                          onClick={() => setMoreOpenFieldId(isMoreOpen ? null : field.id)}
+                          className={`size-7 flex items-center justify-center rounded transition-colors ${isMoreOpen ? 'text-white bg-gray-800' : `${dk ? 'text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} opacity-0 group-hover/row:opacity-100`}`}
+                        >
+                          <Info className="size-3.5" />
+                        </button>
+                      </Tip>
                       <button
                         onClick={() => onDeleteField(field.id)}
                         className={`size-7 flex items-center justify-center rounded transition-colors ${dk ? 'text-[#6c7086] hover:text-red-300 hover:bg-red-500/20' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}
@@ -473,6 +485,35 @@ export function TableDetailsPanel({
                         <Trash2 className="size-3.5" />
                       </button>
                     </div>
+                    {isMoreOpen && popoverPos && createPortal(
+                      <>
+                        <div className="fixed inset-0 z-[9998]" onClick={() => setMoreOpenFieldId(null)} />
+                        <div className="fixed z-[9999] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-4 w-72" style={{ top: popoverPos.top, left: popoverPos.left }}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Value Attributes</h4>
+                            <button onClick={() => setMoreOpenFieldId(null)} className="text-gray-500 hover:text-white transition-colors">
+                              <X className="size-4" />
+                            </button>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
+                                Comment <MessageSquare className="size-3" />
+                              </label>
+                              <textarea
+                                value={field.comment || ''}
+                                onChange={(e) => onUpdateField(field.id, { comment: e.target.value || undefined })}
+                                placeholder="Optional description for this enum value"
+                                className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </>,
+                      document.body
+                    )}
+                    </>
                   ) : (
                   <>
                   <div className={`flex items-center gap-1 py-1 px-1 rounded ${rowHover} group/row`}>

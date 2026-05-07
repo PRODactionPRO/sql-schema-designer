@@ -151,6 +151,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     addField,
     updateField,
     deleteField,
+    reorderField,
     addRelation,
     updateRelation,
     deleteRelation,
@@ -188,6 +189,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     fields: enumType.values.map((value, valueIndex) => ({
       id: `${enumType.id}::value::${valueIndex}`,
       name: value,
+      comment: enumType.valueComments?.[valueIndex],
       type: 'enum' as FieldType,
       enumId: enumType.id,
       enumName: enumType.name,
@@ -376,14 +378,30 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   }, [buildSchemaJson, isRevisionPreview, projectId, persistToStorage, revisionsQuery]);
 
   const handleBack = useCallback(async () => {
-    if (projectId) {
-      await persistToStorage();
-      await createProjectRevision(projectId, {
-        schemaJson: buildSchemaJson(),
-        comment: 'Exit autosave',
-      });
-    }
+    console.info('[editor:back:click]', {
+      projectId,
+      timestamp: new Date().toISOString(),
+    });
+    // Navigate immediately to keep UI responsive.
     navigate('/');
+
+    if (!projectId) return;
+    // Persist in background; do not block route transition.
+    void (async () => {
+      try {
+        const started = performance.now();
+        await persistToStorage();
+        await createProjectRevision(projectId, {
+          schemaJson: buildSchemaJson(),
+          comment: 'Exit autosave',
+        });
+        console.info('[editor:back:background-save:done]', {
+          durationMs: Math.round(performance.now() - started),
+        });
+      } catch (error) {
+        console.error('Background save on back failed', error);
+      }
+    })();
   }, [buildSchemaJson, navigate, persistToStorage, projectId]);
 
   const handleOpenVersions = useCallback(async () => {
@@ -553,6 +571,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             fields: selectedEnumType.values.map((value, index) => ({
               id: `${selectedEnumType.id}::value::${index}`,
               name: value,
+              comment: selectedEnumType.valueComments?.[index],
               type: 'varchar' as FieldType,
               isPrimaryKey: false,
               isNullable: false,
@@ -868,6 +887,10 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             onReorderEnumValue={isRevisionPreview ? (() => {}) : ((enumTableId, fromIndex, toIndex) => {
               reorderEnumValues(getEnumIdFromTableId(enumTableId), fromIndex, toIndex);
             })}
+            onReorderField={isRevisionPreview ? (() => {}) : ((tableId, fromIndex, toIndex) => {
+              if (isEnumTableId(tableId)) return;
+              reorderField(tableId, fromIndex, toIndex);
+            })}
             onConvertTableToEnum={isRevisionPreview ? (() => {}) : ((tableId) => {
               const table = tables.find((t) => t.id === tableId);
               if (!table) return;
@@ -1058,7 +1081,10 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   const enumId = getEnumIdFromTableId(activeTableId);
                   const enumType = enums.find((e) => e.id === enumId);
                   if (!enumType) return;
-                  updateEnum(enumId, { values: [...enumType.values, field.name] });
+                  updateEnum(enumId, {
+                    values: [...enumType.values, field.name],
+                    valueComments: [...(enumType.valueComments ?? enumType.values.map(() => undefined)), field.comment?.trim() || undefined],
+                  });
                   return;
                 }
                 addField(activeTableId, field);
@@ -1073,10 +1099,17 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   const index = Number(fieldId.split('::value::')[1] ?? -1);
                   if (index < 0 || index >= enumType.values.length) return;
                   const nextValues = [...enumType.values];
+                  const nextComments = [...(enumType.valueComments ?? enumType.values.map(() => undefined))];
                   if (typeof updates.name === 'string') {
                     nextValues[index] = updates.name;
-                    updateEnum(enumId, { values: nextValues });
                   }
+                  if (Object.prototype.hasOwnProperty.call(updates, 'comment')) {
+                    const nextComment = typeof updates.comment === 'string' && updates.comment.trim().length > 0
+                      ? updates.comment.trim()
+                      : undefined;
+                    nextComments[index] = nextComment;
+                  }
+                  updateEnum(enumId, { values: nextValues, valueComments: nextComments });
                   return;
                 }
                 if (updates.type) {
@@ -1094,7 +1127,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   const index = Number(fieldId.split('::value::')[1] ?? -1);
                   if (index < 0 || index >= enumType.values.length) return;
                   const nextValues = enumType.values.filter((_, i) => i !== index);
-                  updateEnum(enumId, { values: nextValues });
+                  const nextComments = (enumType.valueComments ?? enumType.values.map(() => undefined))
+                    .filter((_, i) => i !== index);
+                  updateEnum(enumId, { values: nextValues, valueComments: nextComments });
                   return;
                 }
                 deleteField(activeTableId, fieldId);

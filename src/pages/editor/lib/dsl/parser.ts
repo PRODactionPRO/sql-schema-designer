@@ -95,16 +95,31 @@ export function parseDSL(source: string): ParseResult {
     if (enumMatch) {
       const enumName = enumMatch[1];
       const values: string[] = [];
+      const valueComments: Array<string | undefined> = [];
       i++;
       while (i < lines.length) {
         const vline = lines[i].trim();
         i++;
         if (vline === '}' || vline === '};') break;
         if (!vline || vline.startsWith('//')) continue;
-        const sanitized = vline.replace(/,$/, '').trim();
-        if (sanitized) values.push(sanitized);
+        const parsedValue = splitInlineComment(vline.replace(/,$/, '').trim());
+        const sanitized = parsedValue.code.trim();
+        if (sanitized) {
+          values.push(sanitized);
+          valueComments.push(parsedValue.comment || undefined);
+        }
       }
-      enums.push({ id: genId('enum'), name: enumName, values: Array.from(new Set(values)) });
+      const uniqueValues: string[] = [];
+      const uniqueComments: Array<string | undefined> = [];
+      const seen = new Set<string>();
+      for (let vi = 0; vi < values.length; vi += 1) {
+        const value = values[vi];
+        if (seen.has(value)) continue;
+        seen.add(value);
+        uniqueValues.push(value);
+        uniqueComments.push(valueComments[vi]);
+      }
+      enums.push({ id: genId('enum'), name: enumName, values: uniqueValues, valueComments: uniqueComments });
       continue;
     }
 

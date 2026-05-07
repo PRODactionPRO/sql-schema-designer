@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap, Trash2 } from 'lucide-react';
 import type { Field, FieldType, Table, TypeCompatibility } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
+import { useReorderableDragList } from './hooks/useReorderableDragList';
 
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   uuid: <Fingerprint className="size-3.5" />,
@@ -90,6 +91,7 @@ interface TableNodeProps {
   onDragStop?: (tableId: string) => void;
   isEnumTable?: boolean;
   onReorderEnumValue?: (fromIndex: number, toIndex: number) => void;
+  onReorderField?: (fromIndex: number, toIndex: number) => void;
   onOpenContextMenu?: (tableId: string, anchor: { x: number; y: number }) => void;
   onDeleteField?: (fieldId: string) => void;
 }
@@ -110,6 +112,7 @@ export const TableNode = memo(function TableNode({
   onDragStop,
   isEnumTable = false,
   onReorderEnumValue,
+  onReorderField,
   onOpenContextMenu,
   onDeleteField,
 }: TableNodeProps) {
@@ -123,11 +126,32 @@ export const TableNode = memo(function TableNode({
   const [editingTypeFieldId, setEditingTypeFieldId] = useState<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
-  const enumDragSourceIndexRef = useRef<number | null>(null);
-  const [enumDragOverIndex, setEnumDragOverIndex] = useState<number | null>(null);
+  const [isFieldReorderPointerDown, setIsFieldReorderPointerDown] = useState(false);
 
   const borderColor = tableColor;
   const availableTypes = enabledFieldTypes || ALL_FIELD_TYPES;
+
+  useEffect(() => {
+    const handleMouseUp = () => setIsFieldReorderPointerDown(false);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const enumDnD = useReorderableDragList({
+    itemIds: table.fields.map((f) => f.id),
+    enabled: isEnumTable && !!onReorderEnumValue,
+    onCommit: (fromIndex, toIndex) => {
+      onReorderEnumValue?.(fromIndex, toIndex);
+    },
+  });
+
+  const fieldDnD = useReorderableDragList({
+    itemIds: table.fields.map((f) => f.id),
+    enabled: !isEnumTable && !!onReorderField,
+    onCommit: (fromIndex, toIndex) => {
+      onReorderField?.(fromIndex, toIndex);
+    },
+  });
 
   // Unfocus: reduce background contrast, text gets opacity
   // No filter-based opacity — use specific bg color wash and text opacity
@@ -246,19 +270,9 @@ export const TableNode = memo(function TableNode({
     }
   };
 
-  const handleEnumRowDragStart = (index: number, e: React.DragEvent) => {
-    enumDragSourceIndexRef.current = index;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', String(index));
-  };
-
-  const handleEnumRowDrop = (targetIndex: number, e: React.DragEvent) => {
-    e.preventDefault();
-    const sourceIndex = enumDragSourceIndexRef.current;
-    setEnumDragOverIndex(null);
-    enumDragSourceIndexRef.current = null;
-    if (sourceIndex == null || sourceIndex === targetIndex) return;
-    onReorderEnumValue?.(sourceIndex, targetIndex);
+  const handleFieldRowDragEnd = () => {
+    fieldDnD.handleDragEnd();
+    setIsFieldReorderPointerDown(false);
   };
 
   const getFieldDragState = (field: Field): {
@@ -379,6 +393,15 @@ export const TableNode = memo(function TableNode({
   }
 
   // --- Full LOD: original detailed rendering ---
+  const renderedFields = (!isEnumTable && fieldDnD.renderedIds)
+    ? fieldDnD.renderedIds
+      .map((id) => table.fields.find((field) => field.id === id))
+      .filter((field): field is Field => !!field)
+    : (isEnumTable && enumDnD.renderedIds
+      ? enumDnD.renderedIds.map((id) => table.fields.find((field) => field.id === id)).filter((field): field is Field => !!field)
+      : table.fields);
+  const relationHandleHidden = !isEnumTable && (isFieldReorderPointerDown || fieldDnD.isDragging);
+
   return (
     <div
       ref={nodeRef}
@@ -438,12 +461,14 @@ export const TableNode = memo(function TableNode({
         </button>
       </div>
 
-      <div className="divide-y divide-gray-200 rounded-b-lg overflow-hidden">
-        {table.fields.map((field, fieldIndex) => {
+      <div className="divide-y divide-gray-200 rounded-b-lg overflow-visible">
+        {renderedFields.map((field, fieldIndex) => {
           const isFieldDropTarget = dropTargetFieldId === field.id;
           const isSource = isDragSourceTable && dragSourceFieldId === field.id;
+          const isReorderSource = fieldDnD.draggingItemId === field.id;
           const dragState = getFieldDragState(field);
           const isHovered = hoveredFieldId === field.id;
+          const effectiveHover = fieldDnD.isDragging ? isReorderSource : isHovered;
 
           let fieldBg = '';
           let fieldStyle: React.CSSProperties = {};
@@ -475,16 +500,16 @@ export const TableNode = memo(function TableNode({
           }
 
           // Field action buttons visibility: show if hovered or if the flag is active
-          const showNotNull = isHovered || field.isNotNull;
-          const showIndex = isHovered || field.isIndexed;
-          const showUnique = isHovered || (field.isUnique && !field.isPrimaryKey);
+          const showNotNull = effectiveHover || field.isNotNull;
+          const showIndex = effectiveHover || field.isIndexed;
+          const showUnique = effectiveHover || (field.isUnique && !field.isPrimaryKey);
 
           return (
             <div
               key={field.id}
               className={`px-3 py-2 flex items-center cursor-pointer relative ${
-                !isFieldDropTarget && !isSource ? 'hover:bg-gray-50' : ''
-              } ${fieldBg} ${isEnumTable ? 'group/enum-row' : ''} ${isEnumTable && enumDragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''}`}
+                !isFieldDropTarget && !isSource && !fieldDnD.isDragging ? 'hover:bg-gray-50' : ''
+              } ${fieldBg} ${isEnumTable ? 'group/enum-row' : 'group/field-row'} ${isEnumTable && enumDnD.dragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''} ${!isEnumTable && fieldDnD.dragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''} ${isReorderSource ? 'bg-gray-100 ring-2 ring-inset ring-blue-300' : ''}`}
               style={fieldStyle}
               onClick={(e) => { e.stopPropagation(); onFieldClick(field); }}
               data-field-id={field.id}
@@ -492,11 +517,16 @@ export const TableNode = memo(function TableNode({
               title={dragState?.reason}
               onMouseEnter={() => setHoveredFieldId(field.id)}
               onMouseLeave={() => setHoveredFieldId(null)}
-              draggable={isEnumTable}
-              onDragStart={isEnumTable ? (e) => handleEnumRowDragStart(fieldIndex, e) : undefined}
-              onDragOver={isEnumTable ? (e) => { e.preventDefault(); setEnumDragOverIndex(fieldIndex); } : undefined}
-              onDragLeave={isEnumTable ? () => setEnumDragOverIndex(null) : undefined}
-              onDrop={isEnumTable ? (e) => handleEnumRowDrop(fieldIndex, e) : undefined}
+              draggable={isEnumTable || !!onReorderField}
+              onDragStart={isEnumTable ? (e) => enumDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
+              onDragStartCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
+              onDragOver={isEnumTable ? (e) => enumDnD.handleDragOver({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
+              onDragOverCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDragOver({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
+              onDragLeave={isEnumTable ? enumDnD.handleDragLeave : undefined}
+              onDragLeaveCapture={!isEnumTable && onReorderField ? fieldDnD.handleDragLeave : undefined}
+              onDrop={isEnumTable ? (e) => enumDnD.handleDrop({ event: e }) : undefined}
+              onDropCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDrop({ event: e }) : undefined}
+              onDragEnd={isEnumTable ? enumDnD.handleDragEnd : (!isEnumTable && onReorderField ? handleFieldRowDragEnd : undefined)}
             >
               {isEnumTable && (
                 <div
@@ -508,9 +538,21 @@ export const TableNode = memo(function TableNode({
                 </div>
               )}
               {!isEnumTable && (
-                <div className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1" onMouseDown={(e) => handleFieldDragStart(e, field)} title="Drag to create relation">
+                <div
+                  className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1"
+                  onMouseDown={(e) => { e.stopPropagation(); setIsFieldReorderPointerDown(true); }}
+                  title="Drag to reorder field"
+                >
                   <GripVertical className="size-3.5" />
                 </div>
+              )}
+              {!isEnumTable && !relationHandleHidden && (
+                <button
+                  type="button"
+                  className="absolute -left-1.5 top-1/2 -translate-y-1/2 size-3 rounded-full border-2 border-blue-500 bg-white opacity-0 group-hover/field-row:opacity-100 hover:bg-blue-500 transition-colors z-30"
+                  onMouseDown={(e) => handleFieldDragStart(e, field)}
+                  title="Drag to create relation"
+                />
               )}
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 {field.isPrimaryKey && <Key className="size-3 text-yellow-500 flex-shrink-0" />}

@@ -66,15 +66,27 @@ function normalizeDomain(value: unknown, index: number): Domain {
 function normalizeEnumType(value: unknown, index: number): EnumType {
   const record = isRecord(value) ? value : {};
   const rawValues = Array.isArray(record.values) ? record.values : [];
+  const rawValueComments = Array.isArray(record.valueComments) ? record.valueComments : [];
   const values = rawValues
     .map((item) => asString(item).trim())
     .filter((item) => item.length > 0);
-  const uniqueValues = Array.from(new Set(values));
+  const uniqueValues: string[] = [];
+  const uniqueComments: Array<string | undefined> = [];
+  const seenValues = new Set<string>();
+  for (let i = 0; i < values.length; i += 1) {
+    const valueItem = values[i];
+    if (seenValues.has(valueItem)) continue;
+    seenValues.add(valueItem);
+    uniqueValues.push(valueItem);
+    const rawComment = asString(rawValueComments[i]).trim();
+    uniqueComments.push(rawComment || undefined);
+  }
 
   return {
     id: asString(record.id, `enum_${index}`),
     name: asString(record.name, `Enum${index + 1}`),
     values: uniqueValues,
+    valueComments: uniqueComments,
     description: asString(record.description) || undefined,
     domainId: asString(record.domainId) || undefined,
     position: isRecord(record.position)

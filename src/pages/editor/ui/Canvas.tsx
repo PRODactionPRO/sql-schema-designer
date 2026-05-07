@@ -44,6 +44,7 @@ interface CanvasProps {
   isEnumTableId?: (id: string) => boolean;
   onAddEnumTable?: (position?: { x: number; y: number }) => void;
   onReorderEnumValue?: (enumTableId: string, fromIndex: number, toIndex: number) => void;
+  onReorderField?: (tableId: string, fromIndex: number, toIndex: number) => void;
   onConvertTableToEnum?: (tableId: string) => void;
   onAddFieldToTable?: (tableId: string) => void;
   onValidateTable?: (tableId: string) => void;
@@ -92,6 +93,7 @@ export function Canvas({
   isEnumTableId,
   onAddEnumTable,
   onReorderEnumValue,
+  onReorderField,
   onConvertTableToEnum,
   onAddFieldToTable,
   onValidateTable,
@@ -1025,6 +1027,7 @@ export function Canvas({
                 onDragStop={handleTableDragStop}
                 isEnumTable={!!isEnumTableId?.(table.id)}
                 onReorderEnumValue={onReorderEnumValue ? ((fromIndex, toIndex) => onReorderEnumValue(table.id, fromIndex, toIndex)) : undefined}
+                onReorderField={onReorderField ? ((fromIndex, toIndex) => onReorderField(table.id, fromIndex, toIndex)) : undefined}
                 onOpenContextMenu={(tableId, anchor) => {
                   setShowDomainSubmenu(false);
                   const isInCurrentSelection = selectedTableId === tableId || selectedTableIds.has(tableId);

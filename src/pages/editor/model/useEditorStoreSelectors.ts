@@ -25,6 +25,7 @@ export function useEditorStoreSelectors() {
       addField: s.addField,
       updateField: s.updateField,
       deleteField: s.deleteField,
+      reorderField: s.reorderField,
       addRelation: s.addRelation,
       updateRelation: s.updateRelation,
       deleteRelation: s.deleteRelation,

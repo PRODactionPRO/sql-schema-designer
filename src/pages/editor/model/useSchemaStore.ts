@@ -120,6 +120,7 @@ interface SchemaState {
   addField: (tableId: string, field: Omit<Field, 'id'>) => string;
   updateField: (tableId: string, fieldId: string, updates: Partial<Field>) => void;
   deleteField: (tableId: string, fieldId: string) => void;
+  reorderField: (tableId: string, fromIndex: number, toIndex: number) => void;
 
   // Relation CRUD
   addRelation: (relation: Omit<Relation, 'id'>) => void;
@@ -426,6 +427,28 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     }));
   },
 
+  reorderField: (tableId, fromIndex, toIndex) => {
+    const state = get();
+    const table = state.tables.find((t) => t.id === tableId);
+    if (!table) return;
+    if (
+      fromIndex < 0 || toIndex < 0 ||
+      fromIndex >= table.fields.length ||
+      toIndex >= table.fields.length ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+
+    const nextFields = [...table.fields];
+    const [moved] = nextFields.splice(fromIndex, 1);
+    nextFields.splice(toIndex, 0, moved);
+
+    set(withHistory(state, {
+      tables: state.tables.map((t) => (t.id === tableId ? { ...t, fields: nextFields } : t)),
+    }));
+  },
+
   // ── Relation CRUD ──
   addRelation: (relation) => {
     const state = get();
@@ -500,6 +523,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       id: nextId(),
       name: finalName,
       values: uniqueValues,
+      valueComments: uniqueValues.map(() => undefined),
       position: position || { x: 260, y: 140 },
     };
     set(withHistory(state, {
@@ -514,12 +538,27 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     if (!prevEnum) return;
     const nextNameRaw = updates.name?.trim();
     const nextName = nextNameRaw && nextNameRaw.length > 0 ? nextNameRaw : prevEnum.name;
-    const uniqueValues = updates.values
-      ? Array.from(new Set(updates.values.map(v => v.trim()).filter(Boolean)))
-      : prevEnum.values;
+    let uniqueValues = prevEnum.values;
+    let uniqueComments = [...(prevEnum.valueComments ?? prevEnum.values.map(() => undefined))];
+    if (updates.values) {
+      const prevComments = prevEnum.valueComments ?? prevEnum.values.map(() => undefined);
+      const incomingComments = updates.valueComments ?? updates.values.map((_, idx) => prevComments[idx]);
+      const valueCommentPairs = updates.values
+        .map((v, idx) => ({ value: v.trim(), comment: (incomingComments[idx] ?? '').trim() || undefined }))
+        .filter((item) => item.value.length > 0);
+      const seen = new Set<string>();
+      uniqueValues = [];
+      uniqueComments = [];
+      for (const item of valueCommentPairs) {
+        if (seen.has(item.value)) continue;
+        seen.add(item.value);
+        uniqueValues.push(item.value);
+        uniqueComments.push(item.comment);
+      }
+    }
 
     set(withHistory(state, {
-      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues } : e),
+      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues, valueComments: uniqueComments } : e),
       tables: state.tables.map(table => ({
         ...table,
         fields: table.fields.map(field => {
@@ -567,10 +606,13 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       return;
     }
     const nextValues = [...enumType.values];
+    const nextComments = [...(enumType.valueComments ?? enumType.values.map(() => undefined))];
     const [moved] = nextValues.splice(fromIndex, 1);
+    const [movedComment] = nextComments.splice(fromIndex, 1);
     nextValues.splice(toIndex, 0, moved);
+    nextComments.splice(toIndex, 0, movedComment);
     set(withHistory(state, {
-      enums: state.enums.map((e) => (e.id === id ? { ...e, values: nextValues } : e)),
+      enums: state.enums.map((e) => (e.id === id ? { ...e, values: nextValues, valueComments: nextComments } : e)),
     }));
   },
 
