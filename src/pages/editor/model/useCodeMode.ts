@@ -25,6 +25,21 @@ interface UseCodeModeOptions {
   rightCollapsed: boolean;
   setRightCollapsed: (v: boolean) => void;
   importFromFormat: (format: string, content: string) => void;
+  pushHistory?: () => void;
+}
+
+interface SyncPreview {
+  parsedTables: number;
+  parsedRelations: number;
+  parsedDomains: number;
+  parsedEnums: number;
+  errorCount: number;
+}
+
+interface SyncResult {
+  applied: boolean;
+  hasErrors: boolean;
+  preview: SyncPreview;
 }
 
 export function useCodeMode({
@@ -37,6 +52,7 @@ export function useCodeMode({
   rightCollapsed,
   setRightCollapsed,
   importFromFormat,
+  pushHistory,
 }: UseCodeModeOptions) {
   const [codeMode, setCodeMode] = useState(false);
   const [codeModeAnimating, setCodeModeAnimating] = useState(false);
@@ -150,16 +166,24 @@ export function useCodeMode({
   }, [tables, relations, domains, enums, codeMode, activeCodeTab, serializeForTab]);
 
   // ── Code → Canvas sync ──
-  const applyCodeToCanvas = useCallback((rawCode: string): { applied: boolean; hasErrors: boolean } => {
+  const applyCodeToCanvas = useCallback((rawCode: string, options?: { allowPartial?: boolean }): SyncResult => {
+    const allowPartial = options?.allowPartial ?? false;
     const result = parseForTab(activeCodeTab, rawCode);
     setCodeErrors(result.errors);
+    const preview: SyncPreview = {
+      parsedTables: result.tables.length,
+      parsedRelations: result.relations.length,
+      parsedDomains: result.domains.length,
+      parsedEnums: result.enums.length,
+      errorCount: result.errors.length,
+    };
 
-    if (result.errors.length > 0) {
-      return { applied: false, hasErrors: true };
+    if (result.errors.length > 0 && !allowPartial) {
+      return { applied: false, hasErrors: true, preview };
     }
 
     if (result.tables.length === 0) {
-      return { applied: false, hasErrors: false };
+      return { applied: false, hasErrors: result.errors.length > 0, preview };
     }
 
     codeSyncDirection.current = 'from-code';
@@ -236,9 +260,9 @@ export function useCodeMode({
     try {
       const schemaJson = JSON.stringify({ tables: patchedTables, relations: patchedRelations, domains: patchedDomains, enums: patchedEnums });
       importFromFormat('json', schemaJson);
-      return { applied: true, hasErrors: false };
+      return { applied: true, hasErrors: result.errors.length > 0, preview };
     } catch {
-      return { applied: false, hasErrors: false };
+      return { applied: false, hasErrors: result.errors.length > 0, preview };
     }
   }, [activeCodeTab, domains, enums, importFromFormat, parseForTab, tables]);
 
@@ -253,15 +277,38 @@ export function useCodeMode({
   const handleCodeSync = useCallback(() => {
     const syncResult = applyCodeToCanvas(codeValue);
     if (syncResult.applied) {
+      pushHistory?.();
       toast.success('Canvas synced from code');
       return;
     }
     if (syncResult.hasErrors) {
-      toast.error('Cannot sync: fix syntax errors in code first');
+      const p = syncResult.preview;
+      toast.warning(
+        `Sync preview: ${p.parsedTables} tables, ${p.parsedRelations} relations, ${p.parsedEnums} enums, ${p.parsedDomains} domains parsed; ${p.errorCount} syntax errors found.`,
+        {
+          duration: 9000,
+          action: {
+            label: 'Apply valid only',
+            onClick: () => {
+              const partialResult = applyCodeToCanvas(codeValue, { allowPartial: true });
+              if (partialResult.applied) {
+                pushHistory?.();
+                toast.success('Applied valid fragments; invalid fragments were skipped');
+              } else {
+                toast.error('Cannot apply valid fragments: no valid tables were parsed');
+              }
+            },
+          },
+          cancel: {
+            label: 'Cancel',
+            onClick: () => {},
+          },
+        },
+      );
       return;
     }
     toast.error('Cannot sync: no tables were parsed from current code');
-  }, [applyCodeToCanvas, codeValue]);
+  }, [applyCodeToCanvas, codeValue, pushHistory]);
 
   // ── Scroll code editor to a table ──
   const scrollToTable = useCallback((tableName: string, fieldName?: string) => {

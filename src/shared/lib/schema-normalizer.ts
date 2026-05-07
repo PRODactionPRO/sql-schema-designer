@@ -76,6 +76,13 @@ function normalizeEnumType(value: unknown, index: number): EnumType {
     name: asString(record.name, `Enum${index + 1}`),
     values: uniqueValues,
     description: asString(record.description) || undefined,
+    domainId: asString(record.domainId) || undefined,
+    position: isRecord(record.position)
+      ? {
+          x: asNumber(record.position.x, 260 + index * 40),
+          y: asNumber(record.position.y, 140 + index * 40),
+        }
+      : undefined,
   };
 }
 
@@ -190,7 +197,10 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
     tables: normalizedTables,
     relations,
     domains,
-    enums,
+    enums: enums.map((enumType) => ({
+      ...enumType,
+      domainId: enumType.domainId && domainIdSet.has(enumType.domainId) ? enumType.domainId : undefined,
+    })),
   };
 }
 

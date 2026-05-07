@@ -82,6 +82,7 @@ interface TableDetailsPanelProps {
   isRevisionsLoading?: boolean;
   onSelectRevision?: (revisionId: string) => void;
   onDeleteRevision?: (revisionId: string) => void;
+  isEnumTable?: boolean;
 }
 
 // Tooltip wrapper
@@ -111,6 +112,7 @@ export function TableDetailsPanel({
   onSelectRevision,
   onDeleteRevision,
   darkMode,
+  isEnumTable = false,
 }: TableDetailsPanelProps) {
   const [isAddingField, setIsAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
@@ -335,7 +337,7 @@ export function TableDetailsPanel({
       const enumType = enums.find(e => e.id === newFieldEnumId);
       onAddField({
         name: newFieldName.trim(),
-        type: newFieldType,
+        type: isEnumTable ? 'varchar' : newFieldType,
         enumId: newFieldType === 'enum' ? enumType?.id : undefined,
         enumName: newFieldType === 'enum' ? enumType?.name : undefined,
         isPrimaryKey: false,
@@ -440,7 +442,7 @@ export function TableDetailsPanel({
       <div className="flex-1 overflow-y-auto panel-scroll">
         <div className="p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">Fields</h3>
+            <h3 className="font-semibold text-sm">{isEnumTable ? 'Values' : 'Fields'}</h3>
             <Button onClick={() => setIsAddingField(true)} size="sm" variant="outline" className="h-7">
               <Plus className="size-3 mr-1" /> Add
             </Button>
@@ -455,7 +457,24 @@ export function TableDetailsPanel({
 
               return (
                 <div key={field.id} className="relative">
-                  {/* Single-line field row */}
+                  {isEnumTable ? (
+                    <div className={`flex items-center gap-2 py-1.5 px-1 rounded ${rowHover}`}>
+                      <input
+                        type="text"
+                        value={field.name}
+                        onChange={(e) => onUpdateField(field.id, { name: e.target.value })}
+                        className={`flex-1 min-w-0 text-sm bg-transparent border-none outline-none px-1.5 py-1 rounded truncate ${dk ? 'hover:bg-[#313244] focus:bg-[#313244] text-[#cdd6f4]' : 'hover:bg-gray-100 focus:bg-gray-100'} focus:ring-1 focus:ring-blue-400`}
+                      />
+                      <button
+                        onClick={() => onDeleteField(field.id)}
+                        className={`size-7 flex items-center justify-center rounded transition-colors ${dk ? 'text-[#6c7086] hover:text-red-300 hover:bg-red-500/20' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}
+                        title="Delete value"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                  <>
                   <div className={`flex items-center gap-1 py-1 px-1 rounded ${rowHover} group/row`}>
                     {/* Field name - editable */}
                     <input
@@ -656,6 +675,8 @@ export function TableDetailsPanel({
                     </>,
                     document.body
                   )}
+                  </>
+                  )}
                 </div>
               );
             })}
@@ -674,20 +695,22 @@ export function TableDetailsPanel({
                   autoFocus
                   className={`flex-1 min-w-0 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 ${dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : 'border-gray-200'}`}
                 />
-                <Select value={newFieldType} onValueChange={(v) => setNewFieldType(v as FieldType)}>
-                  <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-gray-900 border-gray-700 text-white">
-                    {availableTypes.map(type => (
-                      <SelectItem key={type} value={type} className="text-gray-200 focus:bg-gray-800 focus:text-white">
-                        <span className="flex items-center gap-2">
-                          <span className="text-gray-400">{getTypeIcon(type)}</span>
-                          {type}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {newFieldType === 'enum' && (
+                {!isEnumTable && (
+                  <Select value={newFieldType} onValueChange={(v) => setNewFieldType(v as FieldType)}>
+                    <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                      {availableTypes.map(type => (
+                        <SelectItem key={type} value={type} className="text-gray-200 focus:bg-gray-800 focus:text-white">
+                          <span className="flex items-center gap-2">
+                            <span className="text-gray-400">{getTypeIcon(type)}</span>
+                            {type}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {!isEnumTable && newFieldType === 'enum' && (
                   <Select value={newFieldEnumId} onValueChange={setNewFieldEnumId}>
                     <SelectTrigger className="h-7 w-[120px] text-xs"><SelectValue placeholder="Enum..." /></SelectTrigger>
                     <SelectContent className="bg-gray-900 border-gray-700 text-white">

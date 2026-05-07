@@ -1,9 +1,8 @@
 import { useRef, useEffect, useState, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap } from 'lucide-react';
+import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap, Trash2 } from 'lucide-react';
 import type { Field, FieldType, Table, TypeCompatibility } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
 
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   uuid: <Fingerprint className="size-3.5" />,
@@ -89,6 +88,10 @@ interface TableNodeProps {
   onDragEnd?: () => void;
   onDragMove?: (tableId: string, position: { x: number; y: number }) => void;
   onDragStop?: (tableId: string) => void;
+  isEnumTable?: boolean;
+  onReorderEnumValue?: (fromIndex: number, toIndex: number) => void;
+  onOpenContextMenu?: (tableId: string, anchor: { x: number; y: number }) => void;
+  onDeleteField?: (fieldId: string) => void;
 }
 
 export const TableNode = memo(function TableNode({
@@ -105,6 +108,10 @@ export const TableNode = memo(function TableNode({
   onDragEnd,
   onDragMove,
   onDragStop,
+  isEnumTable = false,
+  onReorderEnumValue,
+  onOpenContextMenu,
+  onDeleteField,
 }: TableNodeProps) {
   const nodeRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -116,6 +123,8 @@ export const TableNode = memo(function TableNode({
   const [editingTypeFieldId, setEditingTypeFieldId] = useState<string | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
+  const enumDragSourceIndexRef = useRef<number | null>(null);
+  const [enumDragOverIndex, setEnumDragOverIndex] = useState<number | null>(null);
 
   const borderColor = tableColor;
   const availableTypes = enabledFieldTypes || ALL_FIELD_TYPES;
@@ -237,11 +246,27 @@ export const TableNode = memo(function TableNode({
     }
   };
 
+  const handleEnumRowDragStart = (index: number, e: React.DragEvent) => {
+    enumDragSourceIndexRef.current = index;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(index));
+  };
+
+  const handleEnumRowDrop = (targetIndex: number, e: React.DragEvent) => {
+    e.preventDefault();
+    const sourceIndex = enumDragSourceIndexRef.current;
+    setEnumDragOverIndex(null);
+    enumDragSourceIndexRef.current = null;
+    if (sourceIndex == null || sourceIndex === targetIndex) return;
+    onReorderEnumValue?.(sourceIndex, targetIndex);
+  };
+
   const getFieldDragState = (field: Field): {
     compat: TypeCompatibility;
     blocked: boolean;
     reason?: string;
   } | null => {
+    if (isEnumTable) return null;
     if (!dragSourceFieldType || isDragSourceTable) return null;
     if (existingFKFieldIds?.has(field.id)) {
       return { compat: 'forbidden', blocked: true, reason: 'Already has FK' };
@@ -357,7 +382,7 @@ export const TableNode = memo(function TableNode({
   return (
     <div
       ref={nodeRef}
-      className="absolute bg-white rounded-lg overflow-visible select-none"
+      className="absolute bg-white rounded-lg overflow-visible select-none group/table"
       style={{
         left: table.position.x, top: table.position.y, minWidth: 280,
         willChange: 'transform',
@@ -388,20 +413,33 @@ export const TableNode = memo(function TableNode({
         data-table-header={table.id}
       >
         <div className="flex flex-col min-w-0 flex-1">
-          <span className="text-white truncate" style={{ fontWeight: 600, opacity: textOpacity }}>{table.name}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-white truncate" style={{ fontWeight: 600, opacity: textOpacity }}>{table.name}</span>
+            {isEnumTable && (
+              <span
+                className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/20 text-white/90"
+                style={{ opacity: textOpacity }}
+              >
+                enum
+              </span>
+            )}
+          </div>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger className="text-white hover:bg-white/20 rounded p-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-            <MoreVertical className="size-4" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onDelete} className="text-red-600">Delete Table</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <button
+          className="text-white hover:bg-white/20 rounded p-1 flex-shrink-0 opacity-0 pointer-events-none group-hover/table:opacity-100 group-hover/table:pointer-events-auto transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            onOpenContextMenu?.(table.id, { x: rect.left, y: rect.bottom + 6 });
+          }}
+          title="Table actions"
+        >
+          <MoreVertical className="size-4" />
+        </button>
       </div>
 
       <div className="divide-y divide-gray-200 rounded-b-lg overflow-hidden">
-        {table.fields.map(field => {
+        {table.fields.map((field, fieldIndex) => {
           const isFieldDropTarget = dropTargetFieldId === field.id;
           const isSource = isDragSourceTable && dragSourceFieldId === field.id;
           const dragState = getFieldDragState(field);
@@ -446,7 +484,7 @@ export const TableNode = memo(function TableNode({
               key={field.id}
               className={`px-3 py-2 flex items-center cursor-pointer relative ${
                 !isFieldDropTarget && !isSource ? 'hover:bg-gray-50' : ''
-              } ${fieldBg}`}
+              } ${fieldBg} ${isEnumTable ? 'group/enum-row' : ''} ${isEnumTable && enumDragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''}`}
               style={fieldStyle}
               onClick={(e) => { e.stopPropagation(); onFieldClick(field); }}
               data-field-id={field.id}
@@ -454,18 +492,34 @@ export const TableNode = memo(function TableNode({
               title={dragState?.reason}
               onMouseEnter={() => setHoveredFieldId(field.id)}
               onMouseLeave={() => setHoveredFieldId(null)}
+              draggable={isEnumTable}
+              onDragStart={isEnumTable ? (e) => handleEnumRowDragStart(fieldIndex, e) : undefined}
+              onDragOver={isEnumTable ? (e) => { e.preventDefault(); setEnumDragOverIndex(fieldIndex); } : undefined}
+              onDragLeave={isEnumTable ? () => setEnumDragOverIndex(null) : undefined}
+              onDrop={isEnumTable ? (e) => handleEnumRowDrop(fieldIndex, e) : undefined}
             >
-              <div className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1" onMouseDown={(e) => handleFieldDragStart(e, field)} title="Drag to create relation">
-                <GripVertical className="size-3.5" />
-              </div>
+              {isEnumTable && (
+                <div
+                  className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  title="Drag to reorder"
+                >
+                  <GripVertical className="size-3.5" />
+                </div>
+              )}
+              {!isEnumTable && (
+                <div className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1" onMouseDown={(e) => handleFieldDragStart(e, field)} title="Drag to create relation">
+                  <GripVertical className="size-3.5" />
+                </div>
+              )}
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 {field.isPrimaryKey && <Key className="size-3 text-yellow-500 flex-shrink-0" />}
                 {field.isForeignKey && !field.isPrimaryKey && <Key className="size-3 text-blue-400 flex-shrink-0" style={{ transform: 'rotate(45deg)' }} />}
                 <span className={`text-sm truncate ${field.isForeignKey ? 'text-blue-600' : ''}`} style={{ opacity: textOpacity }}>{field.name}</span>
               </div>
-              <div className="flex items-center gap-0.5 ml-1" style={{ minWidth: 68 }}>
+              <div className="flex items-center gap-0.5 ml-1" style={{ minWidth: isEnumTable ? 28 : 68 }}>
                 {/* Always render 3 button slots to prevent width changes */}
-                <button
+                {!isEnumTable && (<button
                   className={`size-5 flex items-center justify-center rounded transition-colors ${
                     field.isNotNull
                       ? 'text-orange-500 bg-orange-50'
@@ -477,8 +531,8 @@ export const TableNode = memo(function TableNode({
                   title="NOT NULL"
                 >
                   <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>N!</span>
-                </button>
-                <button
+                </button>)}
+                {!isEnumTable && (<button
                   className={`size-5 flex items-center justify-center rounded transition-colors ${
                     field.isIndexed
                       ? 'text-cyan-500 bg-cyan-50'
@@ -490,8 +544,8 @@ export const TableNode = memo(function TableNode({
                   title="INDEX"
                 >
                   <ListOrdered className="size-3" />
-                </button>
-                <button
+                </button>)}
+                {!isEnumTable && (<button
                   className={`size-5 flex items-center justify-center rounded transition-colors ${
                     field.isUnique && !field.isPrimaryKey
                       ? 'text-purple-600 bg-purple-50'
@@ -503,16 +557,28 @@ export const TableNode = memo(function TableNode({
                   title="UNIQUE"
                 >
                   <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>UQ</span>
-                </button>
+                </button>)}
+                {isEnumTable && (
+                  <button
+                    className="size-5 flex items-center justify-center rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover/enum-row:opacity-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteField?.(field.id);
+                    }}
+                    title="Delete value"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                )}
                 {statusIndicator}
-                <button
+                {!isEnumTable && (<button
                   className="text-xs text-gray-500 ml-0.5 flex-shrink-0 flex items-center gap-0.5 hover:text-gray-800 hover:bg-gray-100 rounded px-1.5 py-0.5 transition-colors"
                   onClick={(e) => handleTypeClick(e, field.id)}
                   title="Click to change type"
                 >
                   {getFieldTypeLabel(field)}
                   {onFieldTypeChange && <ChevronDown className="size-2.5 opacity-50" />}
-                </button>
+                </button>)}
               </div>
             </div>
           );
