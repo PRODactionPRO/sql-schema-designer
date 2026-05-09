@@ -169,6 +169,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     importSelectionFromClipboard,
     getTableColor,
     assignDomainToTables,
+    reorderDomains,
     addEnum,
     updateEnum,
     deleteEnum,
