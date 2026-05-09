@@ -25,6 +25,7 @@ import { Toolbar } from './Toolbar';
 import { Sidebar } from './Sidebar';
 import { Canvas } from './Canvas';
 import { TableDetailsPanel } from './TableDetailsPanel';
+import { JsonSchemaDetailsPanel } from './JsonSchemaDetailsPanel';
 import { CanvasToolbar } from './CanvasToolbar';
 import { ExportModal } from './ExportModal';
 import { ImportModal } from './ImportModal';
@@ -38,10 +39,12 @@ import { downloadFile } from '@/shared/lib/download';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
 import { AlertTriangle, Code, PanelLeft } from 'lucide-react';
-import type { FieldType } from '../model/types';
+import type { FieldType, JsonSchemaFieldType } from '../model/types';
 
 const ENUM_TABLE_PREFIX = 'enum::';
+const JSON_SCHEMA_TABLE_PREFIX = 'jsonschema::';
 const ENUM_HEADER_FIELD_ID = '__enum_header__';
+const JSON_SCHEMA_HEADER_FIELD_ID = '__json_schema_header__';
 
 function isEnumTableId(id: string): boolean {
   return id.startsWith(ENUM_TABLE_PREFIX);
@@ -51,8 +54,41 @@ function getEnumIdFromTableId(id: string): string {
   return id.slice(ENUM_TABLE_PREFIX.length);
 }
 
+function isJsonSchemaTableId(id: string): boolean {
+  return id.startsWith(JSON_SCHEMA_TABLE_PREFIX);
+}
+
+function getJsonSchemaIdFromTableId(id: string): string {
+  return id.slice(JSON_SCHEMA_TABLE_PREFIX.length);
+}
+
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function flattenJsonSchemaNodes(
+  nodes: Array<{ id: string; name: string; type: string; parentId?: string; order?: number; collapsed?: boolean; nullable?: boolean }>,
+) {
+  const childrenByParent = new Map<string | undefined, typeof nodes>();
+  for (const node of nodes) {
+    const list = childrenByParent.get(node.parentId) || [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  }
+  for (const list of childrenByParent.values()) {
+    list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+  const out: Array<{ node: (typeof nodes)[number]; depth: number; hasChildren: boolean }> = [];
+  const walk = (parentId: string | undefined, depth: number) => {
+    const children = childrenByParent.get(parentId) || [];
+    for (const child of children) {
+      const hasChildren = (childrenByParent.get(child.id) || []).length > 0;
+      out.push({ node: child, depth, hasChildren });
+      if (hasChildren && !child.collapsed) walk(child.id, depth + 1);
+    }
+  };
+  walk(undefined, 0);
+  return out;
 }
 
 export function EditorPage() {
@@ -86,7 +122,13 @@ export function EditorPage() {
   }
 
   const initialData: SchemaStoreInitialData | undefined = projectData
-    ? { tables: projectData.schema.tables, relations: projectData.schema.relations, domains: projectData.schema.domains, enums: projectData.schema.enums ?? [] }
+    ? {
+        tables: projectData.schema.tables,
+        relations: projectData.schema.relations,
+        domains: projectData.schema.domains,
+        enums: projectData.schema.enums ?? [],
+        jsonSchemas: projectData.schema.jsonSchemas ?? [],
+      }
     : undefined;
 
   const initialSettings = projectData?.settings ?? DEFAULT_PROJECT_SETTINGS;
@@ -135,6 +177,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     relations,
     domains,
     enums,
+    jsonSchemas,
     selectedTableId,
     selectedTableIds,
     selectedRelation,
@@ -175,7 +218,19 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     deleteEnum,
     updateEnumPosition,
     reorderEnumValues,
+    reorderEnums,
+    addJsonSchema,
+    updateJsonSchema,
+    deleteJsonSchema,
+    updateJsonSchemaPosition,
+    addJsonSchemaNode,
+    updateJsonSchemaNode,
+    deleteJsonSchemaNode,
+    toggleJsonSchemaNodeCollapsed,
+    moveJsonSchemaNode,
+    reorderJsonSchemas,
     reorderTables,
+    reorderSidebarEntities,
     undo,
     redo,
     pushHistory,
@@ -203,6 +258,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       ? (domains.find((d) => d.id === enumType.domainId)?.color || '#0f766e')
       : '#0f766e',
     domainId: enumType.domainId,
+    sidebarOrder: enumType.sidebarOrder,
   }));
 
   const enumCanvasRelations = tables.flatMap((table) => (
@@ -218,8 +274,55 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       }))
   ));
 
-  const canvasTables = [...tables, ...enumCanvasTables];
-  const canvasRelations = [...relations, ...enumCanvasRelations];
+  const jsonSchemaFieldMetaByTableId = new Map<string, Record<string, { depth: number; hasChildren: boolean; collapsed: boolean; schemaType: string }>>();
+  const jsonSchemaCanvasTables = jsonSchemas.map((doc, index) => {
+    const flat = flattenJsonSchemaNodes(doc.nodes);
+    const meta: Record<string, { depth: number; hasChildren: boolean; collapsed: boolean; schemaType: string }> = {};
+    for (const row of flat) {
+      meta[`${doc.id}::node::${row.node.id}`] = {
+        depth: row.depth,
+        hasChildren: row.hasChildren,
+        collapsed: !!row.node.collapsed,
+        schemaType: row.node.type,
+      };
+    }
+    jsonSchemaFieldMetaByTableId.set(`${JSON_SCHEMA_TABLE_PREFIX}${doc.id}`, meta);
+    return {
+      id: `${JSON_SCHEMA_TABLE_PREFIX}${doc.id}`,
+      name: doc.name,
+      description: doc.description,
+      fields: flat.map(({ node }) => ({
+        id: `${doc.id}::node::${node.id}`,
+        name: node.name,
+        type: 'jsonb' as FieldType,
+        comment: `${node.type}${node.nullable ? ' | null' : ''}`,
+        isPrimaryKey: false,
+        isNullable: true,
+        isForeignKey: false,
+      })),
+      position: doc.position ?? { x: 320 + index * 40, y: 220 + index * 40 },
+      color: '#7c3aed',
+      domainId: doc.domainId,
+      sidebarOrder: doc.sidebarOrder,
+    };
+  });
+
+  const jsonSchemaCanvasRelations = tables.flatMap((table) => (
+    table.fields
+      .filter((field) => !!field.jsonSchemaId)
+      .map((field) => ({
+        id: `jsonrel::${table.id}::${field.id}::${field.jsonSchemaId}`,
+        fromTableId: table.id,
+        fromFieldId: field.id,
+        toTableId: `${JSON_SCHEMA_TABLE_PREFIX}${field.jsonSchemaId}`,
+        toFieldId: JSON_SCHEMA_HEADER_FIELD_ID,
+        type: '1:N' as const,
+      }))
+  ));
+
+  const canvasTables = [...tables, ...enumCanvasTables, ...jsonSchemaCanvasTables]
+    .sort((a, b) => (a.sidebarOrder ?? Number.MAX_SAFE_INTEGER) - (b.sidebarOrder ?? Number.MAX_SAFE_INTEGER));
+  const canvasRelations = [...relations, ...enumCanvasRelations, ...jsonSchemaCanvasRelations];
 
   // ── Local UI state ──
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -258,6 +361,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     relations: typeof relations;
     domains: typeof domains;
     enums: typeof enums;
+    jsonSchemas: typeof jsonSchemas;
     settings: ProjectSettings;
   } | null>(null);
 
@@ -291,6 +395,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     projectName,
     projectDescription,
     enums,
+    jsonSchemas,
     currentSnapshot,
     persistProject: async (project) => {
       await updateProjectMutation.mutateAsync(project);
@@ -354,9 +459,10 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     relations,
     domains,
     enums,
+    jsonSchemas,
     settings,
     snapshot: currentSnapshot,
-  }), [tables, relations, domains, enums, settings, currentSnapshot]);
+  }), [tables, relations, domains, enums, jsonSchemas, settings, currentSnapshot]);
 
   // ── Save handler (defined before keyboard shortcuts) ──
   const handleSave = useCallback(async () => {
@@ -424,6 +530,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       relations: schema.relations,
       domains: schema.domains,
       enums: schema.enums,
+      jsonSchemas: schema.jsonSchemas,
     });
 
     const settingsRaw = toRecord(schemaJson.settings);
@@ -446,6 +553,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         relations,
         domains,
         enums,
+        jsonSchemas,
         settings,
       };
     }
@@ -454,7 +562,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     setIsRevisionPreview(true);
     applyRevisionSchema(revision);
     toast.success(`Revision r${revision.revision} preview enabled`);
-  }, [applyRevisionSchema, revisionsQuery.data, tables, relations, domains, enums, settings]);
+  }, [applyRevisionSchema, revisionsQuery.data, tables, relations, domains, enums, jsonSchemas, settings]);
 
   const handleCancelRevisionPreview = useCallback(() => {
     if (!draftBeforePreviewRef.current) return;
@@ -463,6 +571,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       relations: draftBeforePreviewRef.current.relations,
       domains: draftBeforePreviewRef.current.domains,
       enums: draftBeforePreviewRef.current.enums,
+      jsonSchemas: draftBeforePreviewRef.current.jsonSchemas,
     });
     setSettings(draftBeforePreviewRef.current.settings);
     draftBeforePreviewRef.current = null;
@@ -502,12 +611,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
 
     const tableIds: string[] = [];
     const enumIds: string[] = [];
+    const jsonSchemaIds: string[] = [];
     for (const id of selectedIds) {
       if (isEnumTableId(id)) enumIds.push(getEnumIdFromTableId(id));
+      else if (isJsonSchemaTableId(id)) jsonSchemaIds.push(getJsonSchemaIdFromTableId(id));
       else tableIds.push(id);
     }
 
-    const payload = exportSelectionForClipboard(tableIds, enumIds);
+    const payload = exportSelectionForClipboard(tableIds, enumIds, jsonSchemaIds);
     if (!payload) return;
 
     try {
@@ -527,12 +638,46 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       return;
     }
 
-    const result = importSelectionFromClipboard(text);
+    let pasteOffset: { x: number; y: number } | undefined;
+    try {
+      const parsed = JSON.parse(text) as {
+        tables?: Array<{ position?: { x: number; y: number } }>;
+        enums?: Array<{ position?: { x: number; y: number } }>;
+        jsonSchemas?: Array<{ position?: { x: number; y: number } }>;
+      };
+      const positions = [
+        ...(parsed.tables ?? []).map((item) => item.position).filter((p): p is { x: number; y: number } => !!p),
+        ...(parsed.enums ?? []).map((item) => item.position).filter((p): p is { x: number; y: number } => !!p),
+        ...(parsed.jsonSchemas ?? []).map((item) => item.position).filter((p): p is { x: number; y: number } => !!p),
+      ];
+      const viewport = canvasViewportRef.current;
+      if (positions.length > 0 && viewport) {
+        const minX = Math.min(...positions.map((p) => p.x));
+        const maxX = Math.max(...positions.map((p) => p.x));
+        const minY = Math.min(...positions.map((p) => p.y));
+        const maxY = Math.max(...positions.map((p) => p.y));
+        const sourceCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+        const viewportCenter = {
+          x: (-viewport.pan.x + viewport.width / 2) / viewport.zoom,
+          y: (-viewport.pan.y + viewport.height / 2) / viewport.zoom,
+        };
+        pasteOffset = {
+          x: viewportCenter.x - sourceCenter.x,
+          y: viewportCenter.y - sourceCenter.y,
+        };
+      }
+    } catch {
+      // Ignore parse errors here; store will validate payload shape.
+    }
+
+    const result = importSelectionFromClipboard(text, pasteOffset);
     if (!result) {
       toast.error('Clipboard does not contain copied canvas tables');
       return;
     }
-    toast.success(`Pasted ${result.tables} table${result.tables > 1 ? 's' : ''}, ${result.enums} enum${result.enums === 1 ? '' : 's'} and ${result.relations} relation${result.relations === 1 ? '' : 's'}`);
+    toast.success(
+      `Pasted ${result.tables} table${result.tables > 1 ? 's' : ''}, ${result.enums} enum${result.enums === 1 ? '' : 's'}, ${result.jsonSchemas} JSON schema${result.jsonSchemas === 1 ? '' : 's'} and ${result.relations} relation${result.relations === 1 ? '' : 's'}`,
+    );
   }, [importSelectionFromClipboard]);
 
   useEditorKeyboardShortcuts({
@@ -542,7 +687,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     onImport: () => setIsImportModalOpen(true),
     onZoomToFit: () => zoomToFitRef.current?.(),
     onSelectAll: () => {
-      const allIds = new Set(tables.map(t => t.id));
+      const allIds = new Set(canvasTables.map((t) => t.id));
       useSchemaStore.getState().setSelectedTableIds(allIds);
     },
     onOpenValidation: () => setIsValidationOpen(true),
@@ -558,32 +703,58 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   const selectedEnumType = activeTableId && isEnumTableId(activeTableId)
     ? enums.find((e) => e.id === getEnumIdFromTableId(activeTableId)) || null
     : null;
+  const selectedJsonSchemaDoc = activeTableId && isJsonSchemaTableId(activeTableId)
+    ? jsonSchemas.find((doc) => doc.id === getJsonSchemaIdFromTableId(activeTableId)) || null
+    : null;
 
-  const selectedTable = panelMode === 'history'
-    ? null
-    : (selectedTableIds.size > 1
-      ? null
-      : (selectedEnumType
-        ? {
-            id: `${ENUM_TABLE_PREFIX}${selectedEnumType.id}`,
-            name: selectedEnumType.name,
-            description: selectedEnumType.description,
-            domainId: selectedEnumType.domainId,
-            fields: selectedEnumType.values.map((value, index) => ({
-              id: `${selectedEnumType.id}::value::${index}`,
-              name: value,
-              comment: selectedEnumType.valueComments?.[index],
-              type: 'varchar' as FieldType,
-              isPrimaryKey: false,
-              isNullable: false,
-              isForeignKey: false,
-            })),
-            position: selectedEnumType.position ?? { x: 240, y: 140 },
-          }
-        : (tables.find(t => t.id === activeTableId) || null)));
+  let selectedTable: import('../model/types').Table | null = null;
+
+  if (panelMode !== 'history' && selectedTableIds.size <= 1) {
+    if (selectedEnumType) {
+      selectedTable = {
+        id: `${ENUM_TABLE_PREFIX}${selectedEnumType.id}`,
+        name: selectedEnumType.name,
+        description: selectedEnumType.description,
+        domainId: selectedEnumType.domainId,
+        fields: selectedEnumType.values.map((value, index) => ({
+          id: `${selectedEnumType.id}::value::${index}`,
+          name: value,
+          comment: selectedEnumType.valueComments?.[index],
+          type: 'varchar' as FieldType,
+          isPrimaryKey: false,
+          isNullable: false,
+          isForeignKey: false,
+        })),
+        position: selectedEnumType.position ?? { x: 240, y: 140 },
+      };
+    } else if (selectedJsonSchemaDoc) {
+      selectedTable = {
+        id: `${JSON_SCHEMA_TABLE_PREFIX}${selectedJsonSchemaDoc.id}`,
+        name: selectedJsonSchemaDoc.name,
+        description: selectedJsonSchemaDoc.description,
+        domainId: selectedJsonSchemaDoc.domainId,
+        fields: selectedJsonSchemaDoc.nodes
+          .slice()
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .map((node) => ({
+            id: `${selectedJsonSchemaDoc.id}::node::${node.id}`,
+            name: node.name,
+            type: 'jsonb' as FieldType,
+            comment: `${node.type}${node.nullable ? ' | null' : ''}`,
+            isPrimaryKey: false,
+            isNullable: true,
+            isForeignKey: false,
+          })),
+        position: selectedJsonSchemaDoc.position ?? { x: 320, y: 220 },
+      };
+    } else {
+      selectedTable = tables.find((t) => t.id === activeTableId) || null;
+    }
+  }
 
   // ── Export handlers ──
   const handleExportJSON = () => { downloadFile(exportToFormat('json'), 'schema.json', 'application/json'); toast.success('Schema exported to JSON'); };
+  const handleExportJsonSchema = () => { downloadFile(exportToFormat('json-schema'), 'json-schemas.json', 'application/json'); toast.success('JSON Schema exported (draft 2020-12)'); };
   const handleExportPostgreSQL = () => { downloadFile(exportToFormat('postgresql'), 'schema.sql', 'text/plain'); toast.success('Schema exported to PostgreSQL DDL'); };
   const handleExportSupabaseRLS = () => { downloadFile(exportToFormat('supabase-rls'), 'supabase-rls-policies.sql', 'text/plain'); toast.success('Schema exported to Supabase RLS policies'); };
   const handleExportMermaid = () => { downloadFile(exportToFormat('mermaid'), 'schema.mmd', 'text/plain'); toast.success('Schema exported to Mermaid ER diagram'); };
@@ -604,7 +775,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   };
 
   const handleCreateRelation = useCallback((fromTableId: string, fromFieldId: string, toTableId: string, toFieldId: string | null) => {
-    if (isEnumTableId(fromTableId)) return;
+    if (isEnumTableId(fromTableId) || isJsonSchemaTableId(fromTableId)) return;
     if (isEnumTableId(toTableId)) {
       const enumId = getEnumIdFromTableId(toTableId);
       const sourceTable = tables.find(t => t.id === fromTableId);
@@ -617,6 +788,20 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         enumName: enumType.name,
       });
       toast.success(`Field "${sourceField.name}" linked to ENAM "${enumType.name}"`);
+      return;
+    }
+    if (isJsonSchemaTableId(toTableId)) {
+      const jsonSchemaId = getJsonSchemaIdFromTableId(toTableId);
+      const sourceTable = tables.find((t) => t.id === fromTableId);
+      const sourceField = sourceTable?.fields.find((f) => f.id === fromFieldId);
+      const jsonSchemaDoc = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
+      if (!sourceField || !jsonSchemaDoc) return;
+      updateField(fromTableId, fromFieldId, {
+        type: 'jsonb',
+        jsonSchemaId,
+        jsonSchemaName: jsonSchemaDoc.name,
+      });
+      toast.success(`Field "${sourceField.name}" linked to JSON Schema "${jsonSchemaDoc.name}"`);
       return;
     }
     const fromTable = tables.find(t => t.id === fromTableId);
@@ -678,11 +863,12 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       addRelation({ fromTableId: toTableId, fromFieldId: newFieldId, toTableId: fromTableId, toFieldId: fromFieldId, type: '1:N' });
       toast.success(`Created field "${newFieldName}" with FK relation`);
     }
-  }, [tables, relations, enums, updateField, addField, addRelation]);
+  }, [tables, relations, enums, jsonSchemas, updateField, addField, addRelation]);
 
   const handleAssignDomain = useCallback((domainId: string, tableIds: string[]) => {
     const enumTableIds = tableIds.filter(isEnumTableId);
-    const regularTableIds = tableIds.filter((id) => !isEnumTableId(id));
+    const jsonSchemaTableIds = tableIds.filter(isJsonSchemaTableId);
+    const regularTableIds = tableIds.filter((id) => !isEnumTableId(id) && !isJsonSchemaTableId(id));
 
     if (regularTableIds.length > 0) {
       assignDomainToTables(domainId, regularTableIds);
@@ -691,11 +877,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     for (const enumTableId of enumTableIds) {
       updateEnum(getEnumIdFromTableId(enumTableId), { domainId });
     }
+    for (const jsonSchemaTableId of jsonSchemaTableIds) {
+      updateJsonSchema(getJsonSchemaIdFromTableId(jsonSchemaTableId), { domainId });
+    }
 
     const domain = domains.find(d => d.id === domainId);
-    const total = regularTableIds.length + enumTableIds.length;
+    const total = regularTableIds.length + enumTableIds.length + jsonSchemaTableIds.length;
     toast.success(`Assigned ${total} table${total > 1 ? 's' : ''} to ${domain?.name || 'domain'}`);
-  }, [assignDomainToTables, domains, updateEnum]);
+  }, [assignDomainToTables, domains, updateEnum, updateJsonSchema]);
 
   const handleDeleteTables = useCallback((ids: string[]) => {
     deleteTables(ids);
@@ -726,11 +915,35 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         updateEnumPosition(enumId, { x: pos.x + dx, y: pos.y + dy });
         continue;
       }
+      if (isJsonSchemaTableId(id)) {
+        const jsonSchemaId = getJsonSchemaIdFromTableId(id);
+        const doc = jsonSchemas.find((item) => item.id === jsonSchemaId);
+        if (!doc) continue;
+        const pos = doc.position ?? { x: 320, y: 220 };
+        updateJsonSchemaPosition(jsonSchemaId, { x: pos.x + dx, y: pos.y + dy });
+        continue;
+      }
       const table = tables.find((t) => t.id === id);
       if (!table) continue;
       updateTablePosition(id, { x: table.position.x + dx, y: table.position.y + dy });
     }
-  }, [selectedTableIds, enums, tables, updateEnumPosition, updateTablePosition]);
+  }, [selectedTableIds, enums, jsonSchemas, tables, updateEnumPosition, updateJsonSchemaPosition, updateTablePosition]);
+
+  const handleJsonSchemaToggleCollapse = useCallback((tableId: string, fieldId: string) => {
+    if (!isJsonSchemaTableId(tableId)) return;
+    const docId = getJsonSchemaIdFromTableId(tableId);
+    const nodeId = fieldId.split('::node::')[1];
+    if (!nodeId) return;
+    toggleJsonSchemaNodeCollapsed(docId, nodeId);
+  }, [toggleJsonSchemaNodeCollapsed]);
+
+  const handleJsonSchemaFieldTypeChange = useCallback((tableId: string, fieldId: string, schemaType: string) => {
+    if (!isJsonSchemaTableId(tableId)) return;
+    const docId = getJsonSchemaIdFromTableId(tableId);
+    const nodeId = fieldId.split('::node::')[1];
+    if (!nodeId) return;
+    updateJsonSchemaNode(docId, nodeId, { type: schemaType as JsonSchemaFieldType });
+  }, [updateJsonSchemaNode]);
 
   // ── FK-aware field type change ──
   const handleFieldTypeChange = useCallback((tableId: string, fieldId: string, newType: FieldType, enumInfo?: { enumId?: string; enumName?: string }) => {
@@ -839,11 +1052,19 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 updateEnumPosition(getEnumIdFromTableId(tableId), position);
                 return;
               }
+              if (isJsonSchemaTableId(tableId)) {
+                updateJsonSchemaPosition(getJsonSchemaIdFromTableId(tableId), position);
+                return;
+              }
               updateTablePosition(tableId, position);
             })}
             onTableDelete={isRevisionPreview ? (() => {}) : ((tableId) => {
               if (isEnumTableId(tableId)) {
                 deleteEnum(getEnumIdFromTableId(tableId));
+                return;
+              }
+              if (isJsonSchemaTableId(tableId)) {
+                deleteJsonSchema(getJsonSchemaIdFromTableId(tableId));
                 return;
               }
               deleteTable(tableId);
@@ -853,7 +1074,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               setSelectedTableId(tableId);
             }}
             onRelationSelect={(relation) => {
-              if (relation.id.startsWith('enumrel::')) {
+              if (relation.id.startsWith('enumrel::') || relation.id.startsWith('jsonrel::')) {
                 setSelectedRelation(null);
                 return;
               }
@@ -868,8 +1089,10 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             onMoveSelectedTables={isRevisionPreview ? (() => {}) : handleMoveSelectedEntities}
             onDeleteTables={isRevisionPreview ? (() => {}) : ((ids) => {
               const enumIds = ids.filter(isEnumTableId).map(getEnumIdFromTableId);
-              const tableIds = ids.filter((id) => !isEnumTableId(id));
+              const jsonSchemaIds = ids.filter(isJsonSchemaTableId).map(getJsonSchemaIdFromTableId);
+              const tableIds = ids.filter((id) => !isEnumTableId(id) && !isJsonSchemaTableId(id));
               for (const enumId of enumIds) deleteEnum(enumId);
+              for (const jsonSchemaId of jsonSchemaIds) deleteJsonSchema(jsonSchemaId);
               if (tableIds.length > 0) handleDeleteTables(tableIds);
             })}
             getTableColor={getTableColor}
@@ -882,8 +1105,15 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             onTableDoubleClick={handleTableDoubleClick}
             onAddTable={isRevisionPreview ? (() => {}) : ((pos) => addTable('new_table', pos))}
             isEnumTableId={isEnumTableId}
+            isJsonSchemaTableId={isJsonSchemaTableId}
+            getJsonSchemaFieldMeta={(tableId) => jsonSchemaFieldMetaByTableId.get(tableId) || {}}
+            onJsonSchemaToggleCollapse={isRevisionPreview ? (() => {}) : handleJsonSchemaToggleCollapse}
+            onJsonSchemaFieldTypeChange={isRevisionPreview ? (() => {}) : handleJsonSchemaFieldTypeChange}
             onAddEnumTable={isRevisionPreview ? (() => {}) : ((pos) => {
               addEnum('new_enum', ['value_1', 'value_2'], pos);
+            })}
+            onAddJsonSchemaTable={isRevisionPreview ? (() => {}) : ((pos) => {
+              addJsonSchema('new_json_schema', pos);
             })}
             onReorderEnumValue={isRevisionPreview ? (() => {}) : ((enumTableId, fromIndex, toIndex) => {
               reorderEnumValues(getEnumIdFromTableId(enumTableId), fromIndex, toIndex);
@@ -935,7 +1165,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
 
         {/* Left panel — slides via translateX, content stays pinned to left edge */}
         <div
-          className="absolute left-0 top-0 h-full z-20 overflow-hidden transition-[width] duration-[280ms] ease-in-out"
+          className="absolute left-0 top-0 h-full z-20 overflow-hidden border-r border-gray-200"
           style={{
             width: codeMode
               ? (leftCollapsed ? '40px' : `${leftCodeWidth}px`)
@@ -946,7 +1176,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         >
           {/* Sliding inner — translateX for smooth slide */}
           <div
-            className="h-full transition-transform duration-[280ms] ease-in-out"
+            className="h-full"
             style={{
               width: `${codeMode ? leftCodeWidth : leftSidebarWidth}px`,
               transform: leftCollapsed ? 'translateX(-100%)' : 'translateX(0)',
@@ -965,9 +1195,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               />
             ) : (
               <Sidebar
-                tables={tables}
+                tables={canvasTables}
                 domains={domains}
-                selectedTableId={selectedTableId && isEnumTableId(selectedTableId) ? null : selectedTableId}
+                selectedTableId={selectedTableId && (isEnumTableId(selectedTableId) || isJsonSchemaTableId(selectedTableId)) ? null : selectedTableId}
                 selectedTableIds={selectedTableIds}
                 collapsed={false}
                 onToggleCollapse={() => setLeftCollapsed(true)}
@@ -975,16 +1205,38 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   setPanelMode('properties');
                   setSelectedTableId(tableId);
                 }}
-                onTableDelete={isRevisionPreview ? (() => {}) : deleteTable}
+                onTableDelete={isRevisionPreview ? (() => {}) : ((tableId) => {
+                  if (isEnumTableId(tableId)) {
+                    deleteEnum(getEnumIdFromTableId(tableId));
+                    return;
+                  }
+                  if (isJsonSchemaTableId(tableId)) {
+                    deleteJsonSchema(getJsonSchemaIdFromTableId(tableId));
+                    return;
+                  }
+                  deleteTable(tableId);
+                })}
                 onAddTable={isRevisionPreview ? (() => {}) : addTable}
                 onAddDomain={isRevisionPreview ? (() => {}) : ((name) => addDomain(name))}
                 onUpdateDomain={isRevisionPreview ? (() => {}) : updateDomain}
                 onDeleteDomain={isRevisionPreview ? (() => {}) : deleteDomain}
                 onAssignDomain={isRevisionPreview ? (() => {}) : handleAssignDomain}
-                onRemoveFromDomain={isRevisionPreview ? (() => {}) : ((tableId: string) => updateTableDomain(tableId, undefined))}
+                onRemoveFromDomain={isRevisionPreview ? (() => {}) : ((tableId: string) => {
+                  if (isEnumTableId(tableId)) {
+                    updateEnum(getEnumIdFromTableId(tableId), { domainId: undefined });
+                    return;
+                  }
+                  if (isJsonSchemaTableId(tableId)) {
+                    updateJsonSchema(getJsonSchemaIdFromTableId(tableId), { domainId: undefined });
+                    return;
+                  }
+                  updateTableDomain(tableId, undefined);
+                })}
                 getTableColor={getTableColor}
                 onToggleTableSelection={toggleTableSelection}
-                onReorderTables={isRevisionPreview ? (() => {}) : reorderTables}
+                onReorderTables={isRevisionPreview ? (() => {}) : ((orderedIds) => {
+                  reorderSidebarEntities(orderedIds);
+                })}
                 onReorderDomains={isRevisionPreview ? (() => {}) : reorderDomains}
                 onCenterOnTable={(tableId) => centerOnTableRef.current?.(tableId)}
                 onClearMultiSelection={clearMultiSelection}
@@ -1008,26 +1260,20 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               </button>
             </div>
           )}
-          {/* Shadow overlay */}
-          {!snapshotCaptureMode && !leftCollapsed && (
-            <div className="absolute inset-y-0 right-0 w-px pointer-events-none" style={{
-              boxShadow: codeMode ? '4px 0 24px rgba(0,0,0,0.3)' : '4px 0 16px rgba(0,0,0,0.08)',
-            }} />
-          )}
           {!snapshotCaptureMode && !leftCollapsed && (
             <div
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize left panel"
               onMouseDown={(e) => { e.preventDefault(); setResizingSide('left'); }}
-              className={`absolute top-0 right-0 h-full w-1 cursor-col-resize transition-colors ${resizingSide === 'left' ? 'bg-blue-500/50' : 'hover:bg-blue-500/35'}`}
+              className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
             />
           )}
         </div>
 
         {/* Right panel — translateX keeps content pinned to right edge */}
         <div
-          className="absolute right-0 top-0 h-full z-20 overflow-hidden transition-[width] duration-[280ms] ease-in-out"
+          className="absolute right-0 top-0 h-full z-20 overflow-hidden border-l border-gray-200"
           style={{
             width: rightCollapsed ? '40px' : `${rightPanelWidth}px`,
             transform: snapshotCaptureMode ? 'translateX(100%)' : 'translateX(0)',
@@ -1036,27 +1282,63 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         >
           {/* Sliding inner — always right-aligned */}
           <div
-            className="absolute right-0 top-0 h-full transition-transform duration-[280ms] ease-in-out"
+            className="absolute right-0 top-0 h-full"
             style={{
               width: `${rightPanelWidth}px`,
               transform: rightCollapsed ? 'translateX(calc(100% - 40px))' : 'translateX(0)',
             }}
           >
-            <TableDetailsPanel
-              mode={panelMode}
-              table={selectedTable}
-              tables={tables}
-              domains={domains}
-              enums={enums}
-              relations={relations}
-              collapsed={rightCollapsed}
-              selectedTableIds={selectedTableIds}
-              onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
-              darkMode={codeMode}
-              onUpdateTableName={(name) => {
+            {selectedJsonSchemaDoc ? (
+              <div className={`w-full ${codeMode ? 'bg-[#1e1e2e]/95' : 'bg-white/95'} backdrop-blur-sm flex flex-col h-full overflow-hidden rounded-l-lg`}>
+                <div className={`flex items-center justify-between p-2 border-b ${codeMode ? 'border-[#313244]' : 'border-gray-200'}`}>
+                  <span className={`text-xs ${codeMode ? 'text-[#6c7086]' : 'text-gray-400'} px-2`}>JSON Schema</span>
+                  <button onClick={() => setRightCollapsed(!rightCollapsed)} className={`p-1.5 rounded ${codeMode ? 'hover:bg-[#313244] text-[#6c7086]' : 'hover:bg-gray-100 text-gray-400'}`} title="Collapse">
+                    <PanelLeft className="size-3.5 rotate-180" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <JsonSchemaDetailsPanel
+                    doc={selectedJsonSchemaDoc}
+                    readOnly={isRevisionPreview}
+                    darkMode={codeMode}
+                    onRename={(name) => updateJsonSchema(selectedJsonSchemaDoc.id, { name })}
+                    onDescription={(description) => updateJsonSchema(selectedJsonSchemaDoc.id, { description })}
+                    onAddRootNode={() => addJsonSchemaNode(selectedJsonSchemaDoc.id)}
+                    onAddChildNode={(nodeId) => addJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
+                    onUpdateNode={(nodeId, updates) => updateJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId, updates)}
+                    onDeleteNode={(nodeId) => deleteJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
+                    onToggleCollapsed={(nodeId) => toggleJsonSchemaNodeCollapsed(selectedJsonSchemaDoc.id, nodeId)}
+                    onMoveNode={(nodeId, targetParentId, targetOrder) => {
+                      moveJsonSchemaNode(
+                        selectedJsonSchemaDoc.id,
+                        nodeId,
+                        targetParentId,
+                        targetOrder,
+                      );
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <TableDetailsPanel
+                mode={panelMode}
+                table={selectedTable}
+                tables={tables}
+                domains={domains}
+                enums={enums}
+                relations={relations}
+                collapsed={rightCollapsed}
+                selectedTableIds={selectedTableIds}
+                onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
+                darkMode={codeMode}
+                onUpdateTableName={(name) => {
                 if (isRevisionPreview || !activeTableId) return;
                 if (isEnumTableId(activeTableId)) {
                   updateEnum(getEnumIdFromTableId(activeTableId), { name });
+                  return;
+                }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  updateJsonSchema(getJsonSchemaIdFromTableId(activeTableId), { name });
                   return;
                 }
                 updateTableName(activeTableId, name);
@@ -1067,12 +1349,20 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateEnum(getEnumIdFromTableId(activeTableId), { description: desc });
                   return;
                 }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  updateJsonSchema(getJsonSchemaIdFromTableId(activeTableId), { description: desc });
+                  return;
+                }
                 updateTableDescription(activeTableId, desc);
               }}
               onUpdateTableDomain={(domainId) => {
                 if (isRevisionPreview || !activeTableId) return;
                 if (isEnumTableId(activeTableId)) {
                   updateEnum(getEnumIdFromTableId(activeTableId), { domainId });
+                  return;
+                }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  updateJsonSchema(getJsonSchemaIdFromTableId(activeTableId), { domainId });
                   return;
                 }
                 updateTableDomain(activeTableId, domainId);
@@ -1086,6 +1376,28 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateEnum(enumId, {
                     values: [...enumType.values, field.name],
                     valueComments: [...(enumType.valueComments ?? enumType.values.map(() => undefined)), field.comment?.trim() || undefined],
+                  });
+                  return;
+                }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  const docId = getJsonSchemaIdFromTableId(activeTableId);
+                  const doc = jsonSchemas.find((item) => item.id === docId);
+                  if (!doc) return;
+                  const nextOrder = doc.nodes.length;
+                  const newNodeId = `node_${Date.now().toString(36)}`;
+                  updateJsonSchema(docId, {
+                    nodes: [
+                      ...doc.nodes,
+                      {
+                        id: newNodeId,
+                        name: field.name.trim() || `field_${nextOrder + 1}`,
+                        type: 'json',
+                        order: nextOrder,
+                        required: false,
+                        nullable: false,
+                        description: field.comment?.trim() || undefined,
+                      },
+                    ],
                   });
                   return;
                 }
@@ -1114,6 +1426,26 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateEnum(enumId, { values: nextValues, valueComments: nextComments });
                   return;
                 }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  const docId = getJsonSchemaIdFromTableId(activeTableId);
+                  const doc = jsonSchemas.find((item) => item.id === docId);
+                  if (!doc) return;
+                  const nodeId = fieldId.split('::node::')[1];
+                  if (!nodeId) return;
+                  updateJsonSchema(docId, {
+                    nodes: doc.nodes.map((node) => {
+                      if (node.id !== nodeId) return node;
+                      return {
+                        ...node,
+                        name: typeof updates.name === 'string' ? updates.name : node.name,
+                        description: Object.prototype.hasOwnProperty.call(updates, 'comment')
+                          ? (typeof updates.comment === 'string' && updates.comment.trim().length > 0 ? updates.comment.trim() : undefined)
+                          : node.description,
+                      };
+                    }),
+                  });
+                  return;
+                }
                 if (updates.type) {
                   handleFieldTypeChange(activeTableId, fieldId, updates.type, { enumId: updates.enumId, enumName: updates.enumName });
                 } else {
@@ -1134,6 +1466,18 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateEnum(enumId, { values: nextValues, valueComments: nextComments });
                   return;
                 }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  const docId = getJsonSchemaIdFromTableId(activeTableId);
+                  const doc = jsonSchemas.find((item) => item.id === docId);
+                  if (!doc) return;
+                  const nodeId = fieldId.split('::node::')[1];
+                  if (!nodeId) return;
+                  const nextNodes = doc.nodes
+                    .filter((node) => node.id !== nodeId && node.parentId !== nodeId)
+                    .map((node, index) => ({ ...node, order: index }));
+                  updateJsonSchema(docId, { nodes: nextNodes });
+                  return;
+                }
                 deleteField(activeTableId, fieldId);
               }}
               onAddRelation={(relation) => { if (!isRevisionPreview) addRelation(relation); }}
@@ -1151,8 +1495,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               isRevisionsLoading={revisionsQuery.isLoading || revisionsQuery.isFetching}
               onSelectRevision={handleSelectRevision}
               onDeleteRevision={(revisionId) => { void handleDeleteRevision(revisionId); }}
-              isEnumTable={!!selectedEnumType}
-            />
+                isEnumTable={!!selectedEnumType || !!selectedJsonSchemaDoc}
+              />
+            )}
           </div>
           {!snapshotCaptureMode && !rightCollapsed && (
             <div
@@ -1160,7 +1505,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               aria-orientation="vertical"
               aria-label="Resize right panel"
               onMouseDown={(e) => { e.preventDefault(); setResizingSide('right'); }}
-              className={`absolute top-0 left-0 h-full w-1 cursor-col-resize transition-colors ${resizingSide === 'right' ? 'bg-blue-500/50' : 'hover:bg-blue-500/35'}`}
+              className="absolute top-0 left-0 h-full w-1 cursor-col-resize"
             />
           )}
         </div>
@@ -1224,7 +1569,16 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       </div>
 
       {/* Modals */}
-      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} onExportJSON={handleExportJSON} onExportPostgreSQL={handleExportPostgreSQL} onExportSupabaseRLS={handleExportSupabaseRLS} onExportMermaid={handleExportMermaid} getPreview={handleGetPreview} />
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        onExportJSON={handleExportJSON}
+        onExportJsonSchema={handleExportJsonSchema}
+        onExportPostgreSQL={handleExportPostgreSQL}
+        onExportSupabaseRLS={handleExportSupabaseRLS}
+        onExportMermaid={handleExportMermaid}
+        getPreview={handleGetPreview}
+      />
       <ImportModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} onImport={handleImport} />
       <SettingsModal
         isOpen={isSettingsOpen}

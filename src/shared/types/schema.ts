@@ -56,6 +56,8 @@ export interface Field {
   comment?: string;
   enumId?: string;
   enumName?: string;
+  jsonSchemaId?: string;
+  jsonSchemaName?: string;
   isPrimaryKey: boolean;
   isNullable: boolean;
   isForeignKey: boolean;
@@ -81,6 +83,50 @@ export interface EnumType {
   description?: string;
   position?: { x: number; y: number };
   domainId?: string;
+  sidebarOrder?: number;
+}
+
+export type JsonSchemaFieldType =
+  | 'string'
+  | 'number'
+  | 'integer'
+  | 'boolean'
+  | 'object'
+  | 'array'
+  | 'null'
+  | 'json';
+
+export const JSON_SCHEMA_CANONICAL_TYPES: JsonSchemaFieldType[] = [
+  'string',
+  'number',
+  'integer',
+  'boolean',
+  'object',
+  'array',
+  'null',
+];
+
+export interface JsonSchemaNode {
+  id: string;
+  name: string;
+  type: JsonSchemaFieldType;
+  parentId?: string;
+  order?: number;
+  required?: boolean; // Applies on parent object level in canonical JSON Schema
+  nullable?: boolean; // Maps to union with null
+  collapsed?: boolean; // UI-only convenience
+  enumValues?: string[]; // Used when type === 'enum'
+  description?: string;
+}
+
+export interface JsonSchemaDocument {
+  id: string;
+  name: string;
+  description?: string;
+  nodes: JsonSchemaNode[];
+  position?: { x: number; y: number };
+  domainId?: string;
+  sidebarOrder?: number;
 }
 
 export interface Table {
@@ -92,6 +138,7 @@ export interface Table {
   color?: string;
   schema?: string; // e.g. 'public'
   domainId?: string;
+  sidebarOrder?: number;
 }
 
 export type RelationType = '1:1' | '1:N' | 'N:1' | 'N:M';
@@ -110,6 +157,7 @@ export interface Schema {
   relations: Relation[];
   domains?: Domain[];
   enums?: EnumType[];
+  jsonSchemas?: JsonSchemaDocument[];
 }
 
 // Serialization format identifier

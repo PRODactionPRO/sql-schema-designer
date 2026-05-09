@@ -20,7 +20,7 @@ interface UseEditorKeyboardShortcutsOptions {
  * Keyboard shortcuts:
  * - Ctrl+Z: Undo
  * - Ctrl+Shift+Z / Ctrl+Y: Redo
- * - F: Toggle panels visibility
+ * - F / Cmd+\: Toggle panels visibility
  * - 1: Zoom to fit
  * - Ctrl+S: Save
  * - Ctrl+E: Export
@@ -54,8 +54,23 @@ export function useEditorKeyboardShortcuts({
 
       const isMod = e.metaKey || e.ctrlKey;
 
-      // F key works everywhere (including code mode), except inside CodeMirror
+      // F key and Cmd/Ctrl+\ work everywhere (including code mode), except inside CodeMirror
       if (e.code === 'KeyF' && !isMod && !e.altKey && !inCodeMirror) {
+        e.preventDefault();
+        onToggleMaximize();
+        return;
+      }
+      const isModBackslash =
+        isMod &&
+        !e.altKey &&
+        !e.shiftKey &&
+        !inCodeMirror &&
+        (
+          e.code === 'Backslash' ||
+          e.code === 'IntlBackslash' ||
+          e.key === '\\'
+        );
+      if (isModBackslash) {
         e.preventDefault();
         onToggleMaximize();
         return;

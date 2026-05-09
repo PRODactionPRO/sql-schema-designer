@@ -4,6 +4,7 @@ import { getTypeCompatibility } from '../model/types';
 import { TableNode } from './TableNode';
 import type { DragFieldInfo } from './TableNode';
 import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
+import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
 
 interface CanvasProps {
   tables: Table[];
@@ -42,7 +43,12 @@ interface CanvasProps {
   highlightRelations?: boolean;
   onPushHistory?: () => void;
   isEnumTableId?: (id: string) => boolean;
+  isJsonSchemaTableId?: (id: string) => boolean;
+  getJsonSchemaFieldMeta?: (tableId: string) => Record<string, { depth: number; hasChildren: boolean; collapsed: boolean; schemaType: string }>;
+  onJsonSchemaToggleCollapse?: (tableId: string, fieldId: string) => void;
+  onJsonSchemaFieldTypeChange?: (tableId: string, fieldId: string, schemaType: string) => void;
   onAddEnumTable?: (position?: { x: number; y: number }) => void;
+  onAddJsonSchemaTable?: (position?: { x: number; y: number }) => void;
   onReorderEnumValue?: (enumTableId: string, fromIndex: number, toIndex: number) => void;
   onReorderField?: (tableId: string, fromIndex: number, toIndex: number) => void;
   onConvertTableToEnum?: (tableId: string) => void;
@@ -57,7 +63,9 @@ const SCROLL_SPEED = 1.5;
 const TABLE_WIDTH = 280;
 const HEADER_HEIGHT = 40;
 const FIELD_HEIGHT = 36;
-const CULLING_MARGIN = 200; // extra px margin around viewport for culling
+const CULLING_MARGIN = 800; // world-space padding around viewport before a table is culled
+const CULLING_MIN_TABLES = 180; // avoid culling on medium schemas to prevent visible pop-in
+const WORLD_EXTENT = 50000; // generous workspace extent to avoid clipping at far pan positions
 
 interface DragState {
   source: DragFieldInfo;
@@ -91,7 +99,12 @@ export function Canvas({
   highlightRelations,
   onPushHistory,
   isEnumTableId,
+  isJsonSchemaTableId,
+  getJsonSchemaFieldMeta,
+  onJsonSchemaToggleCollapse,
+  onJsonSchemaFieldTypeChange,
   onAddEnumTable,
+  onAddJsonSchemaTable,
   onReorderEnumValue,
   onReorderField,
   onConvertTableToEnum,
@@ -382,7 +395,7 @@ export function Canvas({
     const table = tables.find(t => t.id === tableId);
     const otherTable = tables.find(t => t.id === otherTableId);
     if (!table || !otherTable) return null;
-    const isHeaderAnchor = fieldId === '__enum_header__';
+    const isHeaderAnchor = fieldId === '__enum_header__' || fieldId === '__json_schema_header__';
     const fi = table.fields.findIndex(f => f.id === fieldId);
     if (!isHeaderAnchor && fi === -1) return null;
     // Use drag override position if this table is being dragged
@@ -560,9 +573,12 @@ export function Canvas({
         if (!t || !o) return null;
         const tPos = tId === tableId ? pos : t.position;
         const oPos = otherId === tableId ? pos : o.position;
+        const isHeaderAnchor = fId === '__enum_header__' || fId === '__json_schema_header__';
         const fi = t.fields.findIndex(f => f.id === fId);
-        if (fi === -1) return null;
-        const cy = tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
+        if (!isHeaderAnchor && fi === -1) return null;
+        const cy = isHeaderAnchor
+          ? tPos.y + HEADER_HEIGHT / 2
+          : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
         const tcx = tPos.x + TABLE_WIDTH / 2;
         const ocx = oPos.x + TABLE_WIDTH / 2;
         return { x: ocx > tcx ? tPos.x + TABLE_WIDTH : tPos.x, y: cy };
@@ -609,9 +625,10 @@ export function Canvas({
 
   // Viewport culling: only cull tables, never relations (arrows need DOM for direct updates during drag)
   const visibleTables = useMemo(() => {
-    // Skip culling if we have few tables or canvas isn't mounted yet
+    // Skip culling for medium schemas or when canvas isn't mounted yet.
+    // This prevents noticeable pop-in near viewport edges.
     const canvas = canvasRef.current;
-    if (!canvas || tables.length <= 50) return tables;
+    if (!canvas || tables.length < CULLING_MIN_TABLES) return tables;
     const rect = canvas.getBoundingClientRect();
     const margin = CULLING_MARGIN / zoom;
     const x1 = (-pan.x / zoom) - margin;
@@ -747,6 +764,14 @@ export function Canvas({
     onAddEnumTable?.(pos);
   };
 
+  const handleCtxAddJsonSchemaTable = () => {
+    const pos = contextMenu?.worldX != null && contextMenu?.worldY != null
+      ? { x: contextMenu.worldX, y: contextMenu.worldY }
+      : undefined;
+    setContextMenu(null);
+    onAddJsonSchemaTable?.(pos);
+  };
+
   const handleCtxAutoLayout = () => {
     setContextMenu(null);
     onAutoLayout();
@@ -854,6 +879,9 @@ export function Canvas({
             </button>
             <button className={itemCls} onClick={handleCtxAddEnumTable}>
               <Tag className="size-3.5" /> Create ENAM table
+            </button>
+            <button className={itemCls} onClick={handleCtxAddJsonSchemaTable}>
+              <Code className="size-3.5" /> Create JSON Schema
             </button>
             <div className={separatorCls} />
             <button className={itemCls} onClick={handleCtxAutoLayout}>
@@ -988,11 +1016,11 @@ export function Canvas({
       <div className="absolute inset-0 origin-top-left" style={{
         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
       }}>
-        <svg className="absolute pointer-events-none" style={{ width: 10000, height: 10000, pointerEvents: 'none', overflow: 'visible' }}>
+        <svg className="absolute pointer-events-none" style={{ width: WORLD_EXTENT, height: WORLD_EXTENT, pointerEvents: 'none', overflow: 'visible' }}>
           <g style={{ pointerEvents: 'auto' }}>{relations.map(drawRelationLine)}</g>
           {drawDragLine()}
         </svg>
-        <div className="relative" style={{ minWidth: 10000, minHeight: 10000 }}>
+        <div className="relative" style={{ minWidth: WORLD_EXTENT, minHeight: WORLD_EXTENT }}>
           {visibleTables.map(table => {
             const isFocused = !hasSelection || focusedTableIds.has(table.id);
             return (
@@ -1001,7 +1029,7 @@ export function Canvas({
                 table={table}
                 tableColor={getTableColor(table)}
                 isSelected={selectedTableId === table.id}
-                isMultiSelected={selectedTableIds.has(table.id)}
+                isMultiSelected={selectedTableIds.size > 1 && selectedTableIds.has(table.id)}
                 isFocused={isFocused}
                 lodLevel={lodLevel}
                 onSelect={handleTableNodeSelect}
@@ -1026,6 +1054,10 @@ export function Canvas({
                 onDragMove={handleTableDragMove}
                 onDragStop={handleTableDragStop}
                 isEnumTable={!!isEnumTableId?.(table.id)}
+                isJsonSchemaTable={!!isJsonSchemaTableId?.(table.id)}
+                jsonSchemaFieldMeta={getJsonSchemaFieldMeta?.(table.id)}
+                onJsonSchemaToggleCollapse={(fieldId) => onJsonSchemaToggleCollapse?.(table.id, fieldId)}
+                onJsonSchemaFieldTypeChange={(fieldId, schemaType) => onJsonSchemaFieldTypeChange?.(table.id, fieldId, schemaType)}
                 onReorderEnumValue={onReorderEnumValue ? ((fromIndex, toIndex) => onReorderEnumValue(table.id, fromIndex, toIndex)) : undefined}
                 onReorderField={onReorderField ? ((fromIndex, toIndex) => onReorderField(table.id, fromIndex, toIndex)) : undefined}
                 onOpenContextMenu={(tableId, anchor) => {
@@ -1058,48 +1090,40 @@ export function Canvas({
       {/* Context menu */}
       {contextMenu && renderContextMenuContent()}
 
-      {/* Delete confirmation modal */}
-      {pendingDeleteIds && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setPendingDeleteIds(null)} onMouseDown={e => e.stopPropagation()}>
-          <div className={`rounded-xl shadow-2xl p-6 max-w-sm mx-4 ${
-            darkMode ? 'bg-[#1e1e2e] text-[#cdd6f4]' : 'bg-white'
-          }`} onClick={e => e.stopPropagation()}>
-            <h3 className={`mb-2 ${darkMode ? 'text-[#cdd6f4]' : 'text-gray-900'}`} style={{ fontWeight: 600 }}>Confirm Deletion</h3>
-            <p className={`text-sm mb-4 ${darkMode ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
-              Are you sure you want to delete {pendingDeleteIds.length} table{pendingDeleteIds.length > 1 ? 's' : ''}? This action cannot be undone.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button className={`px-4 py-2 text-sm rounded-lg ${darkMode ? 'text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-600 hover:bg-gray-100'}`} onClick={() => setPendingDeleteIds(null)}>Cancel</button>
-              <button className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-lg" onClick={handleConfirmDelete}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!pendingDeleteIds}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteIds(null);
+        }}
+        title="Confirm Deletion"
+        description={
+          pendingDeleteIds
+            ? `Are you sure you want to delete ${pendingDeleteIds.length} table${pendingDeleteIds.length > 1 ? 's' : ''}? This action cannot be undone.`
+            : undefined
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        darkMode={!!darkMode}
+        onConfirm={handleConfirmDelete}
+      />
 
-      {convertConfirmTableId && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center" onClick={() => setConvertConfirmTableId(null)} onMouseDown={e => e.stopPropagation()}>
-          <div className={`rounded-xl shadow-2xl p-6 max-w-sm mx-4 ${
-            darkMode ? 'bg-[#1e1e2e] text-[#cdd6f4]' : 'bg-white'
-          }`} onClick={e => e.stopPropagation()}>
-            <h3 className={`mb-2 ${darkMode ? 'text-[#cdd6f4]' : 'text-gray-900'}`} style={{ fontWeight: 600 }}>Confirm Conversion</h3>
-            <p className={`text-sm mb-4 ${darkMode ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
-              Convert this table to an ENUM table? Existing table links may change.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button className={`px-4 py-2 text-sm rounded-lg ${darkMode ? 'text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-600 hover:bg-gray-100'}`} onClick={() => setConvertConfirmTableId(null)}>Cancel</button>
-              <button
-                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
-                onClick={() => {
-                  onConvertTableToEnum?.(convertConfirmTableId);
-                  setConvertConfirmTableId(null);
-                }}
-              >
-                Convert
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!convertConfirmTableId}
+        onOpenChange={(open) => {
+          if (!open) setConvertConfirmTableId(null);
+        }}
+        title="Confirm Conversion"
+        description="Convert this table to an ENUM table? Existing table links may change."
+        cancelLabel="Cancel"
+        confirmLabel="Convert"
+        darkMode={!!darkMode}
+        onConfirm={() => {
+          if (!convertConfirmTableId) return;
+          onConvertTableToEnum?.(convertConfirmTableId);
+          setConvertConfirmTableId(null);
+        }}
+      />
 
       {/* Multi-select info */}
       {selectedTableIds.size > 0 && (
