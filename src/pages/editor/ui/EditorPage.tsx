@@ -984,6 +984,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 getTableColor={getTableColor}
                 onToggleTableSelection={toggleTableSelection}
                 onReorderTables={isRevisionPreview ? (() => {}) : reorderTables}
+                onReorderDomains={isRevisionPreview ? (() => {}) : reorderDomains}
                 onCenterOnTable={(tableId) => centerOnTableRef.current?.(tableId)}
                 onClearMultiSelection={clearMultiSelection}
               />
