@@ -1,7 +1,7 @@
 // ── Shared project types ──
 // Used across pages/editor (persistence) and pages/projects (listing)
 
-import type { Table, Relation, Domain, EnumType, ProjectSettings } from './schema';
+import type { Table, Relation, Domain, EnumType, JsonSchemaDocument, ProjectSettings } from './schema';
 import { DEFAULT_PROJECT_SETTINGS } from './schema';
 
 /**
@@ -21,6 +21,7 @@ export interface ProjectData {
     relations: Relation[];
     domains: Domain[];
     enums: EnumType[];
+    jsonSchemas?: JsonSchemaDocument[];
   };
   settings: ProjectSettings;
 }
@@ -44,6 +45,7 @@ export function createEmptyProject(name: string): ProjectData {
       relations: [],
       domains: [],
       enums: [],
+      jsonSchemas: [],
     },
     settings: { ...DEFAULT_PROJECT_SETTINGS },
   };

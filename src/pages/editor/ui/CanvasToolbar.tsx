@@ -1,33 +1,6 @@
-import { useState, useRef, useCallback } from 'react';
 import { Maximize2, Minimize2, Copy, Code, X, Undo2, Redo2, LayoutGrid, Eye, EyeOff, Scan, AlertTriangle, GitCompare } from 'lucide-react';
 import { Button } from '@/shared/ui/button';
-
-// Tooltip with 500ms delay
-function BarTip({ children, label, shortcut }: { children: React.ReactNode; label: string; shortcut?: string }) {
-  const [show, setShow] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleEnter = useCallback(() => {
-    timer.current = setTimeout(() => setShow(true), 500);
-  }, []);
-  const handleLeave = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    setShow(false);
-  }, []);
-
-  return (
-    <div className="relative" onMouseEnter={handleEnter} onMouseLeave={handleLeave}>
-      {children}
-      {show && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap pointer-events-none z-50 shadow-lg flex items-center gap-2">
-          <span>{label}</span>
-          {shortcut && <kbd className="text-[10px] text-gray-400 bg-gray-700 px-1.5 py-0.5 rounded">{shortcut}</kbd>}
-        </div>
-      )}
-    </div>
-  );
-}
+import { ProTooltip } from '@/shared/ui/pro-tooltip';
 
 interface CanvasToolbarProps {
   isMaximized?: boolean;
@@ -59,7 +32,7 @@ export function CanvasToolbar({
         : 'bg-white border border-gray-200'
     }`}>
       {/* Undo / Redo */}
-      <BarTip label="Undo" shortcut="Ctrl+Z">
+      <ProTooltip label="Undo" shortcut="Ctrl+Z">
         <Button
           variant="ghost"
           size="sm"
@@ -69,8 +42,8 @@ export function CanvasToolbar({
         >
           <Undo2 className="size-4" />
         </Button>
-      </BarTip>
-      <BarTip label="Redo" shortcut="Ctrl+Shift+Z">
+      </ProTooltip>
+      <ProTooltip label="Redo" shortcut="Ctrl+Shift+Z">
         <Button
           variant="ghost"
           size="sm"
@@ -80,11 +53,11 @@ export function CanvasToolbar({
         >
           <Redo2 className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
       <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
 
       {/* Auto-layout */}
-      <BarTip label="Auto-layout" shortcut="">
+      <ProTooltip label="Auto-layout">
         <Button
           variant="ghost"
           size="sm"
@@ -93,10 +66,10 @@ export function CanvasToolbar({
         >
           <LayoutGrid className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
 
       {/* Zoom to fit */}
-      <BarTip label="Zoom to fit" shortcut="1">
+      <ProTooltip label="Zoom to fit" shortcut="1">
         <Button
           variant="ghost"
           size="sm"
@@ -105,10 +78,10 @@ export function CanvasToolbar({
         >
           <Scan className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
 
       {/* Highlight relations toggle */}
-      <BarTip label={highlightRelations ? 'Hide relation highlights' : 'Show relation highlights'}>
+      <ProTooltip label={highlightRelations ? 'Hide relation highlights' : 'Show relation highlights'}>
         <Button
           variant="ghost"
           size="sm"
@@ -121,12 +94,12 @@ export function CanvasToolbar({
         >
           {highlightRelations ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
         </Button>
-      </BarTip>
+      </ProTooltip>
 
       <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
 
       {/* Validation */}
-      <BarTip label="Validate schema" shortcut="Ctrl+Shift+V">
+      <ProTooltip label="Validate schema" shortcut="Ctrl+Shift+V">
         <Button
           variant="ghost"
           size="sm"
@@ -135,10 +108,10 @@ export function CanvasToolbar({
         >
           <AlertTriangle className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
 
       {/* Schema diff */}
-      <BarTip label="Schema diff & migrations" shortcut="Ctrl+Shift+D">
+      <ProTooltip label="Schema diff & migrations" shortcut="Ctrl+Shift+D">
         <Button
           variant="ghost"
           size="sm"
@@ -147,10 +120,10 @@ export function CanvasToolbar({
         >
           <GitCompare className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
 
       <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
-      <BarTip label={isMaximized ? 'Show panels' : 'Hide panels'} shortcut="F">
+      <ProTooltip label={isMaximized ? 'Show panels' : 'Hide panels'} shortcut="F / ⌘\\">
         <Button
           variant="ghost"
           size="sm"
@@ -159,8 +132,8 @@ export function CanvasToolbar({
         >
           {isMaximized ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
         </Button>
-      </BarTip>
-      <BarTip label="Copy schema">
+      </ProTooltip>
+      <ProTooltip label="Copy schema">
         <Button
           variant="ghost"
           size="sm"
@@ -168,9 +141,9 @@ export function CanvasToolbar({
         >
           <Copy className="size-4" />
         </Button>
-      </BarTip>
+      </ProTooltip>
       <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
-      <BarTip label={codeMode ? 'Exit code mode' : 'Code mode'}>
+      <ProTooltip label={codeMode ? 'Exit code mode' : 'Code mode'}>
         <Button
           size="sm"
           onClick={onToggleCodeMode}
@@ -184,7 +157,7 @@ export function CanvasToolbar({
           {codeMode ? <X className="size-3.5" /> : <Code className="size-3.5" />}
           {codeMode ? 'Exit Code' : 'Code Mode'}
         </Button>
-      </BarTip>
+      </ProTooltip>
     </div>
   );
 }

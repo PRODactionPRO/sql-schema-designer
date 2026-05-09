@@ -6,6 +6,8 @@ import {
   type Field,
   type FieldType,
   type ProjectSettings,
+  type JsonSchemaDocument,
+  type JsonSchemaNode,
   type Relation,
   type Table,
 } from '@/shared/types/schema';
@@ -42,6 +44,8 @@ function normalizeField(value: unknown, index: number): Field {
     comment: asString(record.comment) || undefined,
     enumId: type === 'enum' ? asString(record.enumId) || undefined : undefined,
     enumName: type === 'enum' ? asString(record.enumName) || undefined : undefined,
+    jsonSchemaId: asString(record.jsonSchemaId) || undefined,
+    jsonSchemaName: asString(record.jsonSchemaName) || undefined,
     isPrimaryKey: asBoolean(record.isPrimaryKey),
     isNullable: asBoolean(record.isNullable, true),
     isForeignKey: asBoolean(record.isForeignKey),
@@ -95,6 +99,52 @@ function normalizeEnumType(value: unknown, index: number): EnumType {
           y: asNumber(record.position.y, 140 + index * 40),
         }
       : undefined,
+    sidebarOrder: asNumber(record.sidebarOrder, 10_000 + index),
+  };
+}
+
+function normalizeJsonSchemaNode(value: unknown, index: number): JsonSchemaNode {
+  const record = isRecord(value) ? value : {};
+  const rawType = asString(record.type, 'json');
+  const allowedTypes: JsonSchemaNode['type'][] = [
+    'string', 'integer', 'number', 'boolean', 'null', 'object', 'array', 'json',
+  ];
+  const type = allowedTypes.includes(rawType as JsonSchemaNode['type'])
+    ? (rawType as JsonSchemaNode['type'])
+    : 'json';
+  const enumValuesRaw = Array.isArray(record.enumValues) ? record.enumValues : [];
+  const enumValues = enumValuesRaw.map((item) => asString(item).trim()).filter(Boolean);
+  return {
+    id: asString(record.id, `json_node_${index}`),
+    name: asString(record.name, `field_${index + 1}`),
+    type,
+    parentId: asString(record.parentId) || undefined,
+    order: asNumber(record.order, index),
+    required: asBoolean(record.required),
+    nullable: asBoolean(record.nullable),
+    collapsed: asBoolean(record.collapsed),
+    enumValues: enumValues.length > 0 ? Array.from(new Set(enumValues)) : undefined,
+    description: asString(record.description) || undefined,
+  };
+}
+
+function normalizeJsonSchemaDocument(value: unknown, index: number): JsonSchemaDocument {
+  const record = isRecord(value) ? value : {};
+  const rawNodes = Array.isArray(record.nodes) ? record.nodes : [];
+  const nodes = uniqueById(rawNodes.map((node, nodeIndex) => normalizeJsonSchemaNode(node, nodeIndex)));
+  return {
+    id: asString(record.id, `json_schema_${index}`),
+    name: asString(record.name, `json_schema_${index + 1}`),
+    description: asString(record.description) || undefined,
+    nodes,
+    domainId: asString(record.domainId) || undefined,
+    position: isRecord(record.position)
+      ? {
+          x: asNumber(record.position.x, 260 + index * 40),
+          y: asNumber(record.position.y, 220 + index * 40),
+        }
+      : undefined,
+    sidebarOrder: asNumber(record.sidebarOrder, 20_000 + index),
   };
 }
 
@@ -114,6 +164,7 @@ function normalizeTable(value: unknown, index: number): Table {
     color: asString(record.color) || undefined,
     schema: asString(record.schema) || undefined,
     domainId: asString(record.domainId) || undefined,
+    sidebarOrder: asNumber(record.sidebarOrder, index),
   };
 }
 
@@ -171,6 +222,7 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
   const tables = dedupeTableNames(uniqueById((Array.isArray(record.tables) ? record.tables : []).map(normalizeTable)));
   const domains = uniqueById((Array.isArray(record.domains) ? record.domains : []).map(normalizeDomain));
   const enums = uniqueById((Array.isArray(record.enums) ? record.enums : []).map(normalizeEnumType));
+  const jsonSchemas = uniqueById((Array.isArray(record.jsonSchemas) ? record.jsonSchemas : []).map(normalizeJsonSchemaDocument));
 
   const tableById = new Map(tables.map((table) => [table.id, table]));
   const domainIdSet = new Set(domains.map((domain) => domain.id));
@@ -213,6 +265,10 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
       ...enumType,
       domainId: enumType.domainId && domainIdSet.has(enumType.domainId) ? enumType.domainId : undefined,
     })),
+    jsonSchemas: jsonSchemas.map((doc) => ({
+      ...doc,
+      domainId: doc.domainId && domainIdSet.has(doc.domainId) ? doc.domainId : undefined,
+    })),
   };
 }
 
@@ -253,6 +309,7 @@ export function normalizeProjectData(input: unknown): ProjectData | null {
       relations: schema.relations,
       domains: schema.domains ?? [],
       enums: schema.enums ?? [],
+      jsonSchemas: schema.jsonSchemas ?? [],
     },
     settings: normalizeSettings(input.settings),
   };
@@ -262,4 +319,5 @@ export interface NormalizedSchema {
   relations: Relation[];
   domains: Domain[];
   enums: EnumType[];
+  jsonSchemas: JsonSchemaDocument[];
 }

@@ -43,6 +43,7 @@ function toSchemaJson(project: ProjectData): Record<string, unknown> {
     relations: project.schema.relations,
     domains: project.schema.domains,
     enums: project.schema.enums,
+    jsonSchemas: project.schema.jsonSchemas ?? [],
     settings: project.settings,
     snapshot: project.snapshot,
   };
@@ -68,7 +69,7 @@ export async function createProject(payload: {
     body: JSON.stringify({
       name: payload.name,
       description: payload.description,
-      schemaJson: payload.schemaJson ?? { tables: [], relations: [], domains: [], enums: [], settings: DEFAULT_PROJECT_SETTINGS },
+      schemaJson: payload.schemaJson ?? { tables: [], relations: [], domains: [], enums: [], jsonSchemas: [], settings: DEFAULT_PROJECT_SETTINGS },
     }),
   });
 

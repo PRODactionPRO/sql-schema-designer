@@ -7,6 +7,7 @@ interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onExportJSON: () => void;
+  onExportJsonSchema: () => void;
   onExportPostgreSQL: () => void;
   onExportSupabaseRLS: () => void;
   onExportMermaid: () => void;
@@ -14,7 +15,7 @@ interface ExportModalProps {
 }
 
 export function ExportModal({
-  isOpen, onClose, onExportJSON, onExportPostgreSQL, onExportSupabaseRLS, onExportMermaid, getPreview,
+  isOpen, onClose, onExportJSON, onExportJsonSchema, onExportPostgreSQL, onExportSupabaseRLS, onExportMermaid, getPreview,
 }: ExportModalProps) {
   const [previewFormat, setPreviewFormat] = useState<string | null>(null);
   const [previewContent, setPreviewContent] = useState('');
@@ -22,6 +23,7 @@ export function ExportModal({
 
   const handleExport = (type: string) => {
     if (type === 'json') onExportJSON();
+    else if (type === 'json-schema') onExportJsonSchema();
     else if (type === 'postgresql') onExportPostgreSQL();
     else if (type === 'supabase-rls') onExportSupabaseRLS();
     else if (type === 'mermaid') onExportMermaid();
@@ -50,7 +52,7 @@ export function ExportModal({
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-2 text-white">
               <button onClick={() => { setPreviewFormat(null); setPreviewContent(''); }} className="text-gray-400 hover:text-white transition-colors">&larr;</button>
-              Preview: {previewFormat === 'json' ? 'JSON' : previewFormat === 'postgresql' ? 'PostgreSQL DDL' : previewFormat === 'mermaid' ? 'Mermaid ER' : 'Supabase RLS'}
+              Preview: {previewFormat === 'json' ? 'JSON' : previewFormat === 'json-schema' ? 'JSON Schema 2020-12' : previewFormat === 'postgresql' ? 'PostgreSQL DDL' : previewFormat === 'mermaid' ? 'Mermaid ER' : 'Supabase RLS'}
             </DialogTitle>
           </DialogHeader>
           <div className="flex-1 min-h-0 mt-4 relative">
@@ -86,6 +88,9 @@ export function ExportModal({
             <ExportCard icon={<Shield className="size-6" />} title="Supabase RLS" description="Export RLS policies" onExport={() => handleExport('supabase-rls')} onPreview={getPreview ? () => handlePreview('supabase-rls') : undefined} />
             <ExportCard icon={<FileJson className="size-6" />} title="JSON" description="Export JSON schema" onExport={() => handleExport('json')} onPreview={getPreview ? () => handlePreview('json') : undefined} />
             <ExportCard icon={<Database className="size-6" />} title="Mermaid ER" description="Export erDiagram" onExport={() => handleExport('mermaid')} onPreview={getPreview ? () => handlePreview('mermaid') : undefined} />
+          </div>
+          <div className="grid grid-cols-4 gap-4 mt-4">
+            <ExportCard icon={<FileJson className="size-6" />} title="JSON Schema" description="Export draft 2020-12" onExport={() => handleExport('json-schema')} onPreview={getPreview ? () => handlePreview('json-schema') : undefined} />
           </div>
         </div>
         <div className="mt-6">

@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState, memo } from 'react';
 import { createPortal } from 'react-dom';
-import { Key, MoreVertical, ChevronDown, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap, Trash2 } from 'lucide-react';
+import { Key, MoreVertical, ChevronDown, ChevronRight, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap, Trash2 } from 'lucide-react';
 import type { Field, FieldType, Table, TypeCompatibility } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
 import { useReorderableDragList } from './hooks/useReorderableDragList';
+import { ProTooltip } from '@/shared/ui/pro-tooltip';
 
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   uuid: <Fingerprint className="size-3.5" />,
@@ -40,6 +41,10 @@ const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
   array: <List className="size-3.5" />,
   enum: <Tag className="size-3.5" />,
   vector: <Zap className="size-3.5" />,
+  string: <Type className="size-3.5" />,
+  number: <Hash className="size-3.5" />,
+  object: <Braces className="size-3.5" />,
+  null: <Ban className="size-3.5" />,
 };
 
 function getTypeIcon(type: string) {
@@ -90,6 +95,10 @@ interface TableNodeProps {
   onDragMove?: (tableId: string, position: { x: number; y: number }) => void;
   onDragStop?: (tableId: string) => void;
   isEnumTable?: boolean;
+  isJsonSchemaTable?: boolean;
+  jsonSchemaFieldMeta?: Record<string, { depth: number; hasChildren: boolean; collapsed: boolean; schemaType: string }>;
+  onJsonSchemaToggleCollapse?: (fieldId: string) => void;
+  onJsonSchemaFieldTypeChange?: (fieldId: string, schemaType: string) => void;
   onReorderEnumValue?: (fromIndex: number, toIndex: number) => void;
   onReorderField?: (fromIndex: number, toIndex: number) => void;
   onOpenContextMenu?: (tableId: string, anchor: { x: number; y: number }) => void;
@@ -111,6 +120,10 @@ export const TableNode = memo(function TableNode({
   onDragMove,
   onDragStop,
   isEnumTable = false,
+  isJsonSchemaTable = false,
+  jsonSchemaFieldMeta,
+  onJsonSchemaToggleCollapse,
+  onJsonSchemaFieldTypeChange,
   onReorderEnumValue,
   onReorderField,
   onOpenContextMenu,
@@ -130,6 +143,7 @@ export const TableNode = memo(function TableNode({
 
   const borderColor = tableColor;
   const availableTypes = enabledFieldTypes || ALL_FIELD_TYPES;
+  const jsonSchemaTypes = ['string', 'number', 'integer', 'boolean', 'object', 'array', 'null', 'json'] as const;
 
   useEffect(() => {
     const handleMouseUp = () => setIsFieldReorderPointerDown(false);
@@ -248,8 +262,12 @@ export const TableNode = memo(function TableNode({
     }
   };
 
-  const handleTypeSelect = (fieldId: string, type: FieldType) => {
-    if (onFieldTypeChange) onFieldTypeChange(fieldId, type);
+  const handleTypeSelect = (fieldId: string, type: string) => {
+    if (isJsonSchemaTable) {
+      onJsonSchemaFieldTypeChange?.(fieldId, type);
+    } else if (onFieldTypeChange) {
+      onFieldTypeChange(fieldId, type as FieldType);
+    }
     setEditingTypeFieldId(null);
     setDropdownPos(null);
   };
@@ -400,7 +418,7 @@ export const TableNode = memo(function TableNode({
     : (isEnumTable && enumDnD.renderedIds
       ? enumDnD.renderedIds.map((id) => table.fields.find((field) => field.id === id)).filter((field): field is Field => !!field)
       : table.fields);
-  const relationHandleHidden = !isEnumTable && (isFieldReorderPointerDown || fieldDnD.isDragging);
+  const relationHandleHidden = (!isEnumTable && !isJsonSchemaTable) && (isFieldReorderPointerDown || fieldDnD.isDragging);
 
   return (
     <div
@@ -438,27 +456,28 @@ export const TableNode = memo(function TableNode({
         <div className="flex flex-col min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-white truncate" style={{ fontWeight: 600, opacity: textOpacity }}>{table.name}</span>
-            {isEnumTable && (
+            {(isEnumTable || isJsonSchemaTable) && (
               <span
                 className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/20 text-white/90"
                 style={{ opacity: textOpacity }}
               >
-                enum
+                {isEnumTable ? 'enum' : 'json'}
               </span>
             )}
           </div>
         </div>
-        <button
-          className="text-white hover:bg-white/20 rounded p-1 flex-shrink-0 opacity-0 pointer-events-none group-hover/table:opacity-100 group-hover/table:pointer-events-auto transition-opacity"
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            onOpenContextMenu?.(table.id, { x: rect.left, y: rect.bottom + 6 });
-          }}
-          title="Table actions"
-        >
-          <MoreVertical className="size-4" />
-        </button>
+        <ProTooltip label="Table actions">
+          <button
+            className="text-white hover:bg-white/20 rounded p-1 flex-shrink-0 opacity-0 pointer-events-none group-hover/table:opacity-100 group-hover/table:pointer-events-auto transition-opacity"
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              onOpenContextMenu?.(table.id, { x: rect.left, y: rect.bottom + 6 });
+            }}
+          >
+            <MoreVertical className="size-4" />
+          </button>
+        </ProTooltip>
       </div>
 
       <div className="divide-y divide-gray-200 rounded-b-lg overflow-visible">
@@ -528,99 +547,132 @@ export const TableNode = memo(function TableNode({
               onDropCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDrop({ event: e }) : undefined}
               onDragEnd={isEnumTable ? enumDnD.handleDragEnd : (!isEnumTable && onReorderField ? handleFieldRowDragEnd : undefined)}
             >
-              {isEnumTable && (
+              <ProTooltip label={isEnumTable ? 'Drag to reorder' : isJsonSchemaTable ? 'Drag handle' : 'Drag to reorder field'}>
                 <div
                   className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  title="Drag to reorder"
+                  onMouseDown={(e) => {
+                    e.stopPropagation();
+                    if (!isEnumTable && !isJsonSchemaTable) setIsFieldReorderPointerDown(true);
+                  }}
                 >
                   <GripVertical className="size-3.5" />
                 </div>
-              )}
-              {!isEnumTable && (
-                <div
-                  className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1"
-                  onMouseDown={(e) => { e.stopPropagation(); setIsFieldReorderPointerDown(true); }}
-                  title="Drag to reorder field"
-                >
-                  <GripVertical className="size-3.5" />
-                </div>
-              )}
+              </ProTooltip>
               {!isEnumTable && !relationHandleHidden && (
-                <button
-                  type="button"
-                  className="absolute -left-1.5 top-1/2 -translate-y-1/2 size-3 rounded-full border-2 border-blue-500 bg-white opacity-0 group-hover/field-row:opacity-100 hover:bg-blue-500 transition-colors z-30"
-                  onMouseDown={(e) => handleFieldDragStart(e, field)}
-                  title="Drag to create relation"
-                />
+                <ProTooltip label="Drag to create relation">
+                  <button
+                    type="button"
+                    className="absolute -left-1.5 top-1/2 -translate-y-1/2 size-3 rounded-full border-2 border-blue-500 bg-white opacity-0 group-hover/field-row:opacity-100 hover:bg-blue-500 transition-colors z-30"
+                    onMouseDown={(e) => handleFieldDragStart(e, field)}
+                  />
+                </ProTooltip>
               )}
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                {isJsonSchemaTable && (() => {
+                  const meta = jsonSchemaFieldMeta?.[field.id];
+                  if (!meta) return null;
+                  const indentPx = Math.max(0, meta.depth) * 14;
+                  return (
+                    <>
+                      <span style={{ width: indentPx }} className="shrink-0" />
+                      {meta.hasChildren ? (
+                        <ProTooltip label={meta.collapsed ? 'Expand' : 'Collapse'}>
+                          <button
+                            type="button"
+                            className="size-4 rounded hover:bg-gray-100 flex items-center justify-center"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onJsonSchemaToggleCollapse?.(field.id);
+                            }}
+                          >
+                            {meta.collapsed ? <ChevronRight className="size-3 text-gray-500" /> : <ChevronDown className="size-3 text-gray-500" />}
+                          </button>
+                        </ProTooltip>
+                      ) : (
+                        <span className="inline-block w-4" />
+                      )}
+                    </>
+                  );
+                })()}
                 {field.isPrimaryKey && <Key className="size-3 text-yellow-500 flex-shrink-0" />}
                 {field.isForeignKey && !field.isPrimaryKey && <Key className="size-3 text-blue-400 flex-shrink-0" style={{ transform: 'rotate(45deg)' }} />}
                 <span className={`text-sm truncate ${field.isForeignKey ? 'text-blue-600' : ''}`} style={{ opacity: textOpacity }}>{field.name}</span>
               </div>
               <div className="flex items-center gap-0.5 ml-1" style={{ minWidth: isEnumTable ? 28 : 68 }}>
                 {/* Always render 3 button slots to prevent width changes */}
-                {!isEnumTable && (<button
-                  className={`size-5 flex items-center justify-center rounded transition-colors ${
-                    field.isNotNull
-                      ? 'text-orange-500 bg-orange-50'
-                      : showNotNull
-                        ? 'text-gray-300 hover:text-orange-400 hover:bg-orange-50'
-                        : 'invisible'
-                  }`}
-                  onClick={(e) => toggleNotNull(e, field)}
-                  title="NOT NULL"
-                >
-                  <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>N!</span>
-                </button>)}
-                {!isEnumTable && (<button
-                  className={`size-5 flex items-center justify-center rounded transition-colors ${
-                    field.isIndexed
-                      ? 'text-cyan-500 bg-cyan-50'
-                      : showIndex
-                        ? 'text-gray-300 hover:text-cyan-400 hover:bg-cyan-50'
-                        : 'invisible'
-                  }`}
-                  onClick={(e) => toggleIndex(e, field)}
-                  title="INDEX"
-                >
-                  <ListOrdered className="size-3" />
-                </button>)}
-                {!isEnumTable && (<button
-                  className={`size-5 flex items-center justify-center rounded transition-colors ${
-                    field.isUnique && !field.isPrimaryKey
-                      ? 'text-purple-600 bg-purple-50'
-                      : showUnique
-                        ? 'text-gray-300 hover:text-purple-400 hover:bg-purple-50'
-                        : 'invisible'
-                  }`}
-                  onClick={(e) => toggleUnique(e, field)}
-                  title="UNIQUE"
-                >
-                  <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>UQ</span>
-                </button>)}
-                {isEnumTable && (
-                  <button
-                    className="size-5 flex items-center justify-center rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover/enum-row:opacity-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteField?.(field.id);
-                    }}
-                    title="Delete value"
-                  >
-                    <Trash2 className="size-3" />
-                  </button>
+                {!isEnumTable && !isJsonSchemaTable && (
+                  <ProTooltip label="NOT NULL">
+                    <button
+                      className={`size-5 flex items-center justify-center rounded transition-colors ${
+                        field.isNotNull
+                          ? 'text-orange-500 bg-orange-50'
+                          : showNotNull
+                            ? 'text-gray-300 hover:text-orange-400 hover:bg-orange-50'
+                            : 'invisible'
+                      }`}
+                      onClick={(e) => toggleNotNull(e, field)}
+                    >
+                      <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>N!</span>
+                    </button>
+                  </ProTooltip>
+                )}
+                {!isEnumTable && !isJsonSchemaTable && (
+                  <ProTooltip label="INDEX">
+                    <button
+                      className={`size-5 flex items-center justify-center rounded transition-colors ${
+                        field.isIndexed
+                          ? 'text-cyan-500 bg-cyan-50'
+                          : showIndex
+                            ? 'text-gray-300 hover:text-cyan-400 hover:bg-cyan-50'
+                            : 'invisible'
+                      }`}
+                      onClick={(e) => toggleIndex(e, field)}
+                    >
+                      <ListOrdered className="size-3" />
+                    </button>
+                  </ProTooltip>
+                )}
+                {!isEnumTable && !isJsonSchemaTable && (
+                  <ProTooltip label="UNIQUE">
+                    <button
+                      className={`size-5 flex items-center justify-center rounded transition-colors ${
+                        field.isUnique && !field.isPrimaryKey
+                          ? 'text-purple-600 bg-purple-50'
+                          : showUnique
+                            ? 'text-gray-300 hover:text-purple-400 hover:bg-purple-50'
+                            : 'invisible'
+                      }`}
+                      onClick={(e) => toggleUnique(e, field)}
+                    >
+                      <span className="text-[9px]" style={{ fontWeight: 700, lineHeight: 1 }}>UQ</span>
+                    </button>
+                  </ProTooltip>
+                )}
+                {(isEnumTable || isJsonSchemaTable) && (
+                  <ProTooltip label={isEnumTable ? 'Delete value' : 'Delete field'}>
+                    <button
+                      className="size-5 flex items-center justify-center rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover/enum-row:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteField?.(field.id);
+                      }}
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </ProTooltip>
                 )}
                 {statusIndicator}
-                {!isEnumTable && (<button
-                  className="text-xs text-gray-500 ml-0.5 flex-shrink-0 flex items-center gap-0.5 hover:text-gray-800 hover:bg-gray-100 rounded px-1.5 py-0.5 transition-colors"
-                  onClick={(e) => handleTypeClick(e, field.id)}
-                  title="Click to change type"
-                >
-                  {getFieldTypeLabel(field)}
-                  {onFieldTypeChange && <ChevronDown className="size-2.5 opacity-50" />}
-                </button>)}
+                {!isEnumTable && (
+                  <ProTooltip label="Change field type">
+                    <button
+                      className="text-xs text-gray-500 ml-0.5 flex-shrink-0 flex items-center gap-0.5 hover:text-gray-800 hover:bg-gray-100 rounded px-1.5 py-0.5 transition-colors"
+                      onClick={(e) => handleTypeClick(e, field.id)}
+                    >
+                      {isJsonSchemaTable ? (jsonSchemaFieldMeta?.[field.id]?.schemaType || 'json') : getFieldTypeLabel(field)}
+                      {(onFieldTypeChange || (isJsonSchemaTable && onJsonSchemaFieldTypeChange)) && <ChevronDown className="size-2.5 opacity-50" />}
+                    </button>
+                  </ProTooltip>
+                )}
               </div>
             </div>
           );
@@ -640,17 +692,21 @@ export const TableNode = memo(function TableNode({
               onWheel={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              {availableTypes.map(type => (
+              {(isJsonSchemaTable ? jsonSchemaTypes : availableTypes).map(type => (
                 <button
                   key={type}
                   className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
-                    editingField.type === type
+                    (isJsonSchemaTable
+                      ? (jsonSchemaFieldMeta?.[editingField.id]?.schemaType === type)
+                      : (editingField.type === type))
                       ? 'bg-blue-600 text-white'
                       : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                   }`}
                   onClick={() => handleTypeSelect(editingTypeFieldId, type)}
                 >
-                  <span className={editingField.type === type ? 'text-blue-200' : 'text-gray-500'}>{getTypeIcon(type)}</span>
+                  <span className={(isJsonSchemaTable
+                    ? (jsonSchemaFieldMeta?.[editingField.id]?.schemaType === type)
+                    : (editingField.type === type)) ? 'text-blue-200' : 'text-gray-500'}>{getTypeIcon(type)}</span>
                   {type}
                 </button>
               ))}
