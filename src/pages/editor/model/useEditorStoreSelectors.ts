@@ -43,6 +43,7 @@ export function useEditorStoreSelectors() {
       importSelectionFromClipboard: s.importSelectionFromClipboard,
       getTableColor: s.getTableColor,
       assignDomainToTables: s.assignDomainToTables,
+      reorderDomains: s.reorderDomains,
       addEnum: s.addEnum,
       updateEnum: s.updateEnum,
       deleteEnum: s.deleteEnum,

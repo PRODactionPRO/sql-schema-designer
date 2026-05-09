@@ -169,6 +169,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     importSelectionFromClipboard,
     getTableColor,
     assignDomainToTables,
+    reorderDomains,
     addEnum,
     updateEnum,
     deleteEnum,
@@ -984,6 +985,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 getTableColor={getTableColor}
                 onToggleTableSelection={toggleTableSelection}
                 onReorderTables={isRevisionPreview ? (() => {}) : reorderTables}
+                onReorderDomains={isRevisionPreview ? (() => {}) : reorderDomains}
                 onCenterOnTable={(tableId) => centerOnTableRef.current?.(tableId)}
                 onClearMultiSelection={clearMultiSelection}
               />
