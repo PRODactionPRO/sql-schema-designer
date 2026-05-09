@@ -92,4 +92,12 @@ export default tseslint.config(
       'no-restricted-properties': 'off',
     },
   },
+  {
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: globals.node,
+    },
+  },
 );
