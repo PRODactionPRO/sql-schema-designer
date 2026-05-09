@@ -55,15 +55,14 @@ export function ProTooltip({ children, label, shortcut, side = 'top', offset = 8
       {open && createPortal(
         <div
           ref={tooltipRef}
-          className="fixed z-[200] px-2.5 py-1.5 bg-[#111827] text-white text-xs rounded-lg whitespace-nowrap pointer-events-none shadow-lg flex items-center gap-2"
+          className="fixed z-[200] px-2.5 py-1.5 bg-white text-gray-700 text-xs rounded-lg whitespace-nowrap pointer-events-none shadow-lg border border-gray-200 flex items-center gap-2"
           style={pos ? { top: pos.top, left: pos.left } : { visibility: 'hidden' }}
         >
           <span>{label}</span>
-          {shortcut && <kbd className="text-[10px] text-gray-300 bg-[#374151] px-1.5 py-0.5 rounded">{shortcut}</kbd>}
+          {shortcut && <kbd className="text-[10px] text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{shortcut}</kbd>}
         </div>,
         document.body,
       )}
     </span>
   );
 }
-

@@ -38,6 +38,7 @@ import { DiffModal } from './DiffModal';
 import { downloadFile } from '@/shared/lib/download';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
+import { ProTooltip } from '@/shared/ui/pro-tooltip';
 import { AlertTriangle, Code, PanelLeft } from 'lucide-react';
 import type { FieldType, JsonSchemaFieldType } from '../model/types';
 
@@ -1216,7 +1217,22 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   }
                   deleteTable(tableId);
                 })}
+                onRenameTable={isRevisionPreview ? (() => {}) : ((tableId, name) => {
+                  const nextName = name.trim();
+                  if (!nextName) return;
+                  if (isEnumTableId(tableId)) {
+                    updateEnum(getEnumIdFromTableId(tableId), { name: nextName });
+                    return;
+                  }
+                  if (isJsonSchemaTableId(tableId)) {
+                    updateJsonSchema(getJsonSchemaIdFromTableId(tableId), { name: nextName });
+                    return;
+                  }
+                  updateTableName(tableId, nextName);
+                })}
                 onAddTable={isRevisionPreview ? (() => {}) : addTable}
+                onAddEnumTable={isRevisionPreview ? (() => {}) : ((name) => { addEnum(name, ['value_1', 'value_2']); })}
+                onAddJsonSchemaTable={isRevisionPreview ? (() => {}) : ((name) => { addJsonSchema(name); })}
                 onAddDomain={isRevisionPreview ? (() => {}) : ((name) => addDomain(name))}
                 onUpdateDomain={isRevisionPreview ? (() => {}) : updateDomain}
                 onDeleteDomain={isRevisionPreview ? (() => {}) : deleteDomain}
@@ -1251,13 +1267,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               borderTopRightRadius: '0.5rem',
               borderBottomRightRadius: '0.5rem',
             }}>
-              <button
-                onClick={() => setLeftCollapsed(false)}
-                className={`p-1.5 rounded ${codeMode ? 'hover:bg-[#313244] text-[#a6adc8]' : 'hover:bg-gray-100 text-gray-500'}`}
-                title="Expand panel (F)"
-              >
-                {codeMode ? <Code className="size-4" /> : <PanelLeft className="size-4" />}
-              </button>
+              <ProTooltip label="Expand panel" shortcut="F">
+                <button
+                  onClick={() => setLeftCollapsed(false)}
+                  className={`p-1.5 rounded ${codeMode ? 'hover:bg-[#313244] text-[#a6adc8]' : 'hover:bg-gray-100 text-gray-500'}`}
+                >
+                  {codeMode ? <Code className="size-4" /> : <PanelLeft className="size-4" />}
+                </button>
+              </ProTooltip>
             </div>
           )}
           {!snapshotCaptureMode && !leftCollapsed && (

@@ -2,6 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const HIDDEN_DRAG_IMAGE_SRC =
   'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+let sharedHiddenDragImage: HTMLImageElement | null = null;
+
+function getHiddenDragImage(): HTMLImageElement {
+  if (sharedHiddenDragImage) return sharedHiddenDragImage;
+  const img = new Image();
+  img.src = HIDDEN_DRAG_IMAGE_SRC;
+  sharedHiddenDragImage = img;
+  return img;
+}
+
+export function applyHiddenDragImage(event: React.DragEvent) {
+  const img = getHiddenDragImage();
+  event.dataTransfer.setDragImage(img, 0, 0);
+}
 
 interface UseReorderableDragListOptions {
   itemIds: string[];
@@ -38,9 +52,7 @@ export function useReorderableDragList({
 
   useEffect(() => {
     if (hiddenDragImageRef.current) return;
-    const img = new Image();
-    img.src = HIDDEN_DRAG_IMAGE_SRC;
-    hiddenDragImageRef.current = img;
+    hiddenDragImageRef.current = getHiddenDragImage();
   }, []);
 
   const cleanup = () => {
@@ -57,9 +69,7 @@ export function useReorderableDragList({
     setPreviewOrderIds(itemIds);
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
-    if (hiddenDragImageRef.current) {
-      event.dataTransfer.setDragImage(hiddenDragImageRef.current, 0, 0);
-    }
+    if (hiddenDragImageRef.current) applyHiddenDragImage(event);
   };
 
   const handleDragOver = ({ index, itemId, event }: DragOverArgs) => {
@@ -136,4 +146,3 @@ export function useReorderableDragList({
     handleDragEnd,
   };
 }
-

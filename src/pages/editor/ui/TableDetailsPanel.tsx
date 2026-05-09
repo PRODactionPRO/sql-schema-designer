@@ -164,9 +164,11 @@ export function TableDetailsPanel({
   if (collapsed) {
     return (
       <div className={`w-10 ${collapsedBg} backdrop-blur-sm flex flex-col items-center pt-2 h-full rounded-l-lg`}>
-        <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textSecondary}`} title="Expand panel (F)">
-          <PanelRight className="size-4" />
-        </button>
+        <ProTooltip label="Expand panel" shortcut="F">
+          <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textSecondary}`}>
+            <PanelRight className="size-4" />
+          </button>
+        </ProTooltip>
       </div>
     );
   }

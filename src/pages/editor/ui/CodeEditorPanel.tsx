@@ -15,6 +15,7 @@ import { parseDBML } from '../lib/dbml/parser';
 import { parseMermaidER } from '../lib/mermaid-er/parser';
 import { parseDDL } from '../lib/ddl/parser';
 import { Code, FileCode, GitBranch, Database, AlertTriangle, CheckCircle, PanelLeftClose } from 'lucide-react';
+import { ProTooltip } from '@/shared/ui/pro-tooltip';
 
 export type TabId = 'dsl' | 'dbml' | 'mermaid' | 'ddl';
 
@@ -467,13 +468,14 @@ export function CodeEditorPanel({ value, onChange, errors, onSync, activeTab, on
           );
         })}
         {onClose && (
-          <button
-            onClick={onClose}
-            className="ml-auto relative flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-t-lg transition-colors text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#181825]"
-            title="Collapse panel (F)"
-          >
-            <PanelLeftClose className="size-3.5" />
-          </button>
+          <ProTooltip label="Collapse panel" shortcut="F">
+            <button
+              onClick={onClose}
+              className="ml-auto relative flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-t-lg transition-colors text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#181825]"
+            >
+              <PanelLeftClose className="size-3.5" />
+            </button>
+          </ProTooltip>
         )}
       </div>
 
