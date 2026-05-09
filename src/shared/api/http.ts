@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/shared/auth/store';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3200/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export class ApiError extends Error {
   status: number;
@@ -27,6 +27,7 @@ export async function apiRequest<T>(
   init: RequestInit = {},
   options: { skipAuth?: boolean } = {},
 ): Promise<T> {
+  const startedAt = performance.now();
   const token = useAuthStore.getState().token;
 
   const headers = new Headers(init.headers || {});
@@ -38,10 +39,31 @@ export async function apiRequest<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const url = `${API_BASE_URL}${path}`;
+  const bodySize = typeof init.body === 'string' ? init.body.length : 0;
+  const shouldLog = path.includes('/projects') || path.includes('/revisions');
+  if (shouldLog) {
+    console.info('[apiRequest:start]', {
+      method: init.method || 'GET',
+      path,
+      bodySize,
+      startedAt: new Date().toISOString(),
+    });
+  }
+
+  const response = await fetch(url, {
     ...init,
     headers,
   });
+
+  if (shouldLog) {
+    console.info('[apiRequest:done]', {
+      method: init.method || 'GET',
+      path,
+      status: response.status,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+  }
 
   const body = await parseResponse(response);
 

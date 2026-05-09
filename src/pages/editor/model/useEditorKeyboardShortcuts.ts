@@ -12,6 +12,8 @@ interface UseEditorKeyboardShortcutsOptions {
   onSelectAll?: () => void;
   onOpenValidation?: () => void;
   onOpenDiff?: () => void;
+  onCopy?: () => void;
+  onPaste?: () => void;
 }
 
 /**
@@ -39,6 +41,8 @@ export function useEditorKeyboardShortcuts({
   onSelectAll,
   onOpenValidation,
   onOpenDiff,
+  onCopy,
+  onPaste,
 }: UseEditorKeyboardShortcutsOptions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -85,6 +89,12 @@ export function useEditorKeyboardShortcuts({
       } else if (isMod && e.code === 'KeyA') {
         e.preventDefault();
         onSelectAll?.();
+      } else if (isMod && e.code === 'KeyC') {
+        e.preventDefault();
+        onCopy?.();
+      } else if (isMod && e.code === 'KeyV' && !e.shiftKey) {
+        e.preventDefault();
+        onPaste?.();
       } else if (isMod && e.shiftKey && e.code === 'KeyV') {
         e.preventDefault();
         onOpenValidation?.();
@@ -95,5 +105,5 @@ export function useEditorKeyboardShortcuts({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, codeMode, onToggleMaximize, onSave, onExport, onImport, onZoomToFit, onSelectAll, onOpenValidation, onOpenDiff]);
+  }, [undo, redo, codeMode, onToggleMaximize, onSave, onExport, onImport, onZoomToFit, onSelectAll, onOpenValidation, onOpenDiff, onCopy, onPaste]);
 }

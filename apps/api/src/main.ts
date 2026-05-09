@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { createOpenApiDocument } from './openapi/swagger';
 
@@ -21,6 +22,8 @@ async function bootstrap() {
   const swaggerPath =
     configService.get<string>('app.swaggerPath') ??
     configService.get<string>('SWAGGER_PATH', 'docs');
+  const bodySizeLimit =
+    configService.get<string>('BODY_SIZE_LIMIT') ?? '2mb';
   const origins =
     configService.get<string[]>('cors.origins') ??
     configService
@@ -30,6 +33,9 @@ async function bootstrap() {
       .filter(Boolean);
 
   app.setGlobalPrefix(globalPrefix);
+  // Large schemaJson payloads can include inline snapshot data URLs.
+  app.use(json({ limit: bodySizeLimit }));
+  app.use(urlencoded({ extended: true, limit: bodySizeLimit }));
   app.enableCors({
     origin: origins.length ? origins : true,
     credentials: true,

@@ -10,7 +10,7 @@ import { ddlSerializer } from './ddl-serializer';
 import { supabaseRlsSerializer } from './supabase-rls-serializer';
 import { mermaidSerializer } from './mermaid-serializer';
 
-/** Реестр всех доступных сериализаторов */
+/** Registry of all available serializers */
 export const serializers: SchemaSerializer[] = [
   jsonSerializer,
   ddlSerializer,
@@ -18,17 +18,17 @@ export const serializers: SchemaSerializer[] = [
   mermaidSerializer,
 ];
 
-/** Получить сериализатор по ID */
+/** Get serializer by ID */
 export function getSerializer(id: string): SchemaSerializer | undefined {
   return serializers.find(s => s.id === id);
 }
 
-/** Получить все сериализаторы, поддерживающие экспорт */
+/** Get all serializers that support export */
 export function getExportSerializers(): SchemaSerializer[] {
   return serializers.filter(s => s.canExport);
 }
 
-/** Получить все сериализаторы, поддерживающие импорт */
+/** Get all serializers that support import */
 export function getImportSerializers(): SchemaSerializer[] {
   return serializers.filter(s => s.canImport);
 }

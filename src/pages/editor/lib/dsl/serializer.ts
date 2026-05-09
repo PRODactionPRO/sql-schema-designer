@@ -15,8 +15,11 @@ export function serializeToDSL(
   // ─── Enums ───
   for (const enumType of enums) {
     lines.push(`enum ${enumType.name} {`);
-    for (const value of enumType.values) {
-      lines.push(`  ${value}`);
+    for (let idx = 0; idx < enumType.values.length; idx += 1) {
+      const value = enumType.values[idx];
+      const valueComment = enumType.valueComments?.[idx]?.trim();
+      const inlineComment = valueComment ? ` // ${valueComment.replace(/\n+/g, ' | ')}` : '';
+      lines.push(`  ${value}${inlineComment}`);
     }
     lines.push('}');
     lines.push('');

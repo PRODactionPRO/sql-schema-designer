@@ -82,6 +82,7 @@ interface TableDetailsPanelProps {
   isRevisionsLoading?: boolean;
   onSelectRevision?: (revisionId: string) => void;
   onDeleteRevision?: (revisionId: string) => void;
+  isEnumTable?: boolean;
 }
 
 // Tooltip wrapper
@@ -111,6 +112,7 @@ export function TableDetailsPanel({
   onSelectRevision,
   onDeleteRevision,
   darkMode,
+  isEnumTable = false,
 }: TableDetailsPanelProps) {
   const [isAddingField, setIsAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
@@ -181,16 +183,16 @@ export function TableDetailsPanel({
           <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
             <span className={`text-xs ${textMuted} px-2 flex items-center gap-1.5`}>
               <History className="size-3.5" />
-              История версий
+              Version history
             </span>
             <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
               <PanelRightClose className="size-3.5" />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Загрузка истории...</div>}
+            {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Loading history...</div>}
             {!isRevisionsLoading && revisions.length === 0 && (
-              <div className={`text-sm ${textSecondary} px-2 py-3`}>История версий пока пуста.</div>
+              <div className={`text-sm ${textSecondary} px-2 py-3`}>Version history is empty.</div>
             )}
             {!isRevisionsLoading && revisions.map((revision) => {
               const isActive = selectedRevisionId === revision.id;
@@ -208,7 +210,7 @@ export function TableDetailsPanel({
                       <span className="text-sm font-medium">r{revision.revision}</span>
                       <span className={`text-[11px] ${textSecondary}`}>{new Date(revision.createdAt).toLocaleString()}</span>
                     </div>
-                    <div className={`text-xs mt-1 ${textSecondary}`}>{revision.comment || 'Без комментария'}</div>
+                    <div className={`text-xs mt-1 ${textSecondary}`}>{revision.comment || 'No comment'}</div>
                   </button>
                   <button
                     type="button"
@@ -221,7 +223,7 @@ export function TableDetailsPanel({
                         ? 'border-red-500/50 text-red-300 bg-red-500/10 hover:bg-red-500/20'
                         : 'border-red-300 text-red-600 bg-white hover:bg-red-50'
                     }`}
-                    title="Удалить версию"
+                    title="Delete version"
                   >
                     <Trash2 className="size-3.5" />
                   </button>
@@ -232,13 +234,13 @@ export function TableDetailsPanel({
           {revisionToDelete && createPortal(
             <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/45">
               <div className={`w-[340px] rounded-xl border p-4 shadow-xl ${dk ? 'bg-[#1e1e2e] border-[#45475a]' : 'bg-white border-gray-200'}`}>
-                <div className={`text-sm font-semibold ${dk ? 'text-[#cdd6f4]' : 'text-gray-900'}`}>Удалить версию r{revisionToDelete.revision}?</div>
+                <div className={`text-sm font-semibold ${dk ? 'text-[#cdd6f4]' : 'text-gray-900'}`}>Delete version r{revisionToDelete.revision}?</div>
                 <div className={`text-xs mt-2 ${dk ? 'text-[#a6adc8]' : 'text-gray-600'}`}>
-                  Действие необратимо. Версия будет удалена из истории.
+                  This action cannot be undone. The version will be removed from history.
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setRevisionToDelete(null)}>
-                    Отмена
+                    Cancel
                   </Button>
                   <Button
                     size="sm"
@@ -248,7 +250,7 @@ export function TableDetailsPanel({
                     }}
                     className="bg-red-600 hover:bg-red-700 text-white"
                   >
-                    Удалить
+                    Delete
                   </Button>
                 </div>
               </div>
@@ -335,7 +337,7 @@ export function TableDetailsPanel({
       const enumType = enums.find(e => e.id === newFieldEnumId);
       onAddField({
         name: newFieldName.trim(),
-        type: newFieldType,
+        type: isEnumTable ? 'varchar' : newFieldType,
         enumId: newFieldType === 'enum' ? enumType?.id : undefined,
         enumName: newFieldType === 'enum' ? enumType?.name : undefined,
         isPrimaryKey: false,
@@ -440,7 +442,7 @@ export function TableDetailsPanel({
       <div className="flex-1 overflow-y-auto panel-scroll">
         <div className="p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">Fields</h3>
+            <h3 className="font-semibold text-sm">{isEnumTable ? 'Values' : 'Fields'}</h3>
             <Button onClick={() => setIsAddingField(true)} size="sm" variant="outline" className="h-7">
               <Plus className="size-3 mr-1" /> Add
             </Button>
@@ -455,7 +457,65 @@ export function TableDetailsPanel({
 
               return (
                 <div key={field.id} className="relative">
-                  {/* Single-line field row */}
+                  {isEnumTable ? (
+                    <>
+                    <div className={`flex items-center gap-2 py-1.5 px-1 rounded ${rowHover} group/row`}>
+                      <input
+                        type="text"
+                        value={field.name}
+                        onChange={(e) => onUpdateField(field.id, { name: e.target.value })}
+                        className={`flex-1 min-w-0 text-sm bg-transparent border-none outline-none px-1.5 py-1 rounded truncate ${dk ? 'hover:bg-[#313244] focus:bg-[#313244] text-[#cdd6f4]' : 'hover:bg-gray-100 focus:bg-gray-100'} focus:ring-1 focus:ring-blue-400`}
+                      />
+                      <Tip label="Value details">
+                        <button
+                          ref={el => {
+                            moreBtnRefs.current[field.id] = el;
+                          }}
+                          onClick={() => setMoreOpenFieldId(isMoreOpen ? null : field.id)}
+                          className={`size-7 flex items-center justify-center rounded transition-colors ${isMoreOpen ? 'text-white bg-gray-800' : `${dk ? 'text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#313244]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'} opacity-0 group-hover/row:opacity-100`}`}
+                        >
+                          <Info className="size-3.5" />
+                        </button>
+                      </Tip>
+                      <button
+                        onClick={() => onDeleteField(field.id)}
+                        className={`size-7 flex items-center justify-center rounded transition-colors ${dk ? 'text-[#6c7086] hover:text-red-300 hover:bg-red-500/20' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'}`}
+                        title="Delete value"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                    {isMoreOpen && popoverPos && createPortal(
+                      <>
+                        <div className="fixed inset-0 z-[9998]" onClick={() => setMoreOpenFieldId(null)} />
+                        <div className="fixed z-[9999] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-4 w-72" style={{ top: popoverPos.top, left: popoverPos.left }}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Value Attributes</h4>
+                            <button onClick={() => setMoreOpenFieldId(null)} className="text-gray-500 hover:text-white transition-colors">
+                              <X className="size-4" />
+                            </button>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
+                                Comment <MessageSquare className="size-3" />
+                              </label>
+                              <textarea
+                                value={field.comment || ''}
+                                onChange={(e) => onUpdateField(field.id, { comment: e.target.value || undefined })}
+                                placeholder="Optional description for this enum value"
+                                className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </>,
+                      document.body
+                    )}
+                    </>
+                  ) : (
+                  <>
                   <div className={`flex items-center gap-1 py-1 px-1 rounded ${rowHover} group/row`}>
                     {/* Field name - editable */}
                     <input
@@ -656,6 +716,8 @@ export function TableDetailsPanel({
                     </>,
                     document.body
                   )}
+                  </>
+                  )}
                 </div>
               );
             })}
@@ -674,20 +736,22 @@ export function TableDetailsPanel({
                   autoFocus
                   className={`flex-1 min-w-0 text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 ${dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : 'border-gray-200'}`}
                 />
-                <Select value={newFieldType} onValueChange={(v) => setNewFieldType(v as FieldType)}>
-                  <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-gray-900 border-gray-700 text-white">
-                    {availableTypes.map(type => (
-                      <SelectItem key={type} value={type} className="text-gray-200 focus:bg-gray-800 focus:text-white">
-                        <span className="flex items-center gap-2">
-                          <span className="text-gray-400">{getTypeIcon(type)}</span>
-                          {type}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {newFieldType === 'enum' && (
+                {!isEnumTable && (
+                  <Select value={newFieldType} onValueChange={(v) => setNewFieldType(v as FieldType)}>
+                    <SelectTrigger className="h-7 w-[100px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700 text-white">
+                      {availableTypes.map(type => (
+                        <SelectItem key={type} value={type} className="text-gray-200 focus:bg-gray-800 focus:text-white">
+                          <span className="flex items-center gap-2">
+                            <span className="text-gray-400">{getTypeIcon(type)}</span>
+                            {type}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {!isEnumTable && newFieldType === 'enum' && (
                   <Select value={newFieldEnumId} onValueChange={setNewFieldEnumId}>
                     <SelectTrigger className="h-7 w-[120px] text-xs"><SelectValue placeholder="Enum..." /></SelectTrigger>
                     <SelectContent className="bg-gray-900 border-gray-700 text-white">

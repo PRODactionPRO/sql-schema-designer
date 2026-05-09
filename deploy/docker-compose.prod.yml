@@ -1,0 +1,63 @@
+name: sql-schema-designer-prod
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: sql_schema_designer
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sql_schema_designer"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 256m
+    cpus: 0.20
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3200
+      API_PREFIX: api
+      ENABLE_SWAGGER: "false"
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/sql_schema_designer?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      BCRYPT_SALT_ROUNDS: 10
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      DEMO_AUTH_ENABLED: "true"
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL}
+      DEMO_USER_NAME: ${DEMO_USER_NAME}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD}
+    ports:
+      - "127.0.0.1:3200:3200"
+    mem_limit: 320m
+    cpus: 0.20
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.web
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:8081:80"
+    mem_limit: 96m
+    cpus: 0.10
+
+volumes:
+  postgres_data:

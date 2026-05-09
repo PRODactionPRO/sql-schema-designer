@@ -1,0 +1,94 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" \
+            | sed 's/\\n/\n/g' \
+            | tr -d '\r' \
+            > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 >/dev/null
+
+      - name: Add server to known_hosts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync project to server
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -az --delete \
+            --exclude node_modules \
+            --exclude .git \
+            --exclude backups \
+            ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+      - name: Write production env file on server
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "cat > '${{ secrets.DEPLOY_PATH }}/deploy/.env.prod' <<'ENVEOF'
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
+          DEMO_USER_EMAIL=${{ secrets.DEMO_USER_EMAIL }}
+          DEMO_USER_NAME=${{ secrets.DEMO_USER_NAME }}
+          DEMO_USER_PASSWORD=${{ secrets.DEMO_USER_PASSWORD }}
+          ENVEOF"
+
+      - name: Deploy containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "
+            cd '${{ secrets.DEPLOY_PATH }}/deploy' &&
+            docker compose --env-file .env.prod -f docker-compose.prod.yml build &&
+            docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm api npm run prisma:deploy &&
+            docker compose --env-file .env.prod -f docker-compose.prod.yml up -d &&
+            docker compose --env-file .env.prod -f docker-compose.prod.yml ps
+          "
+
+      - name: Health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" "
+            for i in \$(seq 1 24); do
+              if curl -fsS http://127.0.0.1:3200/api/health >/dev/null; then
+                echo 'Health check passed'
+                exit 0
+              fi
+              echo \"Health check retry \$i/24...\"
+              sleep 5
+            done
+            echo 'Health check failed after retries'
+            exit 1
+          "
