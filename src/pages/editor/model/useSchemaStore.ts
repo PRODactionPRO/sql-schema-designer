@@ -132,6 +132,7 @@ interface SchemaState {
   updateDomain: (id: string, updates: Partial<Omit<Domain, 'id'>>) => void;
   deleteDomain: (id: string) => void;
   assignDomainToTables: (domainId: string, tableIds: string[]) => void;
+  reorderDomains: (orderedIds: string[]) => void;
 
   // Enum CRUD
   addEnum: (name: string, values?: string[], position?: { x: number; y: number }) => EnumType;
@@ -506,6 +507,20 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     set(withHistory(state, {
       tables: state.tables.map(t => idSet.has(t.id) ? { ...t, domainId } : t),
     }));
+  },
+
+  reorderDomains: (orderedIds) => {
+    const state = get();
+    const current = state.domains;
+    const idSet = new Set(current.map((d) => d.id));
+    const uniqueOrdered = orderedIds.filter((id, idx) => idSet.has(id) && orderedIds.indexOf(id) === idx);
+    if (uniqueOrdered.length === 0) return;
+    const byId = new Map(current.map((d) => [d.id, d] as const));
+    const next = uniqueOrdered.map((id) => byId.get(id)).filter((d): d is Domain => !!d);
+    for (const d of current) {
+      if (!uniqueOrdered.includes(d.id)) next.push(d);
+    }
+    set(withHistory(state, { domains: next }));
   },
 
   // ── Enum CRUD ──
