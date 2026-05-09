@@ -7,11 +7,13 @@ import {
   Info, X, MessageSquare, Hash, Type, ToggleLeft, Calendar,
   Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag,
   Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Zap, History,
+  GripVertical,
 } from 'lucide-react';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select';
 import { Label } from '@/shared/ui/label';
+import { ProTooltip } from '@/shared/ui/pro-tooltip';
 
 // Map field types to lucide icons
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -87,14 +89,7 @@ interface TableDetailsPanelProps {
 
 // Tooltip wrapper
 function Tip({ children, label }: { children: React.ReactNode; label: string }) {
-  return (
-    <div className="relative group/tip">
-      {children}
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover/tip:opacity-100 pointer-events-none transition-opacity z-50">
-        {label}
-      </div>
-    </div>
-  );
+  return <ProTooltip label={label}>{children}</ProTooltip>;
 }
 
 export function TableDetailsPanel({
@@ -460,6 +455,7 @@ export function TableDetailsPanel({
                   {isEnumTable ? (
                     <>
                     <div className={`flex items-center gap-2 py-1.5 px-1 rounded ${rowHover} group/row`}>
+                      <GripVertical className={`size-3.5 ${textSecondary}`} />
                       <input
                         type="text"
                         value={field.name}
@@ -517,6 +513,7 @@ export function TableDetailsPanel({
                   ) : (
                   <>
                   <div className={`flex items-center gap-1 py-1 px-1 rounded ${rowHover} group/row`}>
+                    <GripVertical className={`size-3.5 ${textSecondary}`} />
                     {/* Field name - editable */}
                     <input
                       type="text"

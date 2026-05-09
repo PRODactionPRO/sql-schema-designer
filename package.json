@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "build": "vite build",
-    "dev": "vite",
+    "dev": "node ./scripts/dev-up.mjs",
+    "dev:web": "vite",
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
