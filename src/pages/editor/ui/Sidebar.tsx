@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import type { Table, Domain } from '../model/types';
 import { DOMAIN_COLORS } from '../model/types';
-import { Search, MoreVertical, Plus, Palette, X, PanelLeftClose, PanelLeft, ArrowUpAZ, ArrowDownAZ, GripVertical, SlidersHorizontal, Group, Check, Shapes, ChevronDown, ChevronRight, Minimize2 } from 'lucide-react';
+import { Search, MoreVertical, Plus, Palette, X, PanelLeftClose, PanelLeft, ArrowUpAZ, ArrowDownAZ, GripVertical, SlidersHorizontal, Group, Shapes, ChevronDown, ChevronRight, Minimize2 } from 'lucide-react';
 import { Input } from '@/shared/ui/input';
 import { Button } from '@/shared/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
@@ -34,6 +34,7 @@ interface SidebarProps {
 type TabType = 'tables' | 'domains';
 type SortMode = 'none' | 'asc' | 'desc';
 type GroupMode = 'none' | 'domain' | 'type';
+type TableKind = 'table' | 'enum' | 'json';
 
 function sortTables(tables: Table[], mode: SortMode): Table[] {
   if (mode === 'none') return tables;
@@ -50,7 +51,7 @@ interface TableGroup {
   tables: Table[];
 }
 
-function getTableKind(tableId: string): 'table' | 'enum' | 'json' {
+function getTableKind(tableId: string): TableKind {
   if (tableId.startsWith('enum::')) return 'enum';
   if (tableId.startsWith('jsonschema::')) return 'json';
   return 'table';
@@ -73,8 +74,12 @@ export function Sidebar({
   const [renamingDomainName, setRenamingDomainName] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('none');
   const [groupMode, setGroupMode] = useState<GroupMode>('none');
-  const [viewPopoverOpen, setViewPopoverOpen] = useState(false);
-  const viewPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [visibleKinds, setVisibleKinds] = useState<Record<TableKind, boolean>>({
+    table: true,
+    enum: true,
+    json: true,
+  });
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set());
   const [draggingDomainId, setDraggingDomainId] = useState<string | null>(null);
   const [domainDropTargetId, setDomainDropTargetId] = useState<string | null>(null);
@@ -85,9 +90,10 @@ export function Sidebar({
   // Last clicked table for shift-select range
   const lastClickedId = useRef<string | null>(null);
 
-  const filteredTables = useMemo(() => tables.filter(table =>
-    !searchQuery || table.name.toLowerCase().includes(searchQuery.toLowerCase())
-  ), [tables, searchQuery]);
+  const filteredTables = useMemo(() => tables.filter(table => {
+    const kind = getTableKind(table.id);
+    return visibleKinds[kind] && (!searchQuery || table.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  }), [tables, searchQuery, visibleKinds]);
 
   // Compute display list: sort + group
   const displayGroups: TableGroup[] = useMemo(() => {
@@ -102,8 +108,8 @@ export function Sidebar({
       const enums = sorted.filter((t) => getTableKind(t.id) === 'enum');
       const jsonSchemas = sorted.filter((t) => getTableKind(t.id) === 'json');
       const groups: TableGroup[] = [];
-      if (regular.length > 0) groups.push({ domainId: '__type_table', domain: null, label: 'Tables', tables: regular });
-      if (enums.length > 0) groups.push({ domainId: '__type_enum', domain: null, label: 'Enum', tables: enums });
+      if (regular.length > 0) groups.push({ domainId: '__type_table', domain: null, label: 'Structure Tables', tables: regular });
+      if (enums.length > 0) groups.push({ domainId: '__type_enum', domain: null, label: 'Enum Tables', tables: enums });
       if (jsonSchemas.length > 0) groups.push({ domainId: '__type_json', domain: null, label: 'JSON Schema', tables: jsonSchemas });
       return groups;
     }
@@ -207,31 +213,14 @@ export function Sidebar({
     if (newDomainName.trim()) { onAddDomain(newDomainName.trim()); setNewDomainName(''); setIsAddingDomain(false); }
   };
 
-  useEffect(() => {
-    if (!viewPopoverOpen) return;
-
-    const onPointerDown = (event: MouseEvent) => {
-      const root = viewPopoverRef.current;
-      if (!root) return;
-      if (root.contains(event.target as Node)) return;
-      setViewPopoverOpen(false);
-    };
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setViewPopoverOpen(false);
-    };
-
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [viewPopoverOpen]);
-
   const hasMultiSelection = selectedTableIds.size > 0;
   const totalTablesCount = tables.length;
   const totalDomainsCount = domains.length;
+  const hasHiddenKinds = useMemo(
+    () => Object.values(visibleKinds).some((isVisible) => !isVisible),
+    [visibleKinds],
+  );
+  const hasActiveFilters = sortMode !== 'none' || groupMode !== 'none' || hasHiddenKinds;
   const isDragEnabled = sortMode === 'none' && groupMode === 'none' && !searchQuery;
   const isDomainDragEnabled = groupMode === 'domain';
   const dndEnabled = isDragEnabled || isDomainDragEnabled;
@@ -349,7 +338,7 @@ export function Sidebar({
 
     if (!sourceDomainId || sourceDomainId === targetDomainId) return;
     domainDnd.handleDrop({ event: e });
-  }, [domainDnd, domains, draggingDomainId, draggingTableId, onAssignDomain, onReorderDomains, tables]);
+  }, [domainDnd, domains, draggingDomainId, draggingTableId, tables]);
   const handleDomainHeaderDragEnd = useCallback(() => {
     setDraggingDomainId(null);
     setDomainDropTargetId(null);
@@ -498,18 +487,29 @@ export function Sidebar({
     <div className="relative w-full bg-white/95 backdrop-blur-sm flex flex-col h-full rounded-r-lg">
       {/* Header with tabs */}
       <div className="border-b border-gray-200">
-        <div className="flex items-center justify-between px-3 pt-2">
-          <div className="flex gap-0.5">
-            <button onClick={() => setActiveTab('tables')} className={`px-3 py-1.5 text-xs rounded-t transition-colors ${activeTab === 'tables' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+        <div className="flex items-center justify-between px-3 pt-2 pb-2">
+          <div className="flex gap-1">
+            <button onClick={() => setActiveTab('tables')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${activeTab === 'tables' ? 'bg-gray-100 border-gray-200 text-gray-900 font-medium' : 'bg-white border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
               Tables
             </button>
-            <button onClick={() => setActiveTab('domains')} className={`px-3 py-1.5 text-xs rounded-t transition-colors flex items-center gap-1 ${activeTab === 'domains' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-500 hover:text-gray-700'}`}>
+            <button onClick={() => setActiveTab('domains')} className={`px-3 py-1.5 text-xs rounded-md border transition-colors flex items-center gap-1 ${activeTab === 'domains' ? 'bg-gray-100 border-gray-200 text-gray-900 font-medium' : 'bg-white border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
               <Palette className="size-3" /> Domains
             </button>
           </div>
           <div className="flex items-center gap-0.5">
             {activeTab === 'tables' && (
-              <button onClick={() => { setSearchOpen(!searchOpen); if (searchOpen) setSearchQuery(''); }} className={`p-1.5 rounded transition-colors ${searchOpen ? 'bg-gray-100 text-gray-700' : 'hover:bg-gray-100 text-gray-400'}`} title="Search tables">
+              <button
+                onClick={() => {
+                  const next = !searchOpen;
+                  setSearchOpen(next);
+                  if (!next) {
+                    setSearchQuery('');
+                    setFiltersOpen(false);
+                  }
+                }}
+                className={`p-1.5 rounded transition-colors ${searchOpen ? 'bg-gray-100 text-gray-700' : 'hover:bg-gray-100 text-gray-400'}`}
+                title="Search tables"
+              >
                 <Search className="size-3.5" />
               </button>
             )}
@@ -524,65 +524,19 @@ export function Sidebar({
               </button>
             )}
             {activeTab === 'tables' && (
-              <div ref={viewPopoverRef} className="relative">
-                <button
-                  onClick={() => setViewPopoverOpen(!viewPopoverOpen)}
-                  className={`p-1.5 rounded transition-colors ${viewPopoverOpen || sortMode !== 'none' || groupMode !== 'none' ? 'bg-gray-100 text-gray-700' : 'hover:bg-gray-100 text-gray-400'}`}
-                  title="Sort & Group"
-                >
-                  <SlidersHorizontal className="size-3.5" />
-                </button>
-                {viewPopoverOpen && (
-                  <div className="absolute right-0 top-full z-50 mt-1 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-3 w-[200px]">
-                      <div className="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wider">Sort</div>
-                      <div className="space-y-0.5 mb-3">
-                        <button
-                          onClick={() => { setSortMode(sortMode === 'asc' ? 'none' : 'asc'); }}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${sortMode === 'asc' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`}
-                        >
-                          <ArrowUpAZ className="size-3.5" />
-                          A → Z
-                          {sortMode === 'asc' && <Check className="size-3 ml-auto" />}
-                        </button>
-                        <button
-                          onClick={() => { setSortMode(sortMode === 'desc' ? 'none' : 'desc'); }}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${sortMode === 'desc' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`}
-                        >
-                          <ArrowDownAZ className="size-3.5" />
-                          Z → A
-                          {sortMode === 'desc' && <Check className="size-3 ml-auto" />}
-                        </button>
-                        <button
-                          onClick={() => { setSortMode('none'); }}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${sortMode === 'none' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`}
-                        >
-                          <GripVertical className="size-3.5" />
-                          Manual
-                          {sortMode === 'none' && <Check className="size-3 ml-auto" />}
-                        </button>
-                      </div>
-                      <div className="border-t border-gray-700 pt-2">
-                        <div className="text-xs text-gray-400 mb-2 font-medium uppercase tracking-wider">Group</div>
-                        <button
-                          onClick={() => setGroupMode(groupMode === 'domain' ? 'none' : 'domain')}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${groupMode === 'domain' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`}
-                        >
-                          <Group className="size-3.5" />
-                          By Domain
-                          {groupMode === 'domain' && <Check className="size-3 ml-auto" />}
-                        </button>
-                        <button
-                          onClick={() => setGroupMode(groupMode === 'type' ? 'none' : 'type')}
-                          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${groupMode === 'type' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`}
-                        >
-                          <Shapes className="size-3.5" />
-                          By Type
-                          {groupMode === 'type' && <Check className="size-3 ml-auto" />}
-                        </button>
-                      </div>
-                    </div>
-                )}
-              </div>
+              <button
+                onClick={() => {
+                  setFiltersOpen((prev) => {
+                    const next = !prev;
+                    if (next) setSearchOpen(true);
+                    return next;
+                  });
+                }}
+                className={`p-1.5 rounded transition-colors ${filtersOpen || hasActiveFilters ? 'bg-gray-100 text-gray-700' : 'hover:bg-gray-100 text-gray-400'}`}
+                title="Sort & Group"
+              >
+                <SlidersHorizontal className="size-3.5" />
+              </button>
             )}
             <button onClick={onToggleCollapse} className="p-1.5 hover:bg-gray-100 rounded text-gray-400" title="Collapse sidebar">
               <PanelLeftClose className="size-3.5" />
@@ -599,6 +553,71 @@ export function Sidebar({
                   <X className="size-3" />
                 </button>
               )}
+            </div>
+          </div>
+        )}
+        {activeTab === 'tables' && filtersOpen && (
+          <div className="px-3 pb-2">
+            <div className="rounded-md bg-gray-50 p-2 space-y-2">
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Sort</div>
+                <div className="grid grid-cols-3 gap-1">
+                  <button
+                    onClick={() => setSortMode('none')}
+                    className={`h-7 px-2 rounded text-xs flex items-center justify-center gap-1 ${sortMode === 'none' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    <GripVertical className="size-3" />
+                    Manual
+                  </button>
+                  <button
+                    onClick={() => setSortMode('asc')}
+                    className={`h-7 px-2 rounded text-xs flex items-center justify-center gap-1 ${sortMode === 'asc' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    <ArrowUpAZ className="size-3" />
+                    A-Z
+                  </button>
+                  <button
+                    onClick={() => setSortMode('desc')}
+                    className={`h-7 px-2 rounded text-xs flex items-center justify-center gap-1 ${sortMode === 'desc' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    <ArrowDownAZ className="size-3" />
+                    Z-A
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Group</div>
+                <div className="grid grid-cols-3 gap-1">
+                  <button onClick={() => setGroupMode('none')} className={`h-7 px-2 rounded text-xs ${groupMode === 'none' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}>None</button>
+                  <button onClick={() => setGroupMode('domain')} className={`h-7 px-2 rounded text-xs flex items-center justify-center gap-1 ${groupMode === 'domain' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}><Group className="size-3" /> Domain</button>
+                  <button onClick={() => setGroupMode('type')} className={`h-7 px-2 rounded text-xs flex items-center justify-center gap-1 ${groupMode === 'type' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}><Shapes className="size-3" /> Type</button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Type</div>
+                <div className="grid grid-cols-3 gap-1">
+                  <button
+                    onClick={() => setVisibleKinds((prev) => ({ ...prev, table: !prev.table }))}
+                    className={`h-7 px-2 rounded text-xs ${visibleKinds.table ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    Structure Tables
+                  </button>
+                  <button
+                    onClick={() => setVisibleKinds((prev) => ({ ...prev, enum: !prev.enum }))}
+                    className={`h-7 px-2 rounded text-xs ${visibleKinds.enum ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    Enum Tables
+                  </button>
+                  <button
+                    onClick={() => setVisibleKinds((prev) => ({ ...prev, json: !prev.json }))}
+                    className={`h-7 px-2 rounded text-xs ${visibleKinds.json ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'}`}
+                  >
+                    JSON Schema
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -623,7 +642,7 @@ export function Sidebar({
                 </button>
               )}
             </div>
-            {renderedGroups.map((group, gi) => (
+            {renderedGroups.map((group) => (
               <div key={group.domainId || '__ungrouped__'}>
                 {/* Domain group header */}
                 {groupMode !== 'none' && (
