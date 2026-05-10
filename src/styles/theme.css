@@ -222,6 +222,7 @@
 }
 
 .panel-scroll {
+  overflow-y: overlay;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }

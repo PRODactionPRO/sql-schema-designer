@@ -5,6 +5,7 @@ import { TableNode } from './TableNode';
 import type { DragFieldInfo } from './TableNode';
 import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
+import { actionMenuClasses } from '@/shared/ui/action-menu-styles';
 
 interface CanvasProps {
   tables: Table[];
@@ -862,13 +863,13 @@ export function Canvas({
       field: 180,
     };
     const safePos = getSafeMenuPosition(contextMenu.x, contextMenu.y, menuHeightByType[contextMenu.type] || 280);
-    // Always dark/inverted style for context menus
-    const menuCls = 'fixed z-50 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1.5 min-w-[220px] select-none';
-    const itemCls = 'w-full px-3 py-2 text-left text-sm flex items-center gap-2 text-gray-200 hover:bg-gray-800 hover:text-white transition-colors';
-    const shortcutCls = 'ml-auto text-xs text-gray-500';
-    const dangerCls = 'w-full px-3 py-2 text-left text-sm flex items-center gap-2 text-red-400 hover:bg-gray-800 hover:text-red-300 transition-colors';
-    const separatorCls = 'h-px mx-2 my-1 bg-gray-700';
-    const labelCls = 'px-3 py-1.5 text-xs text-gray-500';
+    // Shared dark action-menu style (reference for the whole project).
+    const menuCls = `fixed z-50 select-none ${actionMenuClasses.content}`;
+    const itemCls = `w-full text-left flex items-center transition-colors ${actionMenuClasses.item}`;
+    const shortcutCls = `ml-auto ${actionMenuClasses.shortcut}`;
+    const dangerCls = `w-full text-left flex items-center transition-colors ${actionMenuClasses.dangerItem}`;
+    const separatorCls = `h-px mx-2 ${actionMenuClasses.separator}`;
+    const labelCls = actionMenuClasses.label;
 
     switch (contextMenu.type) {
       case 'canvas':
@@ -913,7 +914,7 @@ export function Canvas({
                   <FolderPlus className="size-3.5" /> Add to domain
                 </button>
                 {showDomainSubmenu && (
-                  <div className="absolute left-full top-0 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-1.5 min-w-[220px]">
+                  <div className={`absolute left-full top-0 ${actionMenuClasses.content}`}>
                     {domains.map(d => (
                       <button key={d.id} className={itemCls} onClick={() => { setContextMenu(null); setShowDomainSubmenu(false); onAssignDomain?.(d.id, [tableId]); }}>
                         <span className="size-3 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
