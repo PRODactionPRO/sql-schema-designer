@@ -1,55 +1,10 @@
 import { useRef, useEffect, useState, memo } from 'react';
-import { createPortal } from 'react-dom';
-import { Key, MoreVertical, ChevronDown, ChevronRight, GripVertical, Hash, Type, ToggleLeft, Calendar, Clock, Braces, Binary, Globe, MapPin, Circle, FileCode, List, Tag, Fingerprint, DollarSign, Network, Hexagon, Ruler, Box, Database, Ban, AlertTriangle, Link, ShieldCheck, ListOrdered, Zap, Trash2 } from 'lucide-react';
+import { Key, MoreVertical, ChevronDown, ChevronRight, GripVertical, Ban, AlertTriangle, Link, ListOrdered, Trash2 } from 'lucide-react';
 import type { Field, FieldType, Table, TypeCompatibility } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
-import { useReorderableDragList } from './hooks/useReorderableDragList';
+import { DataTypeSelect } from '@/shared/ui/data-type-select';
 import { ProTooltip } from '@/shared/ui/pro-tooltip';
-
-const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
-  uuid: <Fingerprint className="size-3.5" />,
-  bigint: <Hash className="size-3.5" />,
-  integer: <Hash className="size-3.5" />,
-  smallint: <Hash className="size-3.5" />,
-  serial: <Hash className="size-3.5" />,
-  bigserial: <Hash className="size-3.5" />,
-  varchar: <Type className="size-3.5" />,
-  text: <Type className="size-3.5" />,
-  citext: <Type className="size-3.5" />,
-  boolean: <ToggleLeft className="size-3.5" />,
-  timestamp: <Calendar className="size-3.5" />,
-  timestamptz: <Calendar className="size-3.5" />,
-  date: <Calendar className="size-3.5" />,
-  time: <Clock className="size-3.5" />,
-  interval: <Clock className="size-3.5" />,
-  json: <Braces className="size-3.5" />,
-  jsonb: <Braces className="size-3.5" />,
-  decimal: <DollarSign className="size-3.5" />,
-  numeric: <Hash className="size-3.5" />,
-  real: <Hash className="size-3.5" />,
-  'double precision': <Hash className="size-3.5" />,
-  money: <DollarSign className="size-3.5" />,
-  bytea: <Binary className="size-3.5" />,
-  inet: <Globe className="size-3.5" />,
-  cidr: <Network className="size-3.5" />,
-  macaddr: <Hexagon className="size-3.5" />,
-  point: <MapPin className="size-3.5" />,
-  line: <Ruler className="size-3.5" />,
-  polygon: <Box className="size-3.5" />,
-  circle: <Circle className="size-3.5" />,
-  xml: <FileCode className="size-3.5" />,
-  array: <List className="size-3.5" />,
-  enum: <Tag className="size-3.5" />,
-  vector: <Zap className="size-3.5" />,
-  string: <Type className="size-3.5" />,
-  number: <Hash className="size-3.5" />,
-  object: <Braces className="size-3.5" />,
-  null: <Ban className="size-3.5" />,
-};
-
-function getTypeIcon(type: string) {
-  return FIELD_TYPE_ICONS[type] || <Database className="size-3.5" />;
-}
+import { useReorderableDragList } from '@/shared/ui/useReorderableDragList';
 
 function getFieldTypeLabel(field: Field): string {
   if (field.type !== 'enum') return field.type;
@@ -136,8 +91,6 @@ export const TableNode = memo(function TableNode({
   const headerHandledClick = useRef(false);
   const positionRef = useRef(table.position);
   positionRef.current = table.position;
-  const [editingTypeFieldId, setEditingTypeFieldId] = useState<string | null>(null);
-  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
   const [isFieldReorderPointerDown, setIsFieldReorderPointerDown] = useState(false);
 
@@ -247,29 +200,12 @@ export const TableNode = memo(function TableNode({
     };
   }, [table.id, onSelect, onPositionChange, zoom, isMultiSelected, onGroupDragStart, onDragEnd, onDragMove, onDragStop]);
 
-  const handleTypeClick = (e: React.MouseEvent, fieldId: string) => {
-    e.stopPropagation();
-    if (onFieldTypeChange) {
-      const isClosing = editingTypeFieldId === fieldId;
-      setEditingTypeFieldId(prev => prev === fieldId ? null : fieldId);
-      if (!isClosing) {
-        const btn = e.currentTarget as HTMLElement;
-        const rect = btn.getBoundingClientRect();
-        setDropdownPos({ top: rect.bottom + 4, left: rect.right });
-      } else {
-        setDropdownPos(null);
-      }
-    }
-  };
-
   const handleTypeSelect = (fieldId: string, type: string) => {
     if (isJsonSchemaTable) {
       onJsonSchemaFieldTypeChange?.(fieldId, type);
     } else if (onFieldTypeChange) {
       onFieldTypeChange(fieldId, type as FieldType);
     }
-    setEditingTypeFieldId(null);
-    setDropdownPos(null);
   };
 
   const handleFieldDragStart = (e: React.MouseEvent, field: Field) => {
@@ -663,58 +599,21 @@ export const TableNode = memo(function TableNode({
                 )}
                 {statusIndicator}
                 {!isEnumTable && (
-                  <ProTooltip label="Change field type">
-                    <button
-                      className="text-xs text-gray-500 ml-0.5 flex-shrink-0 flex items-center gap-0.5 hover:text-gray-800 hover:bg-gray-100 rounded px-1.5 py-0.5 transition-colors"
-                      onClick={(e) => handleTypeClick(e, field.id)}
-                    >
-                      {isJsonSchemaTable ? (jsonSchemaFieldMeta?.[field.id]?.schemaType || 'json') : getFieldTypeLabel(field)}
-                      {(onFieldTypeChange || (isJsonSchemaTable && onJsonSchemaFieldTypeChange)) && <ChevronDown className="size-2.5 opacity-50" />}
-                    </button>
-                  </ProTooltip>
+                  <DataTypeSelect
+                    value={isJsonSchemaTable ? (jsonSchemaFieldMeta?.[field.id]?.schemaType || 'json') : getFieldTypeLabel(field)}
+                    options={isJsonSchemaTable ? jsonSchemaTypes : availableTypes}
+                    label="Change field type"
+                    align="end"
+                    disabled={!onFieldTypeChange && !(isJsonSchemaTable && onJsonSchemaFieldTypeChange)}
+                    onChange={(type) => handleTypeSelect(field.id, type)}
+                    triggerClassName="ml-0.5 h-6 max-w-[96px] flex-shrink-0 border-transparent px-1.5 py-0.5 text-xs text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus:ring-0"
+                  />
                 )}
               </div>
             </div>
           );
         })}
       </div>
-
-      {editingTypeFieldId && dropdownPos && (() => {
-        const editingField = table.fields.find(f => f.id === editingTypeFieldId);
-        if (!editingField) return null;
-        return createPortal(
-          <>
-            <div className="fixed inset-0" style={{ zIndex: 9998 }} onClick={() => { setEditingTypeFieldId(null); setDropdownPos(null); }} />
-            <div
-              className="fixed bg-gray-900 border border-gray-700 rounded-xl shadow-2xl py-2 min-w-[160px] max-h-[240px] overflow-y-auto type-dropdown-scroll"
-              style={{ zIndex: 9999, top: dropdownPos.top, left: dropdownPos.left, transform: 'translateX(-100%)' }}
-              onClick={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              {(isJsonSchemaTable ? jsonSchemaTypes : availableTypes).map(type => (
-                <button
-                  key={type}
-                  className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
-                    (isJsonSchemaTable
-                      ? (jsonSchemaFieldMeta?.[editingField.id]?.schemaType === type)
-                      : (editingField.type === type))
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-                  }`}
-                  onClick={() => handleTypeSelect(editingTypeFieldId, type)}
-                >
-                  <span className={(isJsonSchemaTable
-                    ? (jsonSchemaFieldMeta?.[editingField.id]?.schemaType === type)
-                    : (editingField.type === type)) ? 'text-blue-200' : 'text-gray-500'}>{getTypeIcon(type)}</span>
-                  {type}
-                </button>
-              ))}
-            </div>
-          </>,
-          document.body
-        );
-      })()}
     </div>
   );
 });

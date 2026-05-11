@@ -1,5 +1,20 @@
 import { create } from 'zustand';
-import type { Table, Field, Relation, Schema, RelationType, Domain, EnumType, JsonSchemaDocument, JsonSchemaNode, JsonSchemaFieldType } from './types';
+import type {
+  Table,
+  Field,
+  Relation,
+  Schema,
+  RelationType,
+  Domain,
+  EnumType,
+  EnumValueMetadata,
+  JsonSchemaDocument,
+  JsonSchemaNode,
+  JsonSchemaFieldType,
+  TableConstraint,
+  TableConstraintType,
+  TableIndex,
+} from './types';
 import { DOMAIN_COLORS } from './types';
 import { getSerializer } from '../lib/serializers';
 import { deepClone } from '@/shared/lib/json';
@@ -115,9 +130,18 @@ interface SchemaState {
   updateTablePosition: (id: string, position: { x: number; y: number }) => void;
   updateTableName: (id: string, name: string) => void;
   updateTableDescription: (id: string, description: string) => void;
+  updateTableNotes: (id: string, notes: string) => void;
   updateTableDomain: (tableId: string, domainId: string | undefined) => void;
   deleteTable: (id: string) => void;
   deleteTables: (ids: string[]) => void;
+
+  // Table-level PostgreSQL structure
+  addTableConstraint: (tableId: string, type: TableConstraintType) => string | null;
+  updateTableConstraint: (tableId: string, constraintId: string, updates: Partial<TableConstraint>) => void;
+  deleteTableConstraint: (tableId: string, constraintId: string) => void;
+  addTableIndex: (tableId: string) => string | null;
+  updateTableIndex: (tableId: string, indexId: string, updates: Partial<TableIndex>) => void;
+  deleteTableIndex: (tableId: string, indexId: string) => void;
 
   // Field CRUD
   addField: (tableId: string, field: Omit<Field, 'id'>) => string;
@@ -239,6 +263,192 @@ function getUniqueTableName(baseName: string, usedNames: Set<string>): string {
   return candidate;
 }
 
+function makeConstraintName(table: Table, suffix: string): string {
+  return `${table.name}_${suffix}`.replace(/[^a-zA-Z0-9_]/g, '_');
+}
+
+function getDefaultConstraint(table: Table, type: TableConstraintType, allTables: Table[]): TableConstraint | null {
+  const firstField = table.fields[0];
+  if (!firstField && type !== 'check') return null;
+  const id = nextId();
+
+  if (type === 'primary_key') {
+    return {
+      id,
+      type,
+      name: makeConstraintName(table, 'pkey'),
+      columnIds: firstField ? [firstField.id] : [],
+    };
+  }
+
+  if (type === 'unique') {
+    return {
+      id,
+      type,
+      name: makeConstraintName(table, `${firstField?.name || 'field'}_key`),
+      columnIds: firstField ? [firstField.id] : [],
+    };
+  }
+
+  if (type === 'foreign_key') {
+    const referencedTable = allTables.find((candidate) => candidate.id !== table.id);
+    const referencedField = referencedTable?.fields.find((field) => field.isPrimaryKey) ?? referencedTable?.fields[0];
+    if (!firstField || !referencedTable || !referencedField) return null;
+    return {
+      id,
+      type,
+      name: makeConstraintName(table, `${firstField.name}_fkey`),
+      columnIds: [firstField.id],
+      referencedTableId: referencedTable.id,
+      referencedColumnIds: [referencedField.id],
+      onDelete: 'no_action',
+      onUpdate: 'no_action',
+    };
+  }
+
+  return {
+    id,
+    type,
+    name: makeConstraintName(table, 'check'),
+    expression: 'true',
+  };
+}
+
+function syncFieldFlagsFromTableStructure(table: Table): Table {
+  const primaryKeyIds = new Set<string>();
+  const foreignKeyIds = new Set<string>();
+  const singleUniqueIds = new Set<string>();
+  const indexedIds = new Set<string>();
+
+  for (const constraint of table.constraints ?? []) {
+    if (constraint.type === 'primary_key') constraint.columnIds.forEach((id) => primaryKeyIds.add(id));
+    if (constraint.type === 'foreign_key') constraint.columnIds.forEach((id) => foreignKeyIds.add(id));
+    if (constraint.type === 'unique' && constraint.columnIds.length === 1) singleUniqueIds.add(constraint.columnIds[0]);
+  }
+  for (const index of table.indexes ?? []) {
+    index.columns.forEach((column) => {
+      if (column.fieldId) indexedIds.add(column.fieldId);
+    });
+  }
+
+  return {
+    ...table,
+    fields: table.fields.map((field) => ({
+      ...field,
+      isPrimaryKey: primaryKeyIds.has(field.id),
+      isForeignKey: foreignKeyIds.has(field.id),
+      isUnique: singleUniqueIds.has(field.id),
+      isIndexed: indexedIds.has(field.id),
+      isNullable: primaryKeyIds.has(field.id) ? false : field.isNullable,
+    })),
+  };
+}
+
+function addFieldToPrimaryKey(table: Table, fieldId: string): Table {
+  const constraints = [...(table.constraints ?? [])];
+  const existingIndex = constraints.findIndex((constraint) => constraint.type === 'primary_key');
+  if (existingIndex >= 0) {
+    const existing = constraints[existingIndex];
+    if (existing.type === 'primary_key' && !existing.columnIds.includes(fieldId)) {
+      constraints[existingIndex] = { ...existing, columnIds: [...existing.columnIds, fieldId] };
+    }
+  } else {
+    constraints.push({
+      id: nextId(),
+      type: 'primary_key',
+      name: makeConstraintName(table, 'pkey'),
+      columnIds: [fieldId],
+    });
+  }
+  return syncFieldFlagsFromTableStructure({ ...table, constraints });
+}
+
+function removeFieldFromPrimaryKey(table: Table, fieldId: string): Table {
+  const constraints = (table.constraints ?? [])
+    .map((constraint) => (
+      constraint.type === 'primary_key'
+        ? { ...constraint, columnIds: constraint.columnIds.filter((id) => id !== fieldId) }
+        : constraint
+    ))
+    .filter((constraint) => constraint.type !== 'primary_key' || constraint.columnIds.length > 0);
+  return syncFieldFlagsFromTableStructure({ ...table, constraints });
+}
+
+function setSingleFieldUnique(table: Table, fieldId: string, enabled: boolean): Table {
+  const constraints = [...(table.constraints ?? [])];
+  const existingIndex = constraints.findIndex((constraint) => (
+    constraint.type === 'unique' &&
+    constraint.columnIds.length === 1 &&
+    constraint.columnIds[0] === fieldId
+  ));
+  if (enabled && existingIndex < 0) {
+    const field = table.fields.find((item) => item.id === fieldId);
+    constraints.push({
+      id: nextId(),
+      type: 'unique',
+      name: makeConstraintName(table, `${field?.name || 'field'}_key`),
+      columnIds: [fieldId],
+    });
+  }
+  if (!enabled && existingIndex >= 0) {
+    constraints.splice(existingIndex, 1);
+  }
+  return syncFieldFlagsFromTableStructure({ ...table, constraints });
+}
+
+function setSingleFieldIndex(table: Table, fieldId: string, enabled: boolean): Table {
+  const indexes = [...(table.indexes ?? [])];
+  const existingIndex = indexes.findIndex((index) => (
+    index.columns.length === 1 &&
+    index.columns[0].fieldId === fieldId &&
+    !index.unique &&
+    !index.where
+  ));
+  if (enabled && existingIndex < 0) {
+    const field = table.fields.find((item) => item.id === fieldId);
+    indexes.push({
+      id: nextId(),
+      name: makeConstraintName(table, `${field?.name || 'field'}_idx`),
+      columns: [{ fieldId }],
+      method: 'btree',
+    });
+  }
+  if (!enabled && existingIndex >= 0) {
+    indexes.splice(existingIndex, 1);
+  }
+  return syncFieldFlagsFromTableStructure({ ...table, indexes });
+}
+
+function removeFieldFromTableStructure(table: Table, fieldId: string): Table {
+  const constraints = (table.constraints ?? [])
+    .map((constraint) => {
+      if (constraint.type === 'check') return constraint;
+      if (constraint.type === 'foreign_key') {
+        const columnPairs = constraint.columnIds
+          .map((columnId, index) => ({ columnId, referencedColumnId: constraint.referencedColumnIds[index] }))
+          .filter((pair) => pair.columnId !== fieldId && pair.referencedColumnId);
+        return {
+          ...constraint,
+          columnIds: columnPairs.map((pair) => pair.columnId),
+          referencedColumnIds: columnPairs.map((pair) => pair.referencedColumnId),
+        };
+      }
+      return {
+        ...constraint,
+        columnIds: constraint.columnIds.filter((id) => id !== fieldId),
+      };
+    })
+    .filter((constraint) => constraint.type === 'check' || constraint.columnIds.length > 0);
+  const indexes = (table.indexes ?? [])
+    .map((index) => ({
+      ...index,
+      columns: index.columns.filter((column) => column.fieldId !== fieldId),
+      includeFieldIds: index.includeFieldIds?.filter((id) => id !== fieldId),
+    }))
+    .filter((index) => index.columns.length > 0);
+  return syncFieldFlagsFromTableStructure({ ...table, constraints, indexes });
+}
+
 // ── Store ──
 
 export const useSchemaStore = create<SchemaState>()((set, get) => ({
@@ -332,16 +542,23 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       while (nameExists(`${name}_${suffix}`)) suffix++;
       finalName = `${name}_${suffix}`;
     }
+    const primaryFieldId = `${nextId()}-id`;
     const newTable: Table = {
       id: nextId(),
       name: finalName,
       fields: [{
-        id: `${nextId()}-id`,
+        id: primaryFieldId,
         name: 'id',
         type: 'bigint',
         isPrimaryKey: true,
         isNullable: false,
         isForeignKey: false,
+      }],
+      constraints: [{
+        id: nextId(),
+        type: 'primary_key',
+        name: makeConstraintName({ id: '', name: finalName, fields: [], position: { x: 0, y: 0 } }, 'pkey'),
+        columnIds: [primaryFieldId],
       }],
       position: position || { x: 100, y: 100 },
       sidebarOrder: getNextSidebarOrder(state),
@@ -382,6 +599,13 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     }));
   },
 
+  updateTableNotes: (id, notes) => {
+    const state = get();
+    set(withHistory(state, {
+      tables: state.tables.map(t => t.id === id ? { ...t, notes } : t),
+    }));
+  },
+
   updateTableDomain: (tableId, domainId) => {
     const state = get();
     set(withHistory(state, {
@@ -398,7 +622,14 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     const newSelectedTableIds = new Set(state.selectedTableIds);
     newSelectedTableIds.delete(id);
     set(withHistory(state, {
-      tables: state.tables.filter(t => t.id !== id),
+      tables: state.tables
+        .filter(t => t.id !== id)
+        .map((table) => syncFieldFlagsFromTableStructure({
+          ...table,
+          constraints: (table.constraints ?? []).filter((constraint) => (
+            constraint.type !== 'foreign_key' || constraint.referencedTableId !== id
+          )),
+        })),
       relations: state.relations.filter(r => r.fromTableId !== id && r.toTableId !== id),
       selectedTableId: state.selectedTableId === id ? null : state.selectedTableId,
       selectedTableIds: newSelectedTableIds,
@@ -409,10 +640,111 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     const state = get();
     const idSet = new Set(ids);
     set(withHistory(state, {
-      tables: state.tables.filter(t => !idSet.has(t.id)),
+      tables: state.tables
+        .filter(t => !idSet.has(t.id))
+        .map((table) => syncFieldFlagsFromTableStructure({
+          ...table,
+          constraints: (table.constraints ?? []).filter((constraint) => (
+            constraint.type !== 'foreign_key' || !idSet.has(constraint.referencedTableId)
+          )),
+        })),
       relations: state.relations.filter(r => !idSet.has(r.fromTableId) && !idSet.has(r.toTableId)),
       selectedTableId: state.selectedTableId && idSet.has(state.selectedTableId) ? null : state.selectedTableId,
       selectedTableIds: new Set(),
+    }));
+  },
+
+  // ── Table-level PostgreSQL structure ──
+  addTableConstraint: (tableId, type) => {
+    const state = get();
+    const table = state.tables.find((item) => item.id === tableId);
+    if (!table) return null;
+    const constraint = getDefaultConstraint(table, type, state.tables);
+    if (!constraint) return null;
+    set(withHistory(state, {
+      tables: state.tables.map((item) => (
+        item.id === tableId
+          ? syncFieldFlagsFromTableStructure({ ...item, constraints: [...(item.constraints ?? []), constraint] })
+          : item
+      )),
+    }));
+    return constraint.id;
+  },
+
+  updateTableConstraint: (tableId, constraintId, updates) => {
+    const state = get();
+    set(withHistory(state, {
+      tables: state.tables.map((table) => {
+        if (table.id !== tableId) return table;
+        const constraints = (table.constraints ?? []).map((constraint) => (
+          constraint.id === constraintId
+            ? ({ ...constraint, ...updates } as TableConstraint)
+            : constraint
+        ));
+        return syncFieldFlagsFromTableStructure({ ...table, constraints });
+      }),
+    }));
+  },
+
+  deleteTableConstraint: (tableId, constraintId) => {
+    const state = get();
+    set(withHistory(state, {
+      tables: state.tables.map((table) => (
+        table.id === tableId
+          ? syncFieldFlagsFromTableStructure({
+              ...table,
+              constraints: (table.constraints ?? []).filter((constraint) => constraint.id !== constraintId),
+            })
+          : table
+      )),
+    }));
+  },
+
+  addTableIndex: (tableId) => {
+    const state = get();
+    const table = state.tables.find((item) => item.id === tableId);
+    const firstField = table?.fields[0];
+    if (!table || !firstField) return null;
+    const index: TableIndex = {
+      id: nextId(),
+      name: makeConstraintName(table, `${firstField.name}_idx`),
+      columns: [{ fieldId: firstField.id }],
+      method: 'btree',
+    };
+    set(withHistory(state, {
+      tables: state.tables.map((item) => (
+        item.id === tableId
+          ? syncFieldFlagsFromTableStructure({ ...item, indexes: [...(item.indexes ?? []), index] })
+          : item
+      )),
+    }));
+    return index.id;
+  },
+
+  updateTableIndex: (tableId, indexId, updates) => {
+    const state = get();
+    set(withHistory(state, {
+      tables: state.tables.map((table) => {
+        if (table.id !== tableId) return table;
+        const indexes = (table.indexes ?? []).map((index) => (
+          index.id === indexId ? { ...index, ...updates } : index
+        ));
+        return syncFieldFlagsFromTableStructure({ ...table, indexes });
+      }),
+    }));
+  },
+
+  deleteTableIndex: (tableId, indexId) => {
+    const state = get();
+    set(withHistory(state, {
+      tables: state.tables.map((table) => (
+        table.id === tableId
+          ? syncFieldFlagsFromTableStructure({
+              ...table,
+              indexes: (table.indexes ?? []).filter((index) => index.id !== indexId),
+            })
+          : table
+      )),
     }));
   },
 
@@ -449,20 +781,50 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       }
     }
     set(withHistory(state, {
-      tables: state.tables.map(t =>
-        t.id === tableId
-          ? { ...t, fields: t.fields.map(f => f.id === fieldId ? { ...f, ...normalizedUpdates } : f) }
-          : t
-      ),
+      tables: state.tables.map(t => {
+        if (t.id !== tableId) return t;
+        let nextTable = {
+          ...t,
+          fields: t.fields.map(f => f.id === fieldId ? { ...f, ...normalizedUpdates } : f),
+        };
+        if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'isPrimaryKey')) {
+          nextTable = normalizedUpdates.isPrimaryKey
+            ? addFieldToPrimaryKey(nextTable, fieldId)
+            : removeFieldFromPrimaryKey(nextTable, fieldId);
+        }
+        if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'isUnique')) {
+          nextTable = setSingleFieldUnique(nextTable, fieldId, !!normalizedUpdates.isUnique);
+        }
+        if (Object.prototype.hasOwnProperty.call(normalizedUpdates, 'isIndexed')) {
+          nextTable = setSingleFieldIndex(nextTable, fieldId, !!normalizedUpdates.isIndexed);
+        }
+        return syncFieldFlagsFromTableStructure(nextTable);
+      }),
     }));
   },
 
   deleteField: (tableId, fieldId) => {
     const state = get();
     set(withHistory(state, {
-      tables: state.tables.map(t =>
-        t.id === tableId ? { ...t, fields: t.fields.filter(f => f.id !== fieldId) } : t
-      ),
+      tables: state.tables.map(t => {
+        if (t.id === tableId) {
+          return removeFieldFromTableStructure({ ...t, fields: t.fields.filter(f => f.id !== fieldId) }, fieldId);
+        }
+        const constraints = (t.constraints ?? [])
+          .map((constraint) => {
+            if (constraint.type !== 'foreign_key' || constraint.referencedTableId !== tableId) return constraint;
+            const columnPairs = constraint.columnIds
+              .map((columnId, index) => ({ columnId, referencedColumnId: constraint.referencedColumnIds[index] }))
+              .filter((pair) => pair.referencedColumnId !== fieldId && pair.referencedColumnId);
+            return {
+              ...constraint,
+              columnIds: columnPairs.map((pair) => pair.columnId),
+              referencedColumnIds: columnPairs.map((pair) => pair.referencedColumnId),
+            };
+          })
+          .filter((constraint) => constraint.type !== 'foreign_key' || constraint.columnIds.length > 0);
+        return syncFieldFlagsFromTableStructure({ ...t, constraints });
+      }),
       relations: state.relations.filter(r => r.fromFieldId !== fieldId && r.toFieldId !== fieldId),
     }));
   },
@@ -493,8 +855,28 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   addRelation: (relation) => {
     const state = get();
     const newRelation: Relation = { ...relation, id: nextId() };
+    const fromTable = state.tables.find((table) => table.id === relation.fromTableId);
+    const fromField = fromTable?.fields.find((field) => field.id === relation.fromFieldId);
+    const targetTable = state.tables.find((table) => table.id === relation.toTableId);
+    const fkConstraint: TableConstraint | null = fromTable && fromField && targetTable
+      ? {
+          id: nextId(),
+          type: 'foreign_key',
+          name: makeConstraintName(fromTable, `${fromField.name}_fkey`),
+          columnIds: [relation.fromFieldId],
+          referencedTableId: relation.toTableId,
+          referencedColumnIds: [relation.toFieldId],
+          onDelete: 'no_action',
+          onUpdate: 'no_action',
+        }
+      : null;
     set(withHistory(state, {
       relations: [...state.relations, newRelation],
+      tables: state.tables.map((table) => (
+        table.id === relation.fromTableId && fkConstraint
+          ? syncFieldFlagsFromTableStructure({ ...table, constraints: [...(table.constraints ?? []), fkConstraint] })
+          : table
+      )),
     }));
   },
 
@@ -507,8 +889,22 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
 
   deleteRelation: (id) => {
     const state = get();
+    const relation = state.relations.find((item) => item.id === id);
     set(withHistory(state, {
       relations: state.relations.filter(r => r.id !== id),
+      tables: relation
+        ? state.tables.map((table) => {
+            if (table.id !== relation.fromTableId) return table;
+            const constraints = (table.constraints ?? []).filter((constraint) => (
+              constraint.type !== 'foreign_key' ||
+              constraint.columnIds.length !== 1 ||
+              constraint.columnIds[0] !== relation.fromFieldId ||
+              constraint.referencedTableId !== relation.toTableId ||
+              constraint.referencedColumnIds[0] !== relation.toFieldId
+            ));
+            return syncFieldFlagsFromTableStructure({ ...table, constraints });
+          })
+        : state.tables,
       selectedRelation: state.selectedRelation?.id === id ? null : state.selectedRelation,
     }));
   },
@@ -578,6 +974,8 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       name: finalName,
       values: uniqueValues,
       valueComments: uniqueValues.map(() => undefined),
+      valueMetadata: uniqueValues.map((_, index) => ({ sortOrder: index + 1, isActive: true })),
+      storageStrategy: 'postgres_enum',
       position: position || { x: 260, y: 140 },
       sidebarOrder: getNextSidebarOrder(state),
     };
@@ -595,25 +993,42 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     const nextName = nextNameRaw && nextNameRaw.length > 0 ? nextNameRaw : prevEnum.name;
     let uniqueValues = prevEnum.values;
     let uniqueComments = [...(prevEnum.valueComments ?? prevEnum.values.map(() => undefined))];
+    let uniqueMetadata = [...(prevEnum.valueMetadata ?? prevEnum.values.map<EnumValueMetadata>((_, index) => ({ sortOrder: index + 1, isActive: true })))];
     if (updates.values) {
       const prevComments = prevEnum.valueComments ?? prevEnum.values.map(() => undefined);
+      const prevMetadata = prevEnum.valueMetadata ?? prevEnum.values.map<EnumValueMetadata>((_, index) => ({ sortOrder: index + 1, isActive: true }));
       const incomingComments = updates.valueComments ?? updates.values.map((_, idx) => prevComments[idx]);
+      const incomingMetadata = updates.valueMetadata ?? updates.values.map((_, idx) => prevMetadata[idx]);
       const valueCommentPairs = updates.values
-        .map((v, idx) => ({ value: v.trim(), comment: (incomingComments[idx] ?? '').trim() || undefined }))
+        .map((v, idx) => ({
+          value: v.trim(),
+          comment: (incomingComments[idx] ?? '').trim() || undefined,
+          metadata: incomingMetadata[idx],
+        }))
         .filter((item) => item.value.length > 0);
       const seen = new Set<string>();
       uniqueValues = [];
       uniqueComments = [];
+      uniqueMetadata = [];
       for (const item of valueCommentPairs) {
         if (seen.has(item.value)) continue;
         seen.add(item.value);
         uniqueValues.push(item.value);
-        uniqueComments.push(item.comment);
+        const metadata = {
+          ...item.metadata,
+          description: item.metadata?.description ?? item.comment,
+          sortOrder: item.metadata?.sortOrder ?? uniqueValues.length,
+          isActive: item.metadata?.isActive ?? true,
+        };
+        uniqueComments.push(metadata.description || item.comment);
+        uniqueMetadata.push(metadata);
       }
+    } else if (updates.valueMetadata) {
+      uniqueMetadata = updates.valueMetadata;
     }
 
     set(withHistory(state, {
-      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues, valueComments: uniqueComments } : e),
+      enums: state.enums.map(e => e.id === id ? { ...e, ...updates, name: nextName, values: uniqueValues, valueComments: uniqueComments, valueMetadata: uniqueMetadata } : e),
       tables: state.tables.map(table => ({
         ...table,
         fields: table.fields.map(field => {
@@ -662,12 +1077,15 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
     }
     const nextValues = [...enumType.values];
     const nextComments = [...(enumType.valueComments ?? enumType.values.map(() => undefined))];
+    const nextMetadata = [...(enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, index) => ({ sortOrder: index + 1, isActive: true })))];
     const [moved] = nextValues.splice(fromIndex, 1);
     const [movedComment] = nextComments.splice(fromIndex, 1);
+    const [movedMetadata] = nextMetadata.splice(fromIndex, 1);
     nextValues.splice(toIndex, 0, moved);
     nextComments.splice(toIndex, 0, movedComment);
+    nextMetadata.splice(toIndex, 0, movedMetadata);
     set(withHistory(state, {
-      enums: state.enums.map((e) => (e.id === id ? { ...e, values: nextValues, valueComments: nextComments } : e)),
+      enums: state.enums.map((e) => (e.id === id ? { ...e, values: nextValues, valueComments: nextComments, valueMetadata: nextMetadata } : e)),
     }));
   },
 
@@ -704,6 +1122,9 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
       name: finalName,
       position: position || { x: 320, y: 220 },
       sidebarOrder: getNextSidebarOrder(state),
+      rootType: 'object',
+      refs: [],
+      examples: [],
       nodes: [
         {
           id: rootNodeId,
@@ -996,7 +1417,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   // ── Auto-layout ──
   autoLayout: () => {
     const state = get();
-    const { tables, relations, domains } = state;
+    const { tables, domains } = state;
     if (tables.length === 0) return;
 
     // Group tables by domain
@@ -1058,7 +1479,7 @@ export const useSchemaStore = create<SchemaState>()((set, get) => ({
   // ─ Import/Export ──
   exportToFormat: (formatId) => {
     const { tables, relations, domains, enums, jsonSchemas } = get();
-    const schema: Schema = { tables, relations, domains, enums, jsonSchemas };
+    const schema: Schema = { schemaVersion: 2, tables, relations, domains, enums, jsonSchemas };
     const serializer = getSerializer(formatId);
     if (!serializer) throw new Error(`Unknown format: ${formatId}`);
     return serializer.serialize(schema);

@@ -1,17 +1,43 @@
 import {
   ALL_FIELD_TYPES,
   DEFAULT_PROJECT_SETTINGS,
+  DOMAIN_COLORS,
   type Domain,
   type EnumType,
+  type EnumStorageStrategy,
+  type EnumValueMetadata,
   type Field,
   type FieldType,
+  type IndexMethod,
   type ProjectSettings,
   type JsonSchemaDocument,
+  type JsonSchemaExample,
   type JsonSchemaNode,
+  type JsonSchemaReference,
+  type JsonSchemaRootType,
+  type JsonSchemaValidationRules,
   type Relation,
+  type ReferentialAction,
   type Table,
+  type TableConstraint,
+  type TableIndex,
 } from '@/shared/types/schema';
-import type { ProjectData } from '@/shared/types/project';
+import {
+  createErdProjectDocument,
+  type ClassAttribute,
+  type ClassAttributeMultiplicity,
+  type ClassDiagramModel,
+  type ClassEntity,
+  type ClassEntityKind,
+  type ClassMemberVisibility,
+  type ClassMethod,
+  type ClassRelation,
+  type ClassRelationType,
+  type ProjectData,
+  type ProjectDocument,
+  type ProjectDocumentType,
+  type ProjectSchemaModel,
+} from '@/shared/types/project';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -27,6 +53,14 @@ function asBoolean(value: unknown, fallback = false): boolean {
 
 function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function asPosition(value: unknown, fallback: { x: number; y: number }): { x: number; y: number } {
+  const record = isRecord(value) ? value : {};
+  return {
+    x: asNumber(record.x, fallback.x),
+    y: asNumber(record.y, fallback.y),
+  };
 }
 
 function normalizeFieldType(value: unknown): FieldType {
@@ -58,6 +92,113 @@ function normalizeField(value: unknown, index: number): Field {
   };
 }
 
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asString(item).trim()).filter(Boolean);
+}
+
+function normalizeReferentialAction(value: unknown): ReferentialAction | undefined {
+  const action = asString(value);
+  if (
+    action === 'no_action' ||
+    action === 'restrict' ||
+    action === 'cascade' ||
+    action === 'set_null' ||
+    action === 'set_default'
+  ) {
+    return action;
+  }
+  return undefined;
+}
+
+function normalizeIndexMethod(value: unknown): IndexMethod | undefined {
+  const method = asString(value);
+  if (method === 'btree' || method === 'hash' || method === 'gist' || method === 'spgist' || method === 'gin' || method === 'brin') {
+    return method;
+  }
+  return undefined;
+}
+
+function normalizeTableConstraint(value: unknown, index: number, fieldIds: Set<string>): TableConstraint | null {
+  const record = isRecord(value) ? value : {};
+  const type = asString(record.type);
+  const base = {
+    id: asString(record.id, `constraint_${index}`),
+    name: asString(record.name) || undefined,
+    description: asString(record.description) || undefined,
+  };
+
+  if (type === 'primary_key') {
+    const columnIds = asStringArray(record.columnIds).filter((id) => fieldIds.has(id));
+    if (columnIds.length === 0) return null;
+    return { ...base, type, columnIds };
+  }
+
+  if (type === 'unique') {
+    const columnIds = asStringArray(record.columnIds).filter((id) => fieldIds.has(id));
+    if (columnIds.length === 0) return null;
+    return { ...base, type, columnIds, nullsNotDistinct: asBoolean(record.nullsNotDistinct) };
+  }
+
+  if (type === 'foreign_key') {
+    const columnIds = asStringArray(record.columnIds).filter((id) => fieldIds.has(id));
+    const referencedTableId = asString(record.referencedTableId);
+    const referencedColumnIds = asStringArray(record.referencedColumnIds);
+    if (columnIds.length === 0 || !referencedTableId || referencedColumnIds.length === 0) return null;
+    return {
+      ...base,
+      type,
+      columnIds,
+      referencedTableId,
+      referencedColumnIds,
+      onDelete: normalizeReferentialAction(record.onDelete),
+      onUpdate: normalizeReferentialAction(record.onUpdate),
+    };
+  }
+
+  if (type === 'check') {
+    const expression = asString(record.expression).trim();
+    if (!expression) return null;
+    return { ...base, type, expression };
+  }
+
+  return null;
+}
+
+function normalizeTableIndex(value: unknown, index: number, fieldIds: Set<string>): TableIndex | null {
+  const record = isRecord(value) ? value : {};
+  const rawColumns = Array.isArray(record.columns) ? record.columns : [];
+  const columns = rawColumns
+    .map((item) => {
+      const col = isRecord(item) ? item : {};
+      const fieldId = asString(col.fieldId);
+      const expression = asString(col.expression).trim();
+      if (fieldId && fieldIds.has(fieldId)) {
+        return {
+          fieldId,
+          sort: asString(col.sort) === 'desc' ? 'desc' as const : asString(col.sort) === 'asc' ? 'asc' as const : undefined,
+          nulls: asString(col.nulls) === 'first' ? 'first' as const : asString(col.nulls) === 'last' ? 'last' as const : undefined,
+        };
+      }
+      if (expression) return { expression };
+      return null;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  if (columns.length === 0) return null;
+
+  return {
+    id: asString(record.id, `index_${index}`),
+    name: asString(record.name) || undefined,
+    columns,
+    unique: asBoolean(record.unique),
+    method: normalizeIndexMethod(record.method),
+    includeFieldIds: asStringArray(record.includeFieldIds).filter((id) => fieldIds.has(id)),
+    where: asString(record.where).trim() || undefined,
+    description: asString(record.description) || undefined,
+  };
+}
+
 function normalizeDomain(value: unknown, index: number): Domain {
   const record = isRecord(value) ? value : {};
   return {
@@ -67,15 +208,37 @@ function normalizeDomain(value: unknown, index: number): Domain {
   };
 }
 
+function normalizeEnumStorageStrategy(value: unknown): EnumStorageStrategy {
+  const strategy = asString(value);
+  if (strategy === 'check_constraint' || strategy === 'lookup_table') return strategy;
+  return 'postgres_enum';
+}
+
+function normalizeEnumValueMetadata(value: unknown, fallbackDescription?: string, fallbackOrder?: number): EnumValueMetadata {
+  const record = isRecord(value) ? value : {};
+  const aliasesRaw = Array.isArray(record.aliases) ? record.aliases : [];
+  return {
+    label: asString(record.label) || undefined,
+    description: asString(record.description) || fallbackDescription || undefined,
+    sortOrder: asNumber(record.sortOrder, fallbackOrder ?? 0),
+    color: asString(record.color) || undefined,
+    isActive: asBoolean(record.isActive, true),
+    deprecated: asBoolean(record.deprecated),
+    aliases: aliasesRaw.map((item) => asString(item).trim()).filter(Boolean),
+  };
+}
+
 function normalizeEnumType(value: unknown, index: number): EnumType {
   const record = isRecord(value) ? value : {};
   const rawValues = Array.isArray(record.values) ? record.values : [];
   const rawValueComments = Array.isArray(record.valueComments) ? record.valueComments : [];
+  const rawValueMetadata = Array.isArray(record.valueMetadata) ? record.valueMetadata : [];
   const values = rawValues
     .map((item) => asString(item).trim())
     .filter((item) => item.length > 0);
   const uniqueValues: string[] = [];
   const uniqueComments: Array<string | undefined> = [];
+  const uniqueMetadata: EnumValueMetadata[] = [];
   const seenValues = new Set<string>();
   for (let i = 0; i < values.length; i += 1) {
     const valueItem = values[i];
@@ -83,7 +246,9 @@ function normalizeEnumType(value: unknown, index: number): EnumType {
     seenValues.add(valueItem);
     uniqueValues.push(valueItem);
     const rawComment = asString(rawValueComments[i]).trim();
-    uniqueComments.push(rawComment || undefined);
+    const normalizedMetadata = normalizeEnumValueMetadata(rawValueMetadata[i], rawComment || undefined, uniqueValues.length);
+    uniqueComments.push(normalizedMetadata.description || rawComment || undefined);
+    uniqueMetadata.push(normalizedMetadata);
   }
 
   return {
@@ -91,7 +256,10 @@ function normalizeEnumType(value: unknown, index: number): EnumType {
     name: asString(record.name, `Enum${index + 1}`),
     values: uniqueValues,
     valueComments: uniqueComments,
+    valueMetadata: uniqueMetadata,
     description: asString(record.description) || undefined,
+    notes: asString(record.notes) || undefined,
+    storageStrategy: normalizeEnumStorageStrategy(record.storageStrategy),
     domainId: asString(record.domainId) || undefined,
     position: isRecord(record.position)
       ? {
@@ -101,6 +269,40 @@ function normalizeEnumType(value: unknown, index: number): EnumType {
       : undefined,
     sidebarOrder: asNumber(record.sidebarOrder, 10_000 + index),
   };
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeJsonSchemaValidation(value: unknown): JsonSchemaValidationRules | undefined {
+  const record = isRecord(value) ? value : {};
+  const rules: JsonSchemaValidationRules = {
+    defaultValue: asString(record.defaultValue) || undefined,
+    constValue: asString(record.constValue) || undefined,
+    format: asString(record.format) || undefined,
+    pattern: asString(record.pattern) || undefined,
+    minLength: optionalNumber(record.minLength),
+    maxLength: optionalNumber(record.maxLength),
+    minimum: optionalNumber(record.minimum),
+    maximum: optionalNumber(record.maximum),
+    exclusiveMinimum: asBoolean(record.exclusiveMinimum),
+    exclusiveMaximum: asBoolean(record.exclusiveMaximum),
+    multipleOf: optionalNumber(record.multipleOf),
+    minItems: optionalNumber(record.minItems),
+    maxItems: optionalNumber(record.maxItems),
+    uniqueItems: asBoolean(record.uniqueItems),
+    minProperties: optionalNumber(record.minProperties),
+    maxProperties: optionalNumber(record.maxProperties),
+    additionalProperties: typeof record.additionalProperties === 'boolean' ? record.additionalProperties : undefined,
+    readOnly: asBoolean(record.readOnly),
+    writeOnly: asBoolean(record.writeOnly),
+    deprecated: asBoolean(record.deprecated),
+  };
+  const hasRules = Object.entries(rules).some(([key, item]) => (
+    item !== undefined && (item !== false || key === 'additionalProperties')
+  ));
+  return hasRules ? rules : undefined;
 }
 
 function normalizeJsonSchemaNode(value: unknown, index: number): JsonSchemaNode {
@@ -124,6 +326,32 @@ function normalizeJsonSchemaNode(value: unknown, index: number): JsonSchemaNode 
     nullable: asBoolean(record.nullable),
     collapsed: asBoolean(record.collapsed),
     enumValues: enumValues.length > 0 ? Array.from(new Set(enumValues)) : undefined,
+    validation: normalizeJsonSchemaValidation(record.validation),
+    description: asString(record.description) || undefined,
+  };
+}
+
+function normalizeJsonSchemaRootType(value: unknown): JsonSchemaRootType {
+  return asString(value) === 'array' ? 'array' : 'object';
+}
+
+function normalizeJsonSchemaExample(value: unknown, index: number): JsonSchemaExample {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `json_example_${index}`),
+    name: asString(record.name, `Example ${index + 1}`),
+    description: asString(record.description) || undefined,
+    value: asString(record.value, '{\n  \n}'),
+  };
+}
+
+function normalizeJsonSchemaReference(value: unknown, index: number): JsonSchemaReference {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `json_ref_${index}`),
+    name: asString(record.name) || undefined,
+    targetSchemaId: asString(record.targetSchemaId) || undefined,
+    targetSchemaName: asString(record.targetSchemaName) || undefined,
     description: asString(record.description) || undefined,
   };
 }
@@ -132,11 +360,18 @@ function normalizeJsonSchemaDocument(value: unknown, index: number): JsonSchemaD
   const record = isRecord(value) ? value : {};
   const rawNodes = Array.isArray(record.nodes) ? record.nodes : [];
   const nodes = uniqueById(rawNodes.map((node, nodeIndex) => normalizeJsonSchemaNode(node, nodeIndex)));
+  const rawExamples = Array.isArray(record.examples) ? record.examples : [];
+  const rawRefs = Array.isArray(record.refs) ? record.refs : [];
   return {
     id: asString(record.id, `json_schema_${index}`),
     name: asString(record.name, `json_schema_${index + 1}`),
     description: asString(record.description) || undefined,
+    schemaId: asString(record.schemaId) || undefined,
+    rootType: normalizeJsonSchemaRootType(record.rootType),
     nodes,
+    refs: uniqueById(rawRefs.map((item, itemIndex) => normalizeJsonSchemaReference(item, itemIndex))),
+    examples: uniqueById(rawExamples.map((item, itemIndex) => normalizeJsonSchemaExample(item, itemIndex))),
+    notes: asString(record.notes) || undefined,
     domainId: asString(record.domainId) || undefined,
     position: isRecord(record.position)
       ? {
@@ -151,12 +386,27 @@ function normalizeJsonSchemaDocument(value: unknown, index: number): JsonSchemaD
 function normalizeTable(value: unknown, index: number): Table {
   const record = isRecord(value) ? value : {};
   const fieldsRaw = Array.isArray(record.fields) ? record.fields : [];
+  const fields = fieldsRaw.map((field, fieldIndex) => normalizeField(field, fieldIndex));
+  const fieldIds = new Set(fields.map((field) => field.id));
+  const constraintsRaw = Array.isArray(record.constraints) ? record.constraints : [];
+  const indexesRaw = Array.isArray(record.indexes) ? record.indexes : [];
 
   return {
     id: asString(record.id, `table_${index}`),
     name: asString(record.name, `table_${index + 1}`),
     description: asString(record.description) || undefined,
-    fields: fieldsRaw.map((field, fieldIndex) => normalizeField(field, fieldIndex)),
+    notes: asString(record.notes) || undefined,
+    fields,
+    constraints: uniqueById(
+      constraintsRaw
+        .map((constraint, constraintIndex) => normalizeTableConstraint(constraint, constraintIndex, fieldIds))
+        .filter((constraint): constraint is TableConstraint => constraint !== null),
+    ),
+    indexes: uniqueById(
+      indexesRaw
+        .map((tableIndexValue, tableIndexIndex) => normalizeTableIndex(tableIndexValue, tableIndexIndex, fieldIds))
+        .filter((tableIndex): tableIndex is TableIndex => tableIndex !== null),
+    ),
     position: {
       x: asNumber(isRecord(record.position) ? record.position.x : undefined, 100 + index * 40),
       y: asNumber(isRecord(record.position) ? record.position.y : undefined, 100 + index * 40),
@@ -184,12 +434,255 @@ function normalizeRelation(value: unknown, index: number): Relation {
   };
 }
 
+function normalizeVisibility(value: unknown): ClassMemberVisibility {
+  const visibility = asString(value, 'public');
+  return visibility === 'protected' || visibility === 'private' ? visibility : 'public';
+}
+
+function normalizeClassEntityKind(value: unknown): ClassEntityKind {
+  const kind = asString(value, 'class');
+  if (kind === 'abstract-class' || kind === 'interface' || kind === 'enum' || kind === 'datatype') return kind;
+  return 'class';
+}
+
+function normalizeAttributeMultiplicity(value: unknown, requiredValue: unknown): ClassAttributeMultiplicity {
+  const multiplicity = asString(value);
+  if (multiplicity === 'optional' || multiplicity === 'many') return multiplicity;
+  if (multiplicity === 'one') return 'one';
+  return asBoolean(requiredValue, true) ? 'one' : 'optional';
+}
+
+function normalizeClassAttribute(value: unknown, index: number): ClassAttribute {
+  const record = isRecord(value) ? value : {};
+  const multiplicity = normalizeAttributeMultiplicity(record.multiplicity, record.required);
+  return {
+    id: asString(record.id, `attribute_${index}`),
+    name: asString(record.name, `attribute_${index + 1}`),
+    type: asString(record.type, 'string'),
+    visibility: normalizeVisibility(record.visibility),
+    multiplicity,
+    description: asString(record.description) || undefined,
+    required: asBoolean(record.required, multiplicity === 'one'),
+  };
+}
+
+function normalizeClassMethod(value: unknown, index: number): ClassMethod {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `method_${index}`),
+    name: asString(record.name, `method_${index + 1}`),
+    returnType: asString(record.returnType) || undefined,
+    visibility: normalizeVisibility(record.visibility),
+    parameters: asString(record.parameters) || undefined,
+    description: asString(record.description) || undefined,
+  };
+}
+
+function normalizeClassEntity(value: unknown, index: number): ClassEntity {
+  const record = isRecord(value) ? value : {};
+  const rawAttributes = Array.isArray(record.attributes) ? record.attributes : [];
+  const rawMethods = Array.isArray(record.methods) ? record.methods : [];
+
+  return {
+    id: asString(record.id, `class_${index}`),
+    name: asString(record.name, `Class${index + 1}`),
+    kind: normalizeClassEntityKind(record.kind),
+    description: asString(record.description) || undefined,
+    attributes: uniqueById(rawAttributes.map(normalizeClassAttribute)),
+    methods: uniqueById(rawMethods.map(normalizeClassMethod)),
+    position: asPosition(record.position, { x: 120 + index * 48, y: 120 + index * 48 }),
+    color: asString(record.color) || DOMAIN_COLORS[index % DOMAIN_COLORS.length],
+    domainId: asString(record.domainId) || undefined,
+    mappedTableId: asString(record.mappedTableId) || undefined,
+    sidebarOrder: asNumber(record.sidebarOrder, index),
+  };
+}
+
+function normalizeClassRelationType(value: unknown): ClassRelationType {
+  const type = asString(value, 'association');
+  return type === 'inheritance' || type === 'composition' || type === 'aggregation' || type === 'dependency'
+    ? type
+    : 'association';
+}
+
+function normalizeClassRelation(value: unknown, index: number): ClassRelation {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `class_relation_${index}`),
+    fromClassId: asString(record.fromClassId),
+    toClassId: asString(record.toClassId),
+    type: normalizeClassRelationType(record.type),
+    label: asString(record.label) || undefined,
+    description: asString(record.description) || undefined,
+    fromRole: asString(record.fromRole) || undefined,
+    toRole: asString(record.toRole) || undefined,
+    fromMultiplicity: asString(record.fromMultiplicity) || undefined,
+    toMultiplicity: asString(record.toMultiplicity) || undefined,
+  };
+}
+
 function uniqueById<T extends { id: string }>(items: T[]): T[] {
   const seen = new Set<string>();
   return items.filter((item) => {
     if (!item.id || seen.has(item.id)) return false;
     seen.add(item.id);
     return true;
+  });
+}
+
+function buildLegacyConstraints(table: Table, relations: Relation[]): TableConstraint[] {
+  const constraints: TableConstraint[] = [];
+  const primaryKeyColumnIds = table.fields.filter((field) => field.isPrimaryKey).map((field) => field.id);
+  if (primaryKeyColumnIds.length > 0) {
+    constraints.push({
+      id: `constraint:${table.id}:primary_key`,
+      type: 'primary_key',
+      name: `${table.name}_pkey`,
+      columnIds: primaryKeyColumnIds,
+    });
+  }
+
+  for (const field of table.fields) {
+    if (field.isUnique && !field.isPrimaryKey) {
+      constraints.push({
+        id: `constraint:${table.id}:${field.id}:unique`,
+        type: 'unique',
+        name: `${table.name}_${field.name}_key`,
+        columnIds: [field.id],
+      });
+    }
+  }
+
+  for (const relation of relations.filter((item) => item.fromTableId === table.id)) {
+    constraints.push({
+      id: `constraint:${table.id}:${relation.id}:foreign_key`,
+      type: 'foreign_key',
+      name: `fk_${table.name}_${relation.toTableId}`,
+      columnIds: [relation.fromFieldId],
+      referencedTableId: relation.toTableId,
+      referencedColumnIds: [relation.toFieldId],
+      onDelete: 'no_action',
+      onUpdate: 'no_action',
+    });
+  }
+
+  return constraints;
+}
+
+function buildLegacyIndexes(table: Table): TableIndex[] {
+  return table.fields
+    .filter((field) => field.isIndexed)
+    .map((field) => ({
+      id: `index:${table.id}:${field.id}`,
+      name: `idx_${table.name}_${field.name}`,
+      columns: [{ fieldId: field.id }],
+      method: 'btree' as const,
+    }));
+}
+
+function getConstraintKey(constraint: TableConstraint): string {
+  if (constraint.type === 'check') return `check:${constraint.expression.trim()}`;
+  if (constraint.type === 'foreign_key') {
+    return [
+      'foreign_key',
+      constraint.columnIds.join(','),
+      constraint.referencedTableId,
+      constraint.referencedColumnIds.join(','),
+    ].join(':');
+  }
+  return `${constraint.type}:${constraint.columnIds.join(',')}`;
+}
+
+function mergeConstraints(explicitConstraints: TableConstraint[], legacyConstraints: TableConstraint[]): TableConstraint[] {
+  const seen = new Set(explicitConstraints.map(getConstraintKey));
+  const merged = [...explicitConstraints];
+  for (const constraint of legacyConstraints) {
+    const key = getConstraintKey(constraint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(constraint);
+  }
+  return merged;
+}
+
+function getIndexKey(index: TableIndex): string {
+  return [
+    index.unique ? 'unique' : 'index',
+    index.method ?? 'btree',
+    index.columns.map((column) => column.fieldId || column.expression || '').join(','),
+    index.where ?? '',
+  ].join(':');
+}
+
+function mergeIndexes(explicitIndexes: TableIndex[], legacyIndexes: TableIndex[]): TableIndex[] {
+  const seen = new Set(explicitIndexes.map(getIndexKey));
+  const merged = [...explicitIndexes];
+  for (const index of legacyIndexes) {
+    const key = getIndexKey(index);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(index);
+  }
+  return merged;
+}
+
+function applyConstraintFieldFlags(table: Table): Table {
+  const primaryKeyIds = new Set<string>();
+  const foreignKeyIds = new Set<string>();
+  const singleUniqueIds = new Set<string>();
+  const indexedIds = new Set<string>();
+
+  for (const constraint of table.constraints ?? []) {
+    if (constraint.type === 'primary_key') {
+      constraint.columnIds.forEach((id) => primaryKeyIds.add(id));
+    }
+    if (constraint.type === 'foreign_key') {
+      constraint.columnIds.forEach((id) => foreignKeyIds.add(id));
+    }
+    if (constraint.type === 'unique' && constraint.columnIds.length === 1) {
+      singleUniqueIds.add(constraint.columnIds[0]);
+    }
+  }
+
+  for (const index of table.indexes ?? []) {
+    index.columns.forEach((column) => {
+      if (column.fieldId) indexedIds.add(column.fieldId);
+    });
+  }
+
+  return {
+    ...table,
+    fields: table.fields.map((field) => ({
+      ...field,
+      isPrimaryKey: primaryKeyIds.has(field.id),
+      isForeignKey: foreignKeyIds.has(field.id),
+      isUnique: singleUniqueIds.has(field.id),
+      isIndexed: indexedIds.has(field.id),
+      isNullable: primaryKeyIds.has(field.id) ? false : field.isNullable,
+    })),
+  };
+}
+
+function isValidConstraint(constraint: TableConstraint, table: Table, tableById: Map<string, Table>): boolean {
+  const fieldIds = new Set(table.fields.map((field) => field.id));
+  if (constraint.type === 'check') return constraint.expression.trim().length > 0;
+  if (constraint.columnIds.length === 0 || constraint.columnIds.some((id) => !fieldIds.has(id))) return false;
+  if (constraint.type !== 'foreign_key') return true;
+
+  const referencedTable = tableById.get(constraint.referencedTableId);
+  if (!referencedTable) return false;
+  const referencedFieldIds = new Set(referencedTable.fields.map((field) => field.id));
+  return (
+    constraint.referencedColumnIds.length === constraint.columnIds.length &&
+    constraint.referencedColumnIds.every((id) => referencedFieldIds.has(id))
+  );
+}
+
+function isValidIndex(index: TableIndex, table: Table): boolean {
+  const fieldIds = new Set(table.fields.map((field) => field.id));
+  return index.columns.length > 0 && index.columns.every((column) => {
+    if (column.fieldId) return fieldIds.has(column.fieldId);
+    return !!column.expression?.trim();
   });
 }
 
@@ -224,7 +717,6 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
   const enums = uniqueById((Array.isArray(record.enums) ? record.enums : []).map(normalizeEnumType));
   const jsonSchemas = uniqueById((Array.isArray(record.jsonSchemas) ? record.jsonSchemas : []).map(normalizeJsonSchemaDocument));
 
-  const tableById = new Map(tables.map((table) => [table.id, table]));
   const domainIdSet = new Set(domains.map((domain) => domain.id));
   const enumById = new Map(enums.map((enumType) => [enumType.id, enumType]));
   const enumByName = new Map(enums.map((enumType) => [enumType.name.toLowerCase(), enumType]));
@@ -247,9 +739,11 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
     }),
   }));
 
+  const normalizedTableById = new Map(normalizedTables.map((table) => [table.id, table]));
+
   const relations = uniqueById((Array.isArray(record.relations) ? record.relations : []).map(normalizeRelation)).filter((relation) => {
-    const fromTable = tableById.get(relation.fromTableId);
-    const toTable = tableById.get(relation.toTableId);
+    const fromTable = normalizedTableById.get(relation.fromTableId);
+    const toTable = normalizedTableById.get(relation.toTableId);
     if (!fromTable || !toTable) return false;
 
     const fromFieldExists = fromTable.fields.some((field) => field.id === relation.fromFieldId);
@@ -257,8 +751,19 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
     return fromFieldExists && toFieldExists;
   });
 
+  const tablesWithConstraints = normalizedTables.map((table) => {
+    const explicitConstraints = table.constraints ?? [];
+    const explicitIndexes = table.indexes ?? [];
+    const constraints = mergeConstraints(explicitConstraints, buildLegacyConstraints(table, relations))
+      .filter((constraint) => isValidConstraint(constraint, table, normalizedTableById));
+    const indexes = mergeIndexes(explicitIndexes, buildLegacyIndexes(table))
+      .filter((index) => isValidIndex(index, table));
+    return applyConstraintFieldFlags({ ...table, constraints, indexes });
+  });
+
   return {
-    tables: normalizedTables,
+    schemaVersion: 2,
+    tables: tablesWithConstraints,
     relations,
     domains,
     enums: enums.map((enumType) => ({
@@ -270,6 +775,143 @@ export function normalizeSchema(input: unknown): NormalizedSchema {
       domainId: doc.domainId && domainIdSet.has(doc.domainId) ? doc.domainId : undefined,
     })),
   };
+}
+
+export function normalizeProjectSchema(input: unknown): ProjectSchemaModel {
+  const schema = normalizeSchema(input);
+  return {
+    schemaVersion: schema.schemaVersion,
+    tables: schema.tables,
+    relations: schema.relations,
+    domains: schema.domains ?? [],
+    enums: schema.enums ?? [],
+    jsonSchemas: schema.jsonSchemas ?? [],
+  };
+}
+
+function mergeDomains(...domainGroups: Domain[][]): Domain[] {
+  return uniqueById(domainGroups.flat().filter((domain) => domain.name.trim().length > 0));
+}
+
+function normalizeDomainList(value: unknown): Domain[] {
+  return uniqueById((Array.isArray(value) ? value : []).map(normalizeDomain));
+}
+
+function applyProjectDomainsToSchema(schema: ProjectSchemaModel, domains: Domain[]): ProjectSchemaModel {
+  const domainIds = new Set(domains.map((domain) => domain.id));
+  return {
+    ...schema,
+    domains,
+    tables: schema.tables.map((table) => ({
+      ...table,
+      domainId: table.domainId && domainIds.has(table.domainId) ? table.domainId : undefined,
+    })),
+    enums: schema.enums.map((enumType) => ({
+      ...enumType,
+      domainId: enumType.domainId && domainIds.has(enumType.domainId) ? enumType.domainId : undefined,
+    })),
+    jsonSchemas: (schema.jsonSchemas ?? []).map((doc) => ({
+      ...doc,
+      domainId: doc.domainId && domainIds.has(doc.domainId) ? doc.domainId : undefined,
+    })),
+  };
+}
+
+function extractDocumentDomains(value: unknown): Domain[] {
+  const record = isRecord(value) ? value : {};
+  const type = normalizeDocumentType(record.type);
+  if (type === 'erd') {
+    const erdRecord = isRecord(record.erd) ? record.erd : isRecord(record.schema) ? record.schema : {};
+    return normalizeDomainList(erdRecord.domains);
+  }
+  if (type === 'class-diagram') {
+    const diagramRecord = isRecord(record.classDiagram) ? record.classDiagram : {};
+    return normalizeDomainList(diagramRecord.domains);
+  }
+  return [];
+}
+
+export function normalizeClassDiagram(input: unknown, projectDomains?: Domain[]): ClassDiagramModel {
+  const record = isRecord(input) ? input : {};
+  const classes = uniqueById((Array.isArray(record.classes) ? record.classes : []).map(normalizeClassEntity));
+  const domains = projectDomains ?? normalizeDomainList(record.domains);
+  const classIds = new Set(classes.map((entity) => entity.id));
+  const domainIds = new Set(domains.map((domain) => domain.id));
+
+  return {
+    classes: classes.map((entity) => ({
+      ...entity,
+      domainId: entity.domainId && domainIds.has(entity.domainId) ? entity.domainId : undefined,
+    })),
+    relations: uniqueById((Array.isArray(record.relations) ? record.relations : []).map(normalizeClassRelation))
+      .filter((relation) => classIds.has(relation.fromClassId) && classIds.has(relation.toClassId)),
+    domains,
+  };
+}
+
+function normalizeDocumentType(value: unknown): ProjectDocumentType | null {
+  const type = asString(value);
+  if (type === 'erd' || type === 'class-diagram' || type === 'bpmn' || type === 'openapi' || type === 'sequence') {
+    return type;
+  }
+  return null;
+}
+
+function normalizeProjectDocument(value: unknown, index: number, fallbackSchema: ProjectSchemaModel, projectDomains: Domain[]): ProjectDocument | null {
+  const record = isRecord(value) ? value : {};
+  const type = normalizeDocumentType(record.type);
+  if (!type) return null;
+
+  const createdAt = asString(record.createdAt, new Date().toISOString());
+  const base = {
+    id: asString(record.id, `document_${index}`),
+    name: asString(record.name, type === 'class-diagram' ? 'Class Diagram' : type === 'erd' ? 'ERD Diagram' : 'Document'),
+    description: asString(record.description) || undefined,
+    createdAt,
+    updatedAt: asString(record.updatedAt, createdAt),
+    snapshot: asString(record.snapshot) || undefined,
+  };
+
+  if (type === 'erd') {
+    return {
+      ...base,
+      type,
+      erd: applyProjectDomainsToSchema(normalizeProjectSchema(record.erd ?? record.schema ?? fallbackSchema), projectDomains),
+    };
+  }
+
+  if (type === 'class-diagram') {
+    return {
+      ...base,
+      type,
+      classDiagram: normalizeClassDiagram(record.classDiagram, projectDomains),
+    };
+  }
+
+  return {
+    ...base,
+    type,
+  };
+}
+
+function normalizeProjectDocuments(value: unknown, fallbackSchema: ProjectSchemaModel, projectDomains: Domain[]): ProjectDocument[] {
+  const rawDocuments = Array.isArray(value) ? value : [];
+  const documents = uniqueById(
+    rawDocuments
+      .map((item, index) => normalizeProjectDocument(item, index, fallbackSchema, projectDomains))
+      .filter((item): item is ProjectDocument => !!item),
+  );
+
+  if (documents.length > 0) return documents;
+
+  const hasLegacySchemaContent =
+    fallbackSchema.tables.length > 0 ||
+    fallbackSchema.relations.length > 0 ||
+    fallbackSchema.domains.length > 0 ||
+    fallbackSchema.enums.length > 0 ||
+    (fallbackSchema.jsonSchemas?.length ?? 0) > 0;
+
+  return hasLegacySchemaContent ? [createErdProjectDocument('ERD Diagram', applyProjectDomainsToSchema(fallbackSchema, projectDomains))] : [];
 }
 
 function normalizeSettings(value: unknown): ProjectSettings {
@@ -291,9 +933,18 @@ function normalizeSettings(value: unknown): ProjectSettings {
 
 export function normalizeProjectData(input: unknown): ProjectData | null {
   if (!isRecord(input)) return null;
-  if (!input.id || !input.name || !input.schema) return null;
+  if (!input.id || !input.name) return null;
 
-  const schema = normalizeSchema(input.schema);
+  const schema = normalizeProjectSchema(input.schema ?? input);
+  const rawDocuments = Array.isArray(input.documents) ? input.documents : [];
+  const projectDomains = mergeDomains(
+    normalizeDomainList(input.domains),
+    schema.domains,
+    ...rawDocuments.map(extractDocumentDomains),
+  );
+  const schemaWithProjectDomains = applyProjectDomainsToSchema(schema, projectDomains);
+  const documents = normalizeProjectDocuments(input.documents, schemaWithProjectDomains, projectDomains);
+  const primaryErdDocument = documents.find((document) => document.type === 'erd');
   const createdAt = asString(input.createdAt, new Date().toISOString());
   const updatedAt = asString(input.updatedAt, new Date().toISOString());
 
@@ -304,17 +955,15 @@ export function normalizeProjectData(input: unknown): ProjectData | null {
     createdAt,
     updatedAt,
     snapshot: asString(input.snapshot) || undefined,
-    schema: {
-      tables: schema.tables,
-      relations: schema.relations,
-      domains: schema.domains ?? [],
-      enums: schema.enums ?? [],
-      jsonSchemas: schema.jsonSchemas ?? [],
-    },
+    pinned: asBoolean(input.pinned),
+    domains: projectDomains,
+    schema: primaryErdDocument?.erd ?? schemaWithProjectDomains,
+    documents,
     settings: normalizeSettings(input.settings),
   };
 }
 export interface NormalizedSchema {
+  schemaVersion: number;
   tables: Table[];
   relations: Relation[];
   domains: Domain[];

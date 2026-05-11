@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+.playwright-mcp/
+backups/
 *.log
 npm-debug.log*
 yarn-debug.log*

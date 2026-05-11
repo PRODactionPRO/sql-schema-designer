@@ -4,6 +4,114 @@
 import type { Table, Relation, Domain, EnumType, JsonSchemaDocument, ProjectSettings } from './schema';
 import { DEFAULT_PROJECT_SETTINGS } from './schema';
 
+export type ProjectDocumentType =
+  | 'erd'
+  | 'class-diagram'
+  | 'bpmn'
+  | 'openapi'
+  | 'sequence';
+
+export type ClassMemberVisibility = 'public' | 'protected' | 'private';
+export type ClassAttributeMultiplicity = 'one' | 'optional' | 'many';
+export type ClassEntityKind = 'class' | 'abstract-class' | 'interface' | 'enum' | 'datatype';
+
+export interface ProjectSchemaModel {
+  schemaVersion?: number;
+  tables: Table[];
+  relations: Relation[];
+  domains: Domain[];
+  enums: EnumType[];
+  jsonSchemas?: JsonSchemaDocument[];
+}
+
+export interface ClassAttribute {
+  id: string;
+  name: string;
+  type: string;
+  visibility: ClassMemberVisibility;
+  multiplicity?: ClassAttributeMultiplicity;
+  description?: string;
+  required?: boolean;
+}
+
+export interface ClassMethod {
+  id: string;
+  name: string;
+  returnType?: string;
+  visibility: ClassMemberVisibility;
+  parameters?: string;
+  description?: string;
+}
+
+export interface ClassEntity {
+  id: string;
+  name: string;
+  kind?: ClassEntityKind;
+  description?: string;
+  attributes: ClassAttribute[];
+  methods: ClassMethod[];
+  position: { x: number; y: number };
+  color?: string;
+  domainId?: string;
+  mappedTableId?: string;
+  sidebarOrder?: number;
+}
+
+export type ClassRelationType =
+  | 'association'
+  | 'inheritance'
+  | 'composition'
+  | 'aggregation'
+  | 'dependency';
+
+export interface ClassRelation {
+  id: string;
+  fromClassId: string;
+  toClassId: string;
+  type: ClassRelationType;
+  label?: string;
+  description?: string;
+  fromRole?: string;
+  toRole?: string;
+  fromMultiplicity?: string;
+  toMultiplicity?: string;
+}
+
+export interface ClassDiagramModel {
+  classes: ClassEntity[];
+  relations: ClassRelation[];
+  domains: Domain[];
+}
+
+interface ProjectDocumentBase {
+  id: string;
+  name: string;
+  type: ProjectDocumentType;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  snapshot?: string;
+}
+
+export interface ErdProjectDocument extends ProjectDocumentBase {
+  type: 'erd';
+  erd: ProjectSchemaModel;
+}
+
+export interface ClassDiagramProjectDocument extends ProjectDocumentBase {
+  type: 'class-diagram';
+  classDiagram: ClassDiagramModel;
+}
+
+export interface PlaceholderProjectDocument extends ProjectDocumentBase {
+  type: 'bpmn' | 'openapi' | 'sequence';
+}
+
+export type ProjectDocument =
+  | ErdProjectDocument
+  | ClassDiagramProjectDocument
+  | PlaceholderProjectDocument;
+
 /**
  * Full project data stored in localStorage.
  * Universal JSON format — stores everything needed to
@@ -16,13 +124,10 @@ export interface ProjectData {
   createdAt: string;   // ISO 8601
   updatedAt: string;   // ISO 8601
   snapshot?: string;    // base64 PNG data URL of the canvas preview
-  schema: {
-    tables: Table[];
-    relations: Relation[];
-    domains: Domain[];
-    enums: EnumType[];
-    jsonSchemas?: JsonSchemaDocument[];
-  };
+  pinned?: boolean;
+  domains: Domain[];
+  schema: ProjectSchemaModel;
+  documents: ProjectDocument[];
   settings: ProjectSettings;
 }
 
@@ -40,13 +145,100 @@ export function createEmptyProject(name: string): ProjectData {
     name,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    domains: [],
     schema: {
+      schemaVersion: 2,
       tables: [],
       relations: [],
       domains: [],
       enums: [],
       jsonSchemas: [],
     },
+    documents: [],
     settings: { ...DEFAULT_PROJECT_SETTINGS },
   };
+}
+
+function nextProjectObjectId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function createEmptyProjectSchema(): ProjectSchemaModel {
+  return {
+    schemaVersion: 2,
+    tables: [],
+    relations: [],
+    domains: [],
+    enums: [],
+    jsonSchemas: [],
+  };
+}
+
+export function createEmptyClassDiagram(): ClassDiagramModel {
+  return {
+    classes: [],
+    relations: [],
+    domains: [],
+  };
+}
+
+export function createErdProjectDocument(name = 'ERD Diagram', schema: ProjectSchemaModel = createEmptyProjectSchema()): ErdProjectDocument {
+  const now = new Date().toISOString();
+  return {
+    id: nextProjectObjectId('doc_erd'),
+    name,
+    type: 'erd',
+    createdAt: now,
+    updatedAt: now,
+    erd: schema,
+  };
+}
+
+export function createClassDiagramProjectDocument(name = 'Class Diagram', domains: Domain[] = []): ClassDiagramProjectDocument {
+  const now = new Date().toISOString();
+  return {
+    id: nextProjectObjectId('doc_class'),
+    name,
+    type: 'class-diagram',
+    createdAt: now,
+    updatedAt: now,
+    classDiagram: {
+      ...createEmptyClassDiagram(),
+      domains,
+    },
+  };
+}
+
+export function getDocumentBadge(type: ProjectDocumentType): string {
+  switch (type) {
+    case 'erd':
+      return 'ERD';
+    case 'class-diagram':
+      return 'CLASS';
+    case 'bpmn':
+      return 'BPMN';
+    case 'openapi':
+      return 'API';
+    case 'sequence':
+      return 'SEQ';
+    default:
+      return 'DOC';
+  }
+}
+
+export function getDocumentTypeLabel(type: ProjectDocumentType): string {
+  switch (type) {
+    case 'erd':
+      return 'ERD diagram';
+    case 'class-diagram':
+      return 'Class diagram';
+    case 'bpmn':
+      return 'BPMN process';
+    case 'openapi':
+      return 'OpenAPI contract';
+    case 'sequence':
+      return 'Sequence diagram';
+    default:
+      return 'Document';
+  }
 }

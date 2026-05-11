@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { Table, Field, FieldType, Relation, Domain, EnumType } from '../model/types';
+import type { Table, Field, FieldType, Relation, Domain, EnumType, EnumStorageStrategy, EnumValueMetadata, TableConstraint, TableConstraintType, TableIndex } from '../model/types';
 import { ALL_FIELD_TYPES, getTypeCompatibility } from '../model/types';
 import {
   Plus, Trash2, Key, Link, PanelRightClose, PanelRight,
@@ -14,6 +14,9 @@ import { Input } from '@/shared/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select';
 import { Label } from '@/shared/ui/label';
 import { ProTooltip } from '@/shared/ui/pro-tooltip';
+import { PanelHeader, PanelIconButton, PanelTabButton } from '@/shared/ui/panel';
+import { PropertiesSection } from './properties/PropertiesSection';
+import { PostgresStructurePanel } from './properties/PostgresStructurePanel';
 
 // Map field types to lucide icons
 const FIELD_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -57,6 +60,12 @@ function getTypeIcon(type: string) {
   return FIELD_TYPE_ICONS[type] || <Database className="size-3.5" />;
 }
 
+const ENUM_STORAGE_OPTIONS: Array<{ value: EnumStorageStrategy; label: string }> = [
+  { value: 'postgres_enum', label: 'Postgres enum' },
+  { value: 'check_constraint', label: 'CHECK constraint' },
+  { value: 'lookup_table', label: 'Lookup table' },
+];
+
 interface TableDetailsPanelProps {
   mode?: 'properties' | 'history';
   table: Table | null;
@@ -70,12 +79,19 @@ interface TableDetailsPanelProps {
   darkMode?: boolean;
   onUpdateTableName: (name: string) => void;
   onUpdateTableDescription: (description: string) => void;
+  onUpdateTableNotes?: (notes: string) => void;
   onUpdateTableDomain: (domainId: string | undefined) => void;
   onAddField: (field: Omit<Field, 'id'>) => void;
   onUpdateField: (fieldId: string, updates: Partial<Field>) => void;
   onDeleteField: (fieldId: string) => void;
   onAddRelation: (relation: Omit<Relation, 'id'>) => void;
   onDeleteRelation: (relationId: string) => void;
+  onAddTableConstraint?: (type: TableConstraintType) => string | null;
+  onUpdateTableConstraint?: (constraintId: string, updates: Partial<TableConstraint>) => void;
+  onDeleteTableConstraint?: (constraintId: string) => void;
+  onAddTableIndex?: () => string | null;
+  onUpdateTableIndex?: (indexId: string, updates: Partial<TableIndex>) => void;
+  onDeleteTableIndex?: (indexId: string) => void;
   enabledFieldTypes?: FieldType[];
   onBulkAssignDomain?: (domainId: string, tableIds: string[]) => void;
   onBulkDelete?: (tableIds: string[]) => void;
@@ -85,6 +101,9 @@ interface TableDetailsPanelProps {
   onSelectRevision?: (revisionId: string) => void;
   onDeleteRevision?: (revisionId: string) => void;
   isEnumTable?: boolean;
+  enumType?: EnumType | null;
+  enumUsageItems?: Array<{ tableName: string; fieldName: string }>;
+  onUpdateEnum?: (updates: Partial<Omit<EnumType, 'id'>>) => void;
 }
 
 // Tooltip wrapper
@@ -96,7 +115,14 @@ export function TableDetailsPanel({
   mode = 'properties',
   table, tables, domains, enums, relations, collapsed, onToggleCollapse,
   onUpdateTableName, onUpdateTableDescription, onUpdateTableDomain,
+  onUpdateTableNotes,
   onAddField, onUpdateField, onDeleteField, onAddRelation, onDeleteRelation,
+  onAddTableConstraint,
+  onUpdateTableConstraint,
+  onDeleteTableConstraint,
+  onAddTableIndex,
+  onUpdateTableIndex,
+  onDeleteTableIndex,
   enabledFieldTypes,
   selectedTableIds,
   onBulkAssignDomain,
@@ -108,6 +134,9 @@ export function TableDetailsPanel({
   onDeleteRevision,
   darkMode,
   isEnumTable = false,
+  enumType = null,
+  enumUsageItems = [],
+  onUpdateEnum,
 }: TableDetailsPanelProps) {
   const [isAddingField, setIsAddingField] = useState(false);
   const [newFieldName, setNewFieldName] = useState('');
@@ -118,6 +147,8 @@ export function TableDetailsPanel({
   const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const [fkDropdownFieldId, setFkDropdownFieldId] = useState<string | null>(null);
   const [revisionToDelete, setRevisionToDelete] = useState<{ id: string; revision: number } | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [activePanelTab, setActivePanelTab] = useState<'properties' | 'checks'>('properties');
 
   const availableTypes = enabledFieldTypes && enabledFieldTypes.length > 0
     ? ALL_FIELD_TYPES.filter(t => enabledFieldTypes.includes(t))
@@ -129,7 +160,7 @@ export function TableDetailsPanel({
       const btn = moreBtnRefs.current[moreOpenFieldId];
       if (btn) {
         const rect = btn.getBoundingClientRect();
-        const popoverH = 360; // approximate popover height
+        const popoverH = isEnumTable ? 520 : 360; // approximate popover height
         const popoverW = 288; // w-72 = 18rem = 288px
         // Prefer opening below; if not enough space, open above
         let top = rect.bottom + 4;
@@ -146,29 +177,56 @@ export function TableDetailsPanel({
     } else {
       setPopoverPos(null);
     }
-  }, [moreOpenFieldId]);
+  }, [isEnumTable, moreOpenFieldId]);
 
   // Dark theme color helpers
   const dk = darkMode;
   const panelBg = dk ? 'bg-[#1e1e2e]/95' : 'bg-white/95';
-  const borderClr = dk ? 'border-[#313244]' : 'border-gray-200';
   const textMuted = dk ? 'text-[#6c7086]' : 'text-gray-400';
   const textSecondary = dk ? 'text-[#a6adc8]' : 'text-gray-500';
   const textPrimary = dk ? 'text-[#cdd6f4]' : '';
-  const hoverBg = dk ? 'hover:bg-[#313244]' : 'hover:bg-gray-100';
   const rowHover = dk ? 'hover:bg-[#313244]/60' : 'hover:bg-gray-50';
   const inputBg = dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : '';
   const collapsedBg = dk ? 'bg-[#1e1e2e]/95' : 'bg-white/95';
   const inactiveIcon = dk ? 'text-[#45475a] hover:text-[#6c7086] hover:bg-[#313244]' : 'text-gray-300 hover:text-gray-500 hover:bg-gray-100';
+  const toggleSection = (sectionId: string) => {
+    setCollapsedSections((current) => ({ ...current, [sectionId]: !current[sectionId] }));
+  };
+  const handleStartAddField = () => {
+    setCollapsedSections((current) => ({ ...current, fields: false }));
+    setIsAddingField(true);
+  };
+  const handleAddIndex = () => {
+    const indexId = onAddTableIndex?.();
+    if (indexId) {
+      setCollapsedSections((current) => ({ ...current, indexes: false }));
+    }
+  };
+  const renderCollapseButton = (label = 'Collapse properties panel') => (
+    <PanelIconButton label={label} onClick={onToggleCollapse} darkMode={dk}>
+      <PanelRightClose className="size-3.5" />
+    </PanelIconButton>
+  );
+  const renderPropertiesHeader = () => (
+    <PanelHeader darkMode={dk}>
+      <div className="flex items-center gap-1">
+        <PanelTabButton active={activePanelTab === 'properties'} onClick={() => setActivePanelTab('properties')} darkMode={dk}>
+          Properties
+        </PanelTabButton>
+        <PanelTabButton active={activePanelTab === 'checks'} onClick={() => setActivePanelTab('checks')} darkMode={dk}>
+          Checks
+        </PanelTabButton>
+      </div>
+      {renderCollapseButton()}
+    </PanelHeader>
+  );
 
   if (collapsed) {
     return (
-      <div className={`w-10 ${collapsedBg} backdrop-blur-sm flex flex-col items-center pt-2 h-full rounded-l-lg`}>
-        <ProTooltip label="Expand panel" shortcut="F">
-          <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textSecondary}`}>
-            <PanelRight className="size-4" />
-          </button>
-        </ProTooltip>
+      <div className={`w-10 ${collapsedBg} backdrop-blur-sm flex flex-col items-center pt-2 h-full`}>
+        <PanelIconButton label="Expand properties panel" onClick={onToggleCollapse} darkMode={dk}>
+          <PanelRight className="size-4" />
+        </PanelIconButton>
       </div>
     );
   }
@@ -176,16 +234,14 @@ export function TableDetailsPanel({
   if (!table) {
     if (mode === 'history') {
       return (
-        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
-          <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
+        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full ${textPrimary}`}>
+          <PanelHeader darkMode={dk}>
             <span className={`text-xs ${textMuted} px-2 flex items-center gap-1.5`}>
               <History className="size-3.5" />
               Version history
             </span>
-            <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
-              <PanelRightClose className="size-3.5" />
-            </button>
-          </div>
+            {renderCollapseButton('Collapse version history')}
+          </PanelHeader>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {isRevisionsLoading && <div className={`text-sm ${textSecondary} px-2 py-3`}>Loading history...</div>}
             {!isRevisionsLoading && revisions.length === 0 && (
@@ -261,13 +317,9 @@ export function TableDetailsPanel({
     // Multi-selection view
     if (selectedTableIds.size > 1) {
       return (
-        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
-          <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
-            <span className={`text-xs ${textMuted} px-2`}>Bulk Actions</span>
-            <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
-              <PanelRightClose className="size-3.5" />
-            </button>
-          </div>
+        <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full ${textPrimary}`}>
+          {renderPropertiesHeader()}
+          {activePanelTab === 'checks' ? <div className="flex-1" /> : (
           <div className="p-4 space-y-4">
             <div className="text-center">
               <div className="inline-flex items-center justify-center size-12 rounded-full bg-blue-50 text-blue-600 mb-2">
@@ -310,21 +362,19 @@ export function TableDetailsPanel({
               )}
             </div>
           </div>
+          )}
         </div>
       );
     }
 
     return (
-      <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full rounded-l-lg ${textPrimary}`}>
-        <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
-          <span className={`text-xs ${textMuted} px-2`}>Properties</span>
-          <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
-            <PanelRightClose className="size-3.5" />
-          </button>
-        </div>
-        <div className={`flex-1 flex items-center justify-center ${textSecondary} p-4`}>
-          <p className="text-sm text-center">Select a table to view details</p>
-        </div>
+      <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full ${textPrimary}`}>
+        {renderPropertiesHeader()}
+        {activePanelTab === 'checks' ? <div className="flex-1" /> : (
+          <div className={`flex-1 flex items-center justify-center ${textSecondary} p-4`}>
+            <p className="text-sm text-center">Select a table to view details</p>
+          </div>
+        )}
       </div>
     );
   }
@@ -388,69 +438,103 @@ export function TableDetailsPanel({
     if (field.type !== 'enum') return field.type;
     return field.enumName || 'enum';
   };
+  const getEnumValueIndex = (fieldId: string): number => Number(fieldId.split('::value::')[1] ?? -1);
+  const updateEnumValueMetadata = (index: number, updates: NonNullable<EnumType['valueMetadata']>[number]) => {
+    if (!enumType || !onUpdateEnum || index < 0 || index >= enumType.values.length) return;
+    const nextMetadata = [...(enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, valueIndex) => ({ sortOrder: valueIndex + 1, isActive: true })))];
+    const current = nextMetadata[index] ?? { sortOrder: index + 1, isActive: true };
+    nextMetadata[index] = { ...current, ...updates };
+    const nextComments = [...(enumType.valueComments ?? enumType.values.map(() => undefined))];
+    if (Object.prototype.hasOwnProperty.call(updates, 'description')) {
+      nextComments[index] = updates.description?.trim() || undefined;
+    }
+    onUpdateEnum({ valueMetadata: nextMetadata, valueComments: nextComments });
+  };
+  const hasIndexes = (table.indexes?.length ?? 0) > 0;
 
   return (
-    <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full overflow-hidden rounded-l-lg ${textPrimary}`}>
-      {/* Header */}
-      <div className={`flex items-center justify-between p-2 border-b ${borderClr}`}>
-        <span className={`text-xs ${textMuted} px-2`}>Properties</span>
-        <button onClick={onToggleCollapse} className={`p-1.5 ${hoverBg} rounded ${textMuted}`} title="Collapse">
-          <PanelRightClose className="size-3.5" />
-        </button>
-      </div>
+    <div className={`w-full ${panelBg} backdrop-blur-sm flex flex-col h-full overflow-hidden ${textPrimary}`}>
+      {renderPropertiesHeader()}
 
-      {/* Table Name & Meta */}
-      <div className={`p-4 border-b ${borderClr} space-y-3`}>
-        <div>
-          <Label className={`text-xs ${textSecondary} mb-1 block`}>Table Name</Label>
-          <Input type="text" value={table.name} onChange={(e) => onUpdateTableName(e.target.value)} className={`font-semibold h-8 text-sm ${inputBg}`} />
-        </div>
-        <div>
-          <Label className={`text-xs ${textSecondary} mb-1 block`}>Description</Label>
-          <textarea
-            value={table.description || ''}
-            onChange={(e) => onUpdateTableDescription(e.target.value)}
-            placeholder="SQL comment for this table..."
-            className={`w-full text-sm border rounded-md px-3 py-2 resize-none h-14 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : 'border-gray-200'}`}
-          />
-        </div>
-        {domains.length > 0 && (
-          <div>
-            <Label className="text-xs text-gray-500 mb-1 block">Domain</Label>
-            <Select value={table.domainId || '_none_'} onValueChange={(val) => onUpdateTableDomain(val === '_none_' ? undefined : val)}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="No domain" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="_none_">No domain</SelectItem>
-                {domains.map(d => (
-                  <SelectItem key={d.id} value={d.id}>
-                    <span className="flex items-center gap-2">
-                      <span className="size-2.5 rounded-full inline-block" style={{ backgroundColor: d.color }} />
-                      {d.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      </div>
-
-      {/* Fields */}
+      {activePanelTab === 'checks' ? <div className="flex-1" /> : (
       <div className="flex-1 overflow-y-auto panel-scroll">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">{isEnumTable ? 'Values' : 'Fields'}</h3>
-            <Button onClick={() => setIsAddingField(true)} size="sm" variant="outline" className="h-7">
-              <Plus className="size-3 mr-1" /> Add
-            </Button>
+        <PropertiesSection
+          title={isEnumTable ? 'Enum' : 'Table'}
+          collapsed={!!collapsedSections.table}
+          onToggle={() => toggleSection('table')}
+          darkMode={dk}
+        >
+          <div className="space-y-3">
+            <div>
+              <Label className={`text-xs ${textSecondary} mb-1 block`}>Table Name</Label>
+              <Input type="text" value={table.name} onChange={(e) => onUpdateTableName(e.target.value)} className={`font-semibold h-8 text-sm ${inputBg}`} />
+            </div>
+            <div>
+              <Label className={`text-xs ${textSecondary} mb-1 block`}>Description</Label>
+              <textarea
+                value={table.description || ''}
+                onChange={(e) => onUpdateTableDescription(e.target.value)}
+                placeholder="SQL comment for this table..."
+                className={`w-full text-sm border rounded-md px-3 py-2 resize-none h-14 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : 'border-gray-200'}`}
+              />
+            </div>
+            {domains.length > 0 && (
+              <div>
+                <Label className={`text-xs ${textSecondary} mb-1 block`}>Domain</Label>
+                <Select value={table.domainId || '_none_'} onValueChange={(val) => onUpdateTableDomain(val === '_none_' ? undefined : val)}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="No domain" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none_">No domain</SelectItem>
+                    {domains.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        <span className="flex items-center gap-2">
+                          <span className="size-2.5 rounded-full inline-block" style={{ backgroundColor: d.color }} />
+                          {d.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {isEnumTable && enumType && onUpdateEnum && (
+              <div>
+                <Label className={`text-xs ${textSecondary} mb-1 block`}>Storage Strategy</Label>
+                <Select
+                  value={enumType.storageStrategy || 'postgres_enum'}
+                  onValueChange={(value) => onUpdateEnum({ storageStrategy: value as EnumStorageStrategy })}
+                >
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ENUM_STORAGE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
+        </PropertiesSection>
 
+        <PropertiesSection
+          title={isEnumTable ? 'Values' : 'Fields'}
+          collapsed={!!collapsedSections.fields}
+          onToggle={() => toggleSection('fields')}
+          action={(
+            <PanelIconButton label={isEnumTable ? 'Add value' : 'Add field'} onClick={handleStartAddField} darkMode={dk}>
+              <Plus className="size-3.5" />
+            </PanelIconButton>
+          )}
+          darkMode={dk}
+        >
           <div className="space-y-1">
             {table.fields.map(field => {
               const isMoreOpen = moreOpenFieldId === field.id;
               const refRel = getFieldRelation(field.id);
               const refTable = refRel ? tables.find(t => t.id === refRel.toTableId) : null;
               const refField = refTable?.fields.find(f => f.id === refRel?.toFieldId);
+              const enumValueIndex = getEnumValueIndex(field.id);
+              const enumValueMetadata = enumValueIndex >= 0 ? enumType?.valueMetadata?.[enumValueIndex] : undefined;
 
               return (
                 <div key={field.id} className="relative">
@@ -496,15 +580,75 @@ export function TableDetailsPanel({
 
                           <div className="space-y-3">
                             <div>
+                              <label className="text-xs text-gray-400 font-medium mb-1 block">Label</label>
+                              <input
+                                type="text"
+                                value={enumValueMetadata?.label || ''}
+                                onChange={(e) => updateEnumValueMetadata(enumValueIndex, { label: e.target.value || undefined })}
+                                placeholder="Human-readable label"
+                                className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div>
                               <label className="text-xs text-gray-400 font-medium mb-1 flex items-center gap-1">
-                                Comment <MessageSquare className="size-3" />
+                                Description <MessageSquare className="size-3" />
                               </label>
                               <textarea
-                                value={field.comment || ''}
-                                onChange={(e) => onUpdateField(field.id, { comment: e.target.value || undefined })}
+                                value={enumValueMetadata?.description ?? field.comment ?? ''}
+                                onChange={(e) => updateEnumValueMetadata(enumValueIndex, { description: e.target.value || undefined })}
                                 placeholder="Optional description for this enum value"
                                 className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 resize-none h-16 focus:outline-none focus:ring-2 focus:ring-blue-500"
                               />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-xs text-gray-400 font-medium mb-1 block">Sort order</label>
+                                <input
+                                  type="number"
+                                  value={enumValueMetadata?.sortOrder ?? ''}
+                                  onChange={(e) => updateEnumValueMetadata(enumValueIndex, { sortOrder: e.target.value === '' ? undefined : Number(e.target.value) })}
+                                  className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-gray-400 font-medium mb-1 block">Color</label>
+                                <input
+                                  type="color"
+                                  value={enumValueMetadata?.color || '#64748b'}
+                                  onChange={(e) => updateEnumValueMetadata(enumValueIndex, { color: e.target.value })}
+                                  className="h-9 w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-400 font-medium mb-1 block">Aliases</label>
+                              <input
+                                type="text"
+                                value={(enumValueMetadata?.aliases ?? []).join(', ')}
+                                onChange={(e) => updateEnumValueMetadata(enumValueIndex, {
+                                  aliases: e.target.value.split(',').map((item) => item.trim()).filter(Boolean),
+                                })}
+                                placeholder="old_value, legacy_value"
+                                className="w-full text-sm bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-xs text-gray-300 flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={enumValueMetadata?.isActive ?? true}
+                                  onChange={(e) => updateEnumValueMetadata(enumValueIndex, { isActive: e.target.checked })}
+                                />
+                                active
+                              </label>
+                              <label className="text-xs text-gray-300 flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={!!enumValueMetadata?.deprecated}
+                                  onChange={(e) => updateEnumValueMetadata(enumValueIndex, { deprecated: e.target.checked })}
+                                />
+                                deprecated
+                              </label>
                             </div>
                           </div>
                         </div>
@@ -769,8 +913,91 @@ export function TableDetailsPanel({
               </div>
             </div>
           )}
-        </div>
+        </PropertiesSection>
+
+        {isEnumTable && (
+          <PropertiesSection
+            title="Usage"
+            collapsed={!!collapsedSections.usage}
+            onToggle={() => toggleSection('usage')}
+            darkMode={dk}
+          >
+            <div className="space-y-1">
+              {enumUsageItems.map((item) => (
+                <div key={`${item.tableName}.${item.fieldName}`} className={`rounded-md px-3 py-2 text-sm ${dk ? 'bg-[#313244] text-[#cdd6f4]' : 'bg-gray-50 text-gray-700'}`}>
+                  {item.tableName}.{item.fieldName}
+                </div>
+              ))}
+              {enumUsageItems.length === 0 && (
+                <div className={`py-2 text-sm ${textSecondary}`}>No linked table fields yet.</div>
+              )}
+            </div>
+          </PropertiesSection>
+        )}
+
+        {!isEnumTable && (
+          <PropertiesSection
+            title="Constraints"
+            collapsed={!!collapsedSections.constraints}
+            onToggle={() => toggleSection('constraints')}
+            darkMode={dk}
+          >
+            <PostgresStructurePanel
+              table={table}
+              tables={tables}
+              section="constraints"
+              showHeader={false}
+              darkMode={dk}
+              onAddConstraint={onAddTableConstraint}
+              onUpdateConstraint={onUpdateTableConstraint}
+              onDeleteConstraint={onDeleteTableConstraint}
+            />
+          </PropertiesSection>
+        )}
+
+        {!isEnumTable && (
+          <PropertiesSection
+            title="Indexes"
+            collapsed={!hasIndexes || !!collapsedSections.indexes}
+            onToggle={() => {
+              if (hasIndexes) toggleSection('indexes');
+            }}
+            action={(
+              <PanelIconButton label="Add index" onClick={handleAddIndex} darkMode={dk}>
+                <Plus className="size-3.5" />
+              </PanelIconButton>
+            )}
+            renderContent={hasIndexes}
+            darkMode={dk}
+          >
+            <PostgresStructurePanel
+              table={table}
+              tables={tables}
+              section="indexes"
+              showHeader={false}
+              darkMode={dk}
+              onAddIndex={onAddTableIndex}
+              onUpdateIndex={onUpdateTableIndex}
+              onDeleteIndex={onDeleteTableIndex}
+            />
+          </PropertiesSection>
+        )}
+
+        <PropertiesSection
+          title="Note"
+          collapsed={!!collapsedSections.note}
+          onToggle={() => toggleSection('note')}
+          darkMode={dk}
+        >
+          <textarea
+            value={table.notes || ''}
+            onChange={(event) => onUpdateTableNotes?.(event.target.value)}
+            placeholder={isEnumTable ? 'Project notes for this enum...' : 'Project notes for this table...'}
+            className={`w-full min-h-24 text-sm border rounded-md px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${dk ? 'bg-[#313244] border-[#45475a] text-[#cdd6f4] placeholder-[#6c7086]' : 'border-gray-200'}`}
+          />
+        </PropertiesSection>
       </div>
+      )}
     </div>
   );
 }

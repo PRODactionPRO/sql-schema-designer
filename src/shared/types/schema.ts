@@ -69,6 +69,68 @@ export interface Field {
   isNotNull?: boolean;
 }
 
+export type TableConstraintType = 'primary_key' | 'unique' | 'foreign_key' | 'check';
+
+export type ReferentialAction = 'no_action' | 'restrict' | 'cascade' | 'set_null' | 'set_default';
+
+export interface BaseTableConstraint {
+  id: string;
+  type: TableConstraintType;
+  name?: string;
+  description?: string;
+}
+
+export interface PrimaryKeyConstraint extends BaseTableConstraint {
+  type: 'primary_key';
+  columnIds: string[];
+}
+
+export interface UniqueConstraint extends BaseTableConstraint {
+  type: 'unique';
+  columnIds: string[];
+  nullsNotDistinct?: boolean;
+}
+
+export interface ForeignKeyConstraint extends BaseTableConstraint {
+  type: 'foreign_key';
+  columnIds: string[];
+  referencedTableId: string;
+  referencedColumnIds: string[];
+  onDelete?: ReferentialAction;
+  onUpdate?: ReferentialAction;
+}
+
+export interface CheckConstraint extends BaseTableConstraint {
+  type: 'check';
+  expression: string;
+}
+
+export type TableConstraint =
+  | PrimaryKeyConstraint
+  | UniqueConstraint
+  | ForeignKeyConstraint
+  | CheckConstraint;
+
+export type IndexMethod = 'btree' | 'hash' | 'gist' | 'spgist' | 'gin' | 'brin';
+
+export interface TableIndexColumn {
+  fieldId?: string;
+  expression?: string;
+  sort?: 'asc' | 'desc';
+  nulls?: 'first' | 'last';
+}
+
+export interface TableIndex {
+  id: string;
+  name?: string;
+  columns: TableIndexColumn[];
+  unique?: boolean;
+  method?: IndexMethod;
+  includeFieldIds?: string[];
+  where?: string;
+  description?: string;
+}
+
 export interface Domain {
   id: string;
   name: string;
@@ -80,10 +142,25 @@ export interface EnumType {
   name: string;
   values: string[];
   valueComments?: Array<string | undefined>;
+  valueMetadata?: EnumValueMetadata[];
   description?: string;
+  notes?: string;
+  storageStrategy?: EnumStorageStrategy;
   position?: { x: number; y: number };
   domainId?: string;
   sidebarOrder?: number;
+}
+
+export type EnumStorageStrategy = 'postgres_enum' | 'check_constraint' | 'lookup_table';
+
+export interface EnumValueMetadata {
+  label?: string;
+  description?: string;
+  sortOrder?: number;
+  color?: string;
+  isActive?: boolean;
+  deprecated?: boolean;
+  aliases?: string[];
 }
 
 export type JsonSchemaFieldType =
@@ -116,6 +193,47 @@ export interface JsonSchemaNode {
   nullable?: boolean; // Maps to union with null
   collapsed?: boolean; // UI-only convenience
   enumValues?: string[]; // Used when type === 'enum'
+  validation?: JsonSchemaValidationRules;
+  description?: string;
+}
+
+export type JsonSchemaRootType = 'object' | 'array';
+
+export interface JsonSchemaValidationRules {
+  defaultValue?: string;
+  constValue?: string;
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: boolean;
+  exclusiveMaximum?: boolean;
+  multipleOf?: number;
+  minItems?: number;
+  maxItems?: number;
+  uniqueItems?: boolean;
+  minProperties?: number;
+  maxProperties?: number;
+  additionalProperties?: boolean;
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  deprecated?: boolean;
+}
+
+export interface JsonSchemaExample {
+  id: string;
+  name: string;
+  description?: string;
+  value: string;
+}
+
+export interface JsonSchemaReference {
+  id: string;
+  name?: string;
+  targetSchemaId?: string;
+  targetSchemaName?: string;
   description?: string;
 }
 
@@ -123,7 +241,12 @@ export interface JsonSchemaDocument {
   id: string;
   name: string;
   description?: string;
+  schemaId?: string;
+  rootType?: JsonSchemaRootType;
   nodes: JsonSchemaNode[];
+  refs?: JsonSchemaReference[];
+  examples?: JsonSchemaExample[];
+  notes?: string;
   position?: { x: number; y: number };
   domainId?: string;
   sidebarOrder?: number;
@@ -133,7 +256,10 @@ export interface Table {
   id: string;
   name: string;
   description?: string;
+  notes?: string;
   fields: Field[];
+  constraints?: TableConstraint[];
+  indexes?: TableIndex[];
   position: { x: number; y: number };
   color?: string;
   schema?: string; // e.g. 'public'
@@ -153,6 +279,7 @@ export interface Relation {
 }
 
 export interface Schema {
+  schemaVersion?: number;
   tables: Table[];
   relations: Relation[];
   domains?: Domain[];

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createEmptyProject } from './types';
 import type { ProjectData } from './types';
 import { createProject, deleteProject, getProjects, updateProject } from '@/shared/api/projects';
-import { normalizeProjectData, normalizeSchema } from '@/shared/lib/schema-normalizer';
+import { normalizeProjectData, normalizeProjectSchema } from '@/shared/lib/schema-normalizer';
 import { safeJsonParse } from '@/shared/lib/json';
 import { useAuthStore } from '@/shared/auth/store';
 
@@ -67,8 +67,15 @@ export function useProjectsStore() {
       schemaJson: {
         tables: source.schema.tables,
         relations: source.schema.relations,
-        domains: source.schema.domains,
+        domains: source.domains,
         enums: source.schema.enums,
+        jsonSchemas: source.schema.jsonSchemas ?? [],
+        schema: {
+          ...source.schema,
+          domains: source.domains,
+        },
+        documents: source.documents,
+        pinned: source.pinned,
         settings: source.settings,
         snapshot: source.snapshot,
       },
@@ -86,6 +93,17 @@ export function useProjectsStore() {
     });
   }, [projects, updateMutation]);
 
+  const toggleProjectPinned = useCallback(async (id: string) => {
+    const source = projects.find((p) => p.id === id);
+    if (!source) return;
+
+    await updateMutation.mutateAsync({
+      ...source,
+      pinned: !source.pinned,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [projects, updateMutation]);
+
   const exportProjectFile = useCallback((id: string): { content: string; filename: string } | null => {
     const project = projects.find((p) => p.id === id);
     if (!project) return null;
@@ -96,7 +114,13 @@ export function useProjectsStore() {
       project: {
         name: project.name,
         description: project.description,
-        schema: project.schema,
+        domains: project.domains,
+        schema: {
+          ...project.schema,
+          domains: project.domains,
+        },
+        documents: project.documents,
+        pinned: project.pinned,
         settings: project.settings,
       },
     };
@@ -118,6 +142,7 @@ export function useProjectsStore() {
     let description: string | undefined;
     let schema: ProjectData['schema'];
     let settings: ProjectData['settings'];
+    let domains: ProjectData['domains'];
 
     const data = parsed as Record<string, unknown>;
     const wrappedProject = data.project as Record<string, unknown> | undefined;
@@ -125,13 +150,27 @@ export function useProjectsStore() {
     if (data.formatVersion && wrappedProject) {
       name = typeof wrappedProject.name === 'string' ? wrappedProject.name : 'Imported Schema';
       description = typeof wrappedProject.description === 'string' ? wrappedProject.description : undefined;
-      schema = normalizeSchema(wrappedProject.schema);
+      schema = normalizeProjectSchema(wrappedProject.schema);
       settings = wrappedProject.settings as ProjectData['settings'];
+      domains = normalizeProjectData({
+        id: 'import_preview',
+        name,
+        schema,
+        domains: wrappedProject.domains,
+        documents: wrappedProject.documents,
+      })?.domains ?? schema.domains;
     } else if (data.schema && data.name) {
       name = typeof data.name === 'string' ? data.name : 'Imported Schema';
       description = typeof data.description === 'string' ? data.description : undefined;
-      schema = normalizeSchema(data.schema);
+      schema = normalizeProjectSchema(data.schema);
       settings = data.settings as ProjectData['settings'];
+      domains = normalizeProjectData({
+        id: 'import_preview',
+        name,
+        schema,
+        domains: data.domains,
+        documents: data.documents,
+      })?.domains ?? schema.domains;
     } else {
       const normalizedRaw = normalizeProjectData(parsed);
       if (!normalizedRaw) {
@@ -141,11 +180,22 @@ export function useProjectsStore() {
       description = normalizedRaw.description;
       schema = normalizedRaw.schema;
       settings = normalizedRaw.settings;
+      domains = normalizedRaw.domains;
     }
 
     const newProject = createEmptyProject(name);
     newProject.description = description;
     newProject.schema = schema;
+    newProject.domains = domains;
+    const normalizedWithDocuments = normalizeProjectData({
+      ...newProject,
+      documents: wrappedProject?.documents ?? data.documents ?? [],
+    });
+    if (normalizedWithDocuments) {
+      newProject.documents = normalizedWithDocuments.documents;
+      newProject.domains = normalizedWithDocuments.domains;
+      newProject.schema = normalizedWithDocuments.schema;
+    }
     if (settings) {
       newProject.settings = settings;
     }
@@ -156,8 +206,14 @@ export function useProjectsStore() {
       schemaJson: {
         tables: newProject.schema.tables,
         relations: newProject.schema.relations,
-        domains: newProject.schema.domains,
+        domains: newProject.domains,
         enums: newProject.schema.enums,
+        jsonSchemas: newProject.schema.jsonSchemas ?? [],
+        schema: {
+          ...newProject.schema,
+          domains: newProject.domains,
+        },
+        documents: newProject.documents,
         settings: newProject.settings,
         snapshot: newProject.snapshot,
       },
@@ -171,6 +227,7 @@ export function useProjectsStore() {
     deleteProject: deleteProjectAction,
     duplicateProject,
     renameProject,
+    toggleProjectPinned,
     exportProjectFile,
     importProjectFile,
     isLoading: projectsQuery.isLoading,
