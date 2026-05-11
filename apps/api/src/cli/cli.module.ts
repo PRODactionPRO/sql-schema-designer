@@ -8,6 +8,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { UsersModule } from '../users/users.module';
 import { CreateUserCommand } from './commands/create-user.command';
+import { ExportDbSchemaCommand } from './commands/export-db-schema.command';
 import { ImportProjectCommand } from './commands/import-project.command';
 
 @Module({
@@ -20,6 +21,6 @@ import { ImportProjectCommand } from './commands/import-project.command';
     UsersModule,
     ProjectsModule,
   ],
-  providers: [CreateUserCommand, ImportProjectCommand],
+  providers: [CreateUserCommand, ImportProjectCommand, ExportDbSchemaCommand],
 })
 export class CliModule {}

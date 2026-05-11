@@ -7,7 +7,7 @@ import { useSchemaStore } from '../model/useSchemaStore';
 import type { SchemaStoreInitialData } from '../model/useSchemaStore';
 import type { ProjectSettings } from '../model/types';
 import { DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '../model/types';
-import type { ProjectData } from '@/shared/types/project';
+import type { ErdProjectDocument, ProjectData } from '@/shared/types/project';
 import { getProjectById, updateProject } from '@/shared/api/projects';
 import { createProjectRevision, deleteProjectRevision, getProjectRevisions, restoreProjectRevision, type ProjectRevision } from '@/shared/api/revisions';
 import { normalizeSchema } from '@/shared/lib/schema-normalizer';
@@ -26,6 +26,7 @@ import { Sidebar } from './Sidebar';
 import { Canvas } from './Canvas';
 import { TableDetailsPanel } from './TableDetailsPanel';
 import { JsonSchemaDetailsPanel } from './JsonSchemaDetailsPanel';
+import { JsonSchemaExamplesPanel } from './JsonSchemaExamplesPanel';
 import { CanvasToolbar } from './CanvasToolbar';
 import { ExportModal } from './ExportModal';
 import { ImportModal } from './ImportModal';
@@ -39,8 +40,9 @@ import { downloadFile } from '@/shared/lib/download';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
 import { ProTooltip } from '@/shared/ui/pro-tooltip';
-import { AlertTriangle, Code, PanelLeft } from 'lucide-react';
-import type { FieldType, JsonSchemaFieldType } from '../model/types';
+import { PanelHeader, PanelIconButton, PanelTabButton } from '@/shared/ui/panel';
+import { AlertTriangle, Code, PanelLeft, PanelRight, PanelRightClose } from 'lucide-react';
+import type { EnumValueMetadata, FieldType, JsonSchemaFieldType } from '../model/types';
 
 const ENUM_TABLE_PREFIX = 'enum::';
 const JSON_SCHEMA_TABLE_PREFIX = 'jsonschema::';
@@ -94,7 +96,7 @@ function flattenJsonSchemaNodes(
 
 export function EditorPage() {
   const { isAuthenticated } = useRequireAuth();
-  const { projectId } = useParams<{ projectId: string }>();
+  const { projectId, documentId } = useParams<{ projectId: string; documentId?: string }>();
   const navigate = useNavigate();
   const projectQuery = useQuery({
     queryKey: ['project', projectId],
@@ -106,6 +108,10 @@ export function EditorPage() {
   });
 
   const projectData = (projectQuery.data as ProjectData | null | undefined) ?? null;
+  const erdDocument = projectData?.documents.find((document): document is ErdProjectDocument => (
+    document.id === documentId && document.type === 'erd'
+  )) ?? null;
+  const activeSchema = erdDocument?.erd ?? projectData?.schema ?? null;
 
   useEffect(() => {
     if (projectQuery.isError) {
@@ -122,13 +128,13 @@ export function EditorPage() {
     );
   }
 
-  const initialData: SchemaStoreInitialData | undefined = projectData
+  const initialData: SchemaStoreInitialData | undefined = activeSchema
     ? {
-        tables: projectData.schema.tables,
-        relations: projectData.schema.relations,
-        domains: projectData.schema.domains,
-        enums: projectData.schema.enums ?? [],
-        jsonSchemas: projectData.schema.jsonSchemas ?? [],
+        tables: activeSchema.tables,
+        relations: activeSchema.relations,
+        domains: activeSchema.domains,
+        enums: activeSchema.enums ?? [],
+        jsonSchemas: activeSchema.jsonSchemas ?? [],
       }
     : undefined;
 
@@ -136,8 +142,10 @@ export function EditorPage() {
 
   return (
     <EditorPageInner
-      key={projectId || '__standalone__'}
+      key={`${projectId || '__standalone__'}:${documentId || '__legacy_erd__'}`}
       projectId={projectId || null}
+      documentId={documentId || null}
+      documentName={erdDocument?.name}
       projectData={projectData}
       initialData={initialData}
       initialSettings={initialSettings}
@@ -149,12 +157,14 @@ export function EditorPage() {
 
 interface EditorPageInnerProps {
   projectId: string | null;
+  documentId: string | null;
+  documentName?: string;
   projectData: ProjectData | null;
   initialData?: SchemaStoreInitialData;
   initialSettings: ProjectSettings;
 }
 
-function EditorPageInner({ projectId, projectData, initialData, initialSettings }: EditorPageInnerProps) {
+function EditorPageInner({ projectId, documentId, documentName: initialDocumentName, projectData, initialData, initialSettings }: EditorPageInnerProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const updateProjectMutation = useMutation({
@@ -189,9 +199,16 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     updateTablePosition,
     updateTableName,
     updateTableDescription,
+    updateTableNotes,
     updateTableDomain,
     deleteTable,
     deleteTables,
+    addTableConstraint,
+    updateTableConstraint,
+    deleteTableConstraint,
+    addTableIndex,
+    updateTableIndex,
+    deleteTableIndex,
     addField,
     updateField,
     deleteField,
@@ -243,10 +260,11 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     id: `${ENUM_TABLE_PREFIX}${enumType.id}`,
     name: enumType.name,
     description: enumType.description,
+    notes: enumType.notes,
     fields: enumType.values.map((value, valueIndex) => ({
       id: `${enumType.id}::value::${valueIndex}`,
       name: value,
-      comment: enumType.valueComments?.[valueIndex],
+      comment: enumType.valueMetadata?.[valueIndex]?.description ?? enumType.valueComments?.[valueIndex],
       type: 'enum' as FieldType,
       enumId: enumType.id,
       enumName: enumType.name,
@@ -292,6 +310,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       id: `${JSON_SCHEMA_TABLE_PREFIX}${doc.id}`,
       name: doc.name,
       description: doc.description,
+      notes: doc.notes,
       fields: flat.map(({ node }) => ({
         id: `${doc.id}::node::${node.id}`,
         name: node.name,
@@ -337,11 +356,13 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   const [resizingSide, setResizingSide] = useState<'left' | 'right' | null>(null);
   const [settings, setSettings] = useState<ProjectSettings>(initialSettings);
   const [projectName, setProjectName] = useState(projectData?.name || '');
+  const [documentName, setDocumentName] = useState(initialDocumentName || 'ERD Diagram');
   const [projectDescription, setProjectDescription] = useState(projectData?.description || '');
   const [highlightRelations, setHighlightRelations] = useState(false);
   const [isValidationOpen, setIsValidationOpen] = useState(false);
   const [isDiffOpen, setIsDiffOpen] = useState(false);
   const [panelMode, setPanelMode] = useState<'properties' | 'history'>('properties');
+  const [jsonPanelTab, setJsonPanelTab] = useState<'properties' | 'checks' | 'examples'>('properties');
   const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [isRevisionPreview, setIsRevisionPreview] = useState(false);
   const [previewRevisionNumber, setPreviewRevisionNumber] = useState<number | null>(null);
@@ -398,6 +419,8 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
     enums,
     jsonSchemas,
     currentSnapshot,
+    activeDocumentId: documentId,
+    activeDocumentName: documentName,
     persistProject: async (project) => {
       await updateProjectMutation.mutateAsync(project);
     },
@@ -456,6 +479,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   }, [codeMode, resizingSide, snapshotCaptureMode]);
 
   const buildSchemaJson = useCallback(() => ({
+    schemaVersion: 2,
     tables,
     relations,
     domains,
@@ -491,7 +515,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
       timestamp: new Date().toISOString(),
     });
     // Navigate immediately to keep UI responsive.
-    navigate('/');
+    navigate(projectId ? `/project/${projectId}` : '/');
 
     if (!projectId) return;
     // Persist in background; do not block route transition.
@@ -707,6 +731,16 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
   const selectedJsonSchemaDoc = activeTableId && isJsonSchemaTableId(activeTableId)
     ? jsonSchemas.find((doc) => doc.id === getJsonSchemaIdFromTableId(activeTableId)) || null
     : null;
+  const selectedJsonSchemaUsageItems = selectedJsonSchemaDoc
+    ? tables.flatMap((table) => table.fields
+        .filter((field) => field.jsonSchemaId === selectedJsonSchemaDoc.id)
+        .map((field) => ({ tableName: table.name, fieldName: field.name })))
+    : [];
+  const selectedEnumUsageItems = selectedEnumType
+    ? tables.flatMap((table) => table.fields
+        .filter((field) => field.enumId === selectedEnumType.id)
+        .map((field) => ({ tableName: table.name, fieldName: field.name })))
+    : [];
 
   let selectedTable: import('../model/types').Table | null = null;
 
@@ -716,11 +750,12 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         id: `${ENUM_TABLE_PREFIX}${selectedEnumType.id}`,
         name: selectedEnumType.name,
         description: selectedEnumType.description,
+        notes: selectedEnumType.notes,
         domainId: selectedEnumType.domainId,
         fields: selectedEnumType.values.map((value, index) => ({
           id: `${selectedEnumType.id}::value::${index}`,
           name: value,
-          comment: selectedEnumType.valueComments?.[index],
+          comment: selectedEnumType.valueMetadata?.[index]?.description ?? selectedEnumType.valueComments?.[index],
           type: 'varchar' as FieldType,
           isPrimaryKey: false,
           isNullable: false,
@@ -733,6 +768,7 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
         id: `${JSON_SCHEMA_TABLE_PREFIX}${selectedJsonSchemaDoc.id}`,
         name: selectedJsonSchemaDoc.name,
         description: selectedJsonSchemaDoc.description,
+        notes: selectedJsonSchemaDoc.notes,
         domainId: selectedJsonSchemaDoc.domainId,
         fields: selectedJsonSchemaDoc.nodes
           .slice()
@@ -1028,8 +1064,8 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
           onSettings={() => setIsSettingsOpen(true)}
           onVersions={() => { void handleOpenVersions(); }}
           onBack={projectId ? (() => { void handleBack(); }) : undefined}
-          projectName={projectName || undefined}
-          onRename={projectId ? setProjectName : undefined}
+          projectName={(documentId ? documentName : projectName) || undefined}
+          onRename={projectId ? (documentId ? setDocumentName : setProjectName) : undefined}
           darkMode={darkMode}
         />
       )}
@@ -1142,7 +1178,14 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 const enumId = getEnumIdFromTableId(tableId);
                 const enumType = enums.find((e) => e.id === enumId);
                 if (!enumType) return;
-                updateEnum(enumId, { values: [...enumType.values, `value_${enumType.values.length + 1}`] });
+                const valueName = `value_${enumType.values.length + 1}`;
+                updateEnum(enumId, {
+                  values: [...enumType.values, valueName],
+                  valueMetadata: [
+                    ...(enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, index) => ({ sortOrder: index + 1, isActive: true }))),
+                    { label: valueName, sortOrder: enumType.values.length + 1, isActive: true },
+                  ],
+                });
                 return;
               }
               addField(tableId, {
@@ -1264,8 +1307,6 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             <div className="absolute inset-0 flex flex-col items-center pt-2" style={{
               background: codeMode ? 'rgba(30,30,46,0.95)' : 'rgba(255,255,255,0.95)',
               backdropFilter: 'blur(8px)',
-              borderTopRightRadius: '0.5rem',
-              borderBottomRightRadius: '0.5rem',
             }}>
               <ProTooltip label="Expand panel" shortcut="F">
                 <button
@@ -1306,36 +1347,68 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
             }}
           >
             {selectedJsonSchemaDoc ? (
-              <div className={`w-full ${codeMode ? 'bg-[#1e1e2e]/95' : 'bg-white/95'} backdrop-blur-sm flex flex-col h-full overflow-hidden rounded-l-lg`}>
-                <div className={`flex items-center justify-between p-2 border-b ${codeMode ? 'border-[#313244]' : 'border-gray-200'}`}>
-                  <span className={`text-xs ${codeMode ? 'text-[#6c7086]' : 'text-gray-400'} px-2`}>JSON Schema</span>
-                  <button onClick={() => setRightCollapsed(!rightCollapsed)} className={`p-1.5 rounded ${codeMode ? 'hover:bg-[#313244] text-[#6c7086]' : 'hover:bg-gray-100 text-gray-400'}`} title="Collapse">
-                    <PanelLeft className="size-3.5 rotate-180" />
-                  </button>
+              rightCollapsed ? (
+                <div className={`w-10 ${codeMode ? 'bg-[#1e1e2e]/95' : 'bg-white/95'} backdrop-blur-sm flex flex-col items-center pt-2 h-full`}>
+                  <PanelIconButton label="Expand properties panel" onClick={() => setRightCollapsed(false)} darkMode={codeMode}>
+                    <PanelRight className="size-4" />
+                  </PanelIconButton>
                 </div>
-                <div className="flex-1 overflow-y-auto">
-                  <JsonSchemaDetailsPanel
-                    doc={selectedJsonSchemaDoc}
-                    readOnly={isRevisionPreview}
-                    darkMode={codeMode}
-                    onRename={(name) => updateJsonSchema(selectedJsonSchemaDoc.id, { name })}
-                    onDescription={(description) => updateJsonSchema(selectedJsonSchemaDoc.id, { description })}
-                    onAddRootNode={() => addJsonSchemaNode(selectedJsonSchemaDoc.id)}
-                    onAddChildNode={(nodeId) => addJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
-                    onUpdateNode={(nodeId, updates) => updateJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId, updates)}
-                    onDeleteNode={(nodeId) => deleteJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
-                    onToggleCollapsed={(nodeId) => toggleJsonSchemaNodeCollapsed(selectedJsonSchemaDoc.id, nodeId)}
-                    onMoveNode={(nodeId, targetParentId, targetOrder) => {
-                      moveJsonSchemaNode(
-                        selectedJsonSchemaDoc.id,
-                        nodeId,
-                        targetParentId,
-                        targetOrder,
-                      );
-                    }}
-                  />
+              ) : (
+                <div className={`w-full ${codeMode ? 'bg-[#1e1e2e]/95' : 'bg-white/95'} backdrop-blur-sm flex flex-col h-full overflow-hidden`}>
+                  <PanelHeader darkMode={codeMode}>
+                    <div className="flex items-center gap-1">
+                      <PanelTabButton active={jsonPanelTab === 'properties'} onClick={() => setJsonPanelTab('properties')} darkMode={codeMode}>
+                        Properties
+                      </PanelTabButton>
+                      <PanelTabButton active={jsonPanelTab === 'checks'} onClick={() => setJsonPanelTab('checks')} darkMode={codeMode}>
+                        Checks
+                      </PanelTabButton>
+                      <PanelTabButton active={jsonPanelTab === 'examples'} onClick={() => setJsonPanelTab('examples')} darkMode={codeMode}>
+                        Examples
+                      </PanelTabButton>
+                    </div>
+                    <PanelIconButton label="Collapse properties panel" onClick={() => setRightCollapsed(true)} darkMode={codeMode}>
+                      <PanelRightClose className="size-3.5" />
+                    </PanelIconButton>
+                  </PanelHeader>
+                  {jsonPanelTab === 'checks' ? <div className="flex-1" /> : jsonPanelTab === 'examples' ? (
+                    <JsonSchemaExamplesPanel
+                      doc={selectedJsonSchemaDoc}
+                      readOnly={isRevisionPreview}
+                      darkMode={codeMode}
+                      onUpdateDocument={(updates) => updateJsonSchema(selectedJsonSchemaDoc.id, updates)}
+                    />
+                  ) : (
+                    <div className="flex-1 overflow-y-auto">
+                      <JsonSchemaDetailsPanel
+                        doc={selectedJsonSchemaDoc}
+                        domains={domains}
+                        allDocuments={jsonSchemas}
+                        usageItems={selectedJsonSchemaUsageItems}
+                        readOnly={isRevisionPreview}
+                        darkMode={codeMode}
+                        onUpdateDocument={(updates) => updateJsonSchema(selectedJsonSchemaDoc.id, updates)}
+                        onRename={(name) => updateJsonSchema(selectedJsonSchemaDoc.id, { name })}
+                        onDescription={(description) => updateJsonSchema(selectedJsonSchemaDoc.id, { description })}
+                        onDomain={(domainId) => updateJsonSchema(selectedJsonSchemaDoc.id, { domainId })}
+                        onAddRootNode={() => addJsonSchemaNode(selectedJsonSchemaDoc.id)}
+                        onAddChildNode={(nodeId) => addJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
+                        onUpdateNode={(nodeId, updates) => updateJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId, updates)}
+                        onDeleteNode={(nodeId) => deleteJsonSchemaNode(selectedJsonSchemaDoc.id, nodeId)}
+                        onToggleCollapsed={(nodeId) => toggleJsonSchemaNodeCollapsed(selectedJsonSchemaDoc.id, nodeId)}
+                        onMoveNode={(nodeId, targetParentId, targetOrder) => {
+                          moveJsonSchemaNode(
+                            selectedJsonSchemaDoc.id,
+                            nodeId,
+                            targetParentId,
+                            targetOrder,
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
-              </div>
+              )
             ) : (
               <TableDetailsPanel
                 mode={panelMode}
@@ -1372,6 +1445,18 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                 }
                 updateTableDescription(activeTableId, desc);
               }}
+              onUpdateTableNotes={(notes) => {
+                if (isRevisionPreview || !activeTableId) return;
+                if (isEnumTableId(activeTableId)) {
+                  updateEnum(getEnumIdFromTableId(activeTableId), { notes });
+                  return;
+                }
+                if (isJsonSchemaTableId(activeTableId)) {
+                  updateJsonSchema(getJsonSchemaIdFromTableId(activeTableId), { notes });
+                  return;
+                }
+                updateTableNotes(activeTableId, notes);
+              }}
               onUpdateTableDomain={(domainId) => {
                 if (isRevisionPreview || !activeTableId) return;
                 if (isEnumTableId(activeTableId)) {
@@ -1393,6 +1478,15 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   updateEnum(enumId, {
                     values: [...enumType.values, field.name],
                     valueComments: [...(enumType.valueComments ?? enumType.values.map(() => undefined)), field.comment?.trim() || undefined],
+                    valueMetadata: [
+                      ...(enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, index) => ({ sortOrder: index + 1, isActive: true }))),
+                      {
+                        label: field.name,
+                        description: field.comment?.trim() || undefined,
+                        sortOrder: enumType.values.length + 1,
+                        isActive: true,
+                      },
+                    ],
                   });
                   return;
                 }
@@ -1431,16 +1525,19 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   if (index < 0 || index >= enumType.values.length) return;
                   const nextValues = [...enumType.values];
                   const nextComments = [...(enumType.valueComments ?? enumType.values.map(() => undefined))];
+                  const nextMetadata = [...(enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, valueIndex) => ({ sortOrder: valueIndex + 1, isActive: true })))];
                   if (typeof updates.name === 'string') {
                     nextValues[index] = updates.name;
+                    nextMetadata[index] = { ...nextMetadata[index], label: nextMetadata[index]?.label || updates.name };
                   }
                   if (Object.prototype.hasOwnProperty.call(updates, 'comment')) {
                     const nextComment = typeof updates.comment === 'string' && updates.comment.trim().length > 0
                       ? updates.comment.trim()
                       : undefined;
                     nextComments[index] = nextComment;
+                    nextMetadata[index] = { ...nextMetadata[index], description: nextComment };
                   }
-                  updateEnum(enumId, { values: nextValues, valueComments: nextComments });
+                  updateEnum(enumId, { values: nextValues, valueComments: nextComments, valueMetadata: nextMetadata });
                   return;
                 }
                 if (isJsonSchemaTableId(activeTableId)) {
@@ -1480,7 +1577,9 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
                   const nextValues = enumType.values.filter((_, i) => i !== index);
                   const nextComments = (enumType.valueComments ?? enumType.values.map(() => undefined))
                     .filter((_, i) => i !== index);
-                  updateEnum(enumId, { values: nextValues, valueComments: nextComments });
+                  const nextMetadata = (enumType.valueMetadata ?? enumType.values.map<EnumValueMetadata>((_, valueIndex) => ({ sortOrder: valueIndex + 1, isActive: true })))
+                    .filter((_, i) => i !== index);
+                  updateEnum(enumId, { values: nextValues, valueComments: nextComments, valueMetadata: nextMetadata });
                   return;
                 }
                 if (isJsonSchemaTableId(activeTableId)) {
@@ -1499,6 +1598,30 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               }}
               onAddRelation={(relation) => { if (!isRevisionPreview) addRelation(relation); }}
               onDeleteRelation={(relationId) => { if (!isRevisionPreview) deleteRelation(relationId); }}
+              onAddTableConstraint={(type) => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return null;
+                return addTableConstraint(activeTableId, type);
+              }}
+              onUpdateTableConstraint={(constraintId, updates) => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return;
+                updateTableConstraint(activeTableId, constraintId, updates);
+              }}
+              onDeleteTableConstraint={(constraintId) => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return;
+                deleteTableConstraint(activeTableId, constraintId);
+              }}
+              onAddTableIndex={() => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return null;
+                return addTableIndex(activeTableId);
+              }}
+              onUpdateTableIndex={(indexId, updates) => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return;
+                updateTableIndex(activeTableId, indexId, updates);
+              }}
+              onDeleteTableIndex={(indexId) => {
+                if (isRevisionPreview || !activeTableId || isEnumTableId(activeTableId) || isJsonSchemaTableId(activeTableId)) return;
+                deleteTableIndex(activeTableId, indexId);
+              }}
               enabledFieldTypes={settings.enabledFieldTypes}
               onBulkAssignDomain={isRevisionPreview ? undefined : handleAssignDomain}
               onBulkDelete={isRevisionPreview ? undefined : handleDeleteTables}
@@ -1512,7 +1635,13 @@ function EditorPageInner({ projectId, projectData, initialData, initialSettings 
               isRevisionsLoading={revisionsQuery.isLoading || revisionsQuery.isFetching}
               onSelectRevision={handleSelectRevision}
               onDeleteRevision={(revisionId) => { void handleDeleteRevision(revisionId); }}
-                isEnumTable={!!selectedEnumType || !!selectedJsonSchemaDoc}
+              isEnumTable={!!selectedEnumType || !!selectedJsonSchemaDoc}
+              enumType={selectedEnumType}
+              enumUsageItems={selectedEnumUsageItems}
+              onUpdateEnum={(updates) => {
+                if (!selectedEnumType || isRevisionPreview) return;
+                updateEnum(selectedEnumType.id, updates);
+              }}
               />
             )}
           </div>

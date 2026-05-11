@@ -87,7 +87,6 @@ export function Sidebar({
   const [visibleKinds, setVisibleKinds] = useState<Record<TableKind, boolean>>(DEFAULT_VISIBLE_KINDS);
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(new Set());
 
-  // Last clicked table for shift-select range
   const lastClickedId = useRef<string | null>(null);
 
   const filteredTables = useMemo(() => tables.filter(table => {
@@ -95,7 +94,6 @@ export function Sidebar({
     return visibleKinds[kind] && (!searchQuery || table.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }), [tables, searchQuery, visibleKinds]);
 
-  // Compute display list: sort + group
   const displayGroups: SidebarTableGroup[] = useMemo(() => {
     const sorted = sortTables(filteredTables, sortMode);
 
@@ -114,7 +112,6 @@ export function Sidebar({
       return groups;
     }
 
-    // Group by domain
     const domainMap = new Map<string, Domain>();
     domains.forEach(d => domainMap.set(d.id, d));
 
@@ -132,7 +129,6 @@ export function Sidebar({
     });
 
     const result: SidebarTableGroup[] = [];
-    // Domains in order they appear in the domains list
     domains.forEach(d => {
       const g = groups.get(d.id);
       if (g && g.length > 0) {
@@ -145,14 +141,12 @@ export function Sidebar({
     return result;
   }, [filteredTables, sortMode, groupMode, domains]);
 
-  // Flat ordered list for shift-select
   const flatTableIds = useMemo(() => {
     return displayGroups.flatMap(g => g.tables.map(t => t.id));
   }, [displayGroups]);
 
   const handleTableClick = useCallback((tableId: string, e: React.MouseEvent) => {
     if (e.shiftKey) {
-      // Range select
       const lastIdx = lastClickedId.current ? flatTableIds.indexOf(lastClickedId.current) : -1;
       const curIdx = flatTableIds.indexOf(tableId);
       if (lastIdx >= 0 && curIdx >= 0) {
@@ -167,7 +161,6 @@ export function Sidebar({
       } else {
         onToggleTableSelection(tableId, true);
       }
-      // Don't update lastClickedId on shift-click
       return;
     }
 
@@ -177,7 +170,6 @@ export function Sidebar({
       return;
     }
 
-    // Normal click - clear multi-selection, select single table
     if (selectedTableIds.size > 0) {
       onClearMultiSelection();
     }
@@ -211,7 +203,6 @@ export function Sidebar({
       setIsAddingTable(false);
       return;
     }
-    // Validate duplicate name for regular table
     const isDuplicate = tables.some(t => t.name.toLowerCase() === name.toLowerCase());
     if (isDuplicate) {
       let suffix = 2;

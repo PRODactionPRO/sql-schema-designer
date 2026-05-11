@@ -1,6 +1,6 @@
 import { createBrowserRouter } from 'react-router';
 import { ProjectsPage } from '../pages/projects';
-import { EditorPage } from '../pages/editor';
+import { ProjectHomePage, DocumentPage } from '../pages/project';
 import { AuthPage } from '../pages/auth';
 
 export const router = createBrowserRouter([
@@ -14,6 +14,10 @@ export const router = createBrowserRouter([
   },
   {
     path: '/project/:projectId',
-    Component: EditorPage,
+    Component: ProjectHomePage,
+  },
+  {
+    path: '/project/:projectId/document/:documentId',
+    Component: DocumentPage,
   },
 ]);

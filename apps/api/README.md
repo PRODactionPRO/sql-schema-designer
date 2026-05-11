@@ -82,6 +82,9 @@ npm run cli -- create-user --email admin@example.com --password secret --role ad
 
 # import project from json file
 npm run cli -- import-project --owner-email admin@example.com --file ./schema.json --name "Imported schema"
+
+# export current PostgreSQL structure into the app JSON format
+npm run cli -- export-db-schema --out ../../backups/live-schema.json
 ```
 
 ## Contract generation

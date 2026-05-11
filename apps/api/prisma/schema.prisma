@@ -16,6 +16,7 @@ model User {
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   projects     Project[]
+  documents    ProjectDocument[]
   revisions    ProjectRevision[]
   sqlViews     ProjectSqlView[]
   migrations   ProjectMigration[]
@@ -31,12 +32,33 @@ model Project {
   deletedAt   DateTime?
   ownerId     String
   owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents   ProjectDocument[]
   revisions   ProjectRevision[]
   sqlViews    ProjectSqlView[]
   migrations  ProjectMigration[]
 
   @@index([ownerId])
   @@index([updatedAt])
+}
+
+model ProjectDocument {
+  id          String    @id @default(uuid())
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ownerId     String
+  owner       User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  type        String
+  name        String
+  description String?
+  payload     Json
+  snapshot    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId, updatedAt])
+  @@index([projectId, updatedAt])
+  @@index([type])
 }
 
 model ProjectRevision {

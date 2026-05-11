@@ -1,4 +1,4 @@
-import { normalizeSchema } from '@/shared/lib/schema-normalizer';
+import { normalizeProjectData, normalizeProjectSchema } from '@/shared/lib/schema-normalizer';
 import type { ProjectData } from '@/shared/types/project';
 import { DEFAULT_PROJECT_SETTINGS } from '@/shared/types/schema';
 import { apiRequest } from './http';
@@ -19,31 +19,49 @@ function toRecord(value: unknown): Record<string, unknown> {
 function mapApiProjectToProjectData(project: ApiProject): ProjectData {
   const schemaJson = toRecord(project.schemaJson);
   const schemaSource = toRecord(schemaJson.schema ?? schemaJson);
-  const schema = normalizeSchema(schemaSource);
-  const settings = toRecord(schemaJson.settings);
-
-  return {
+  const normalized = normalizeProjectData({
     id: project.id,
     name: project.name,
     description: project.description || undefined,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     snapshot: typeof schemaJson.snapshot === 'string' ? schemaJson.snapshot : undefined,
-    schema,
+    pinned: schemaJson.pinned === true,
+    domains: schemaJson.domains,
+    schema: normalizeProjectSchema(schemaSource),
+    documents: schemaJson.documents,
     settings: {
       ...DEFAULT_PROJECT_SETTINGS,
-      ...settings,
+      ...toRecord(schemaJson.settings),
     },
-  };
+  });
+
+  if (!normalized) {
+    throw new Error('Invalid project payload from API');
+  }
+
+  return normalized;
 }
 
 function toSchemaJson(project: ProjectData): Record<string, unknown> {
+  const domains = project.domains ?? project.schema.domains;
   return {
+    schema: {
+      schemaVersion: project.schema.schemaVersion ?? 2,
+      tables: project.schema.tables,
+      relations: project.schema.relations,
+      domains,
+      enums: project.schema.enums,
+      jsonSchemas: project.schema.jsonSchemas ?? [],
+    },
+    schemaVersion: project.schema.schemaVersion ?? 2,
     tables: project.schema.tables,
     relations: project.schema.relations,
-    domains: project.schema.domains,
+    domains,
     enums: project.schema.enums,
     jsonSchemas: project.schema.jsonSchemas ?? [],
+    documents: project.documents,
+    pinned: project.pinned,
     settings: project.settings,
     snapshot: project.snapshot,
   };
@@ -69,7 +87,17 @@ export async function createProject(payload: {
     body: JSON.stringify({
       name: payload.name,
       description: payload.description,
-      schemaJson: payload.schemaJson ?? { tables: [], relations: [], domains: [], enums: [], jsonSchemas: [], settings: DEFAULT_PROJECT_SETTINGS },
+      schemaJson: payload.schemaJson ?? {
+        schema: { schemaVersion: 2, tables: [], relations: [], domains: [], enums: [], jsonSchemas: [] },
+        schemaVersion: 2,
+        tables: [],
+        relations: [],
+        domains: [],
+        enums: [],
+        jsonSchemas: [],
+        documents: [],
+        settings: DEFAULT_PROJECT_SETTINGS,
+      },
     }),
   });
 

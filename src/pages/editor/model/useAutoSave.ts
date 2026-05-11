@@ -15,6 +15,8 @@ interface UseAutoSaveOptions {
   projectName: string;
   projectDescription: string;
   currentSnapshot?: string;
+  activeDocumentId?: string | null;
+  activeDocumentName?: string;
   persistProject?: (project: ProjectData) => Promise<void>;
 }
 
@@ -34,6 +36,8 @@ export function useAutoSave({
   projectName,
   projectDescription,
   currentSnapshot,
+  activeDocumentId,
+  activeDocumentName,
   persistProject,
 }: UseAutoSaveOptions) {
   const tablesRef = useRef(tables);
@@ -46,6 +50,8 @@ export function useAutoSave({
   const projectDescriptionRef = useRef(projectDescription);
   const projectDataRef = useRef(projectData);
   const currentSnapshotRef = useRef(currentSnapshot);
+  const activeDocumentIdRef = useRef(activeDocumentId);
+  const activeDocumentNameRef = useRef(activeDocumentName);
 
   useEffect(() => { tablesRef.current = tables; }, [tables]);
   useEffect(() => { relationsRef.current = relations; }, [relations]);
@@ -57,26 +63,66 @@ export function useAutoSave({
   useEffect(() => { projectDescriptionRef.current = projectDescription; }, [projectDescription]);
   useEffect(() => { projectDataRef.current = projectData; }, [projectData]);
   useEffect(() => { currentSnapshotRef.current = currentSnapshot; }, [currentSnapshot]);
+  useEffect(() => { activeDocumentIdRef.current = activeDocumentId; }, [activeDocumentId]);
+  useEffect(() => { activeDocumentNameRef.current = activeDocumentName; }, [activeDocumentName]);
 
   const persistToStorage = useCallback(async () => {
     if (!projectId) return;
     const current = projectDataRef.current;
     if (!current) return;
     const snapshot = currentSnapshotRef.current || current.snapshot;
+    const now = new Date().toISOString();
+    const nextDomains = domainsRef.current;
+    const nextSchema = {
+      tables: tablesRef.current,
+      relations: relationsRef.current,
+      domains: nextDomains,
+      enums: enumsRef.current,
+      jsonSchemas: jsonSchemasRef.current,
+    };
+    const activeErdDocumentId = activeDocumentIdRef.current;
+    const documents = current.documents.map((document) => {
+      if (document.type === 'erd') {
+        if (document.id !== activeErdDocumentId) {
+          return {
+            ...document,
+            erd: {
+              ...document.erd,
+              domains: nextDomains,
+            },
+          };
+        }
+        return {
+          ...document,
+          name: activeDocumentNameRef.current?.trim() || document.name,
+          erd: nextSchema,
+          snapshot,
+          updatedAt: now,
+        };
+      }
+      if (document.type === 'class-diagram') {
+        return {
+          ...document,
+          classDiagram: {
+            ...document.classDiagram,
+            domains: nextDomains,
+          },
+        };
+      }
+      return document;
+    });
+    const firstErdDocument = documents.find((document) => document.type === 'erd');
+    const shouldMirrorProjectSchema = !activeErdDocumentId || firstErdDocument?.id === activeErdDocumentId;
     const updated: ProjectData = {
       ...current,
       name: projectNameRef.current || current.name,
       description: projectDescriptionRef.current,
-      schema: {
-        tables: tablesRef.current,
-        relations: relationsRef.current,
-        domains: domainsRef.current,
-        enums: enumsRef.current,
-        jsonSchemas: jsonSchemasRef.current,
-      },
+      domains: nextDomains,
+      schema: shouldMirrorProjectSchema ? nextSchema : { ...current.schema, domains: nextDomains },
+      documents,
       settings: settingsRef.current,
       snapshot,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
     // Always keep local recovery copy even when backend persistence is enabled.
     saveProject(updated);
@@ -98,7 +144,7 @@ export function useAutoSave({
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [tables, relations, domains, enums, jsonSchemas, settings, projectName, projectDescription, currentSnapshot, persistToStorage, projectId]);
+  }, [tables, relations, domains, enums, jsonSchemas, settings, projectName, projectDescription, currentSnapshot, activeDocumentName, persistToStorage, projectId]);
 
   return { persistToStorage, projectDataRef };
 }

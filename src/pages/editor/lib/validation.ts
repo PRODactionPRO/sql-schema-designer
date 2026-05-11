@@ -3,7 +3,7 @@
  * Validates the schema for common issues and best practices.
  */
 
-import type { Table, Relation, Field } from '../model/types';
+import type { Table, Relation } from '../model/types';
 
 export type ValidationSeverity = 'error' | 'warning' | 'info';
 
@@ -27,6 +27,9 @@ export function validateSchema(tables: Table[], relations: Relation[]): Validati
   // ── Table-level checks ──
 
   for (const table of tables) {
+    const tableConstraints = table.constraints ?? [];
+    const tableIndexes = table.indexes ?? [];
+
     // 1. Table without PK
     const hasPK = table.fields.some(f => f.isPrimaryKey);
     if (!hasPK) {
@@ -95,7 +98,10 @@ export function validateSchema(tables: Table[], relations: Relation[]): Validati
           (r.fromTableId === table.id && r.fromFieldId === field.id) ||
           (r.toTableId === table.id && r.toFieldId === field.id)
         );
-        if (!hasRelation) {
+        const hasTableForeignKey = tableConstraints.some((constraint) => (
+          constraint.type === 'foreign_key' && constraint.columnIds.includes(field.id)
+        ));
+        if (!hasRelation && !hasTableForeignKey) {
           issues.push({
             id: nextId(), severity: 'warning', category: 'Foreign Key',
             message: `Field "${table.name}.${field.name}" is marked as FK but has no relation.`,
@@ -104,6 +110,137 @@ export function validateSchema(tables: Table[], relations: Relation[]): Validati
             suggestion: 'Create a relation or remove the FK flag.',
           });
         }
+      }
+    }
+
+    // 6b. PostgreSQL table-level constraints
+    const constraintNames = new Map<string, number>();
+    for (const constraint of tableConstraints) {
+      const name = constraint.name?.trim().toLowerCase();
+      if (name) constraintNames.set(name, (constraintNames.get(name) || 0) + 1);
+
+      if (constraint.type === 'check') {
+        if (!constraint.expression.trim()) {
+          issues.push({
+            id: nextId(), severity: 'error', category: 'Check Constraint',
+            message: `Check constraint "${constraint.name || constraint.id}" on "${table.name}" has no expression.`,
+            tableId: table.id, tableName: table.name,
+            suggestion: 'Add a SQL expression, for example "price >= 0".',
+          });
+        }
+        continue;
+      }
+
+      if (constraint.columnIds.length === 0) {
+        issues.push({
+          id: nextId(), severity: 'error', category: 'Constraint',
+          message: `Constraint "${constraint.name || constraint.id}" on "${table.name}" has no columns.`,
+          tableId: table.id, tableName: table.name,
+          suggestion: 'Select at least one column or delete the empty constraint.',
+        });
+      }
+
+      const missingColumns = constraint.columnIds.filter((columnId) => !table.fields.some((field) => field.id === columnId));
+      if (missingColumns.length > 0) {
+        issues.push({
+          id: nextId(), severity: 'error', category: 'Constraint',
+          message: `Constraint "${constraint.name || constraint.id}" on "${table.name}" references missing columns.`,
+          tableId: table.id, tableName: table.name,
+          suggestion: 'Remove missing columns from the constraint.',
+        });
+      }
+
+      if (constraint.type === 'foreign_key') {
+        const referencedTable = tables.find((candidate) => candidate.id === constraint.referencedTableId);
+        if (!referencedTable) {
+          issues.push({
+            id: nextId(), severity: 'error', category: 'Foreign Key',
+            message: `Foreign key "${constraint.name || constraint.id}" on "${table.name}" references a missing table.`,
+            tableId: table.id, tableName: table.name,
+            suggestion: 'Select an existing referenced table.',
+          });
+          continue;
+        }
+
+        if (constraint.referencedColumnIds.length !== constraint.columnIds.length) {
+          issues.push({
+            id: nextId(), severity: 'error', category: 'Foreign Key',
+            message: `Foreign key "${constraint.name || constraint.id}" on "${table.name}" has different local and referenced column counts.`,
+            tableId: table.id, tableName: table.name,
+            suggestion: 'Composite FK must have the same number of local and referenced columns.',
+          });
+        }
+
+        const missingReferencedColumns = constraint.referencedColumnIds.filter((columnId) => (
+          !referencedTable.fields.some((field) => field.id === columnId)
+        ));
+        if (missingReferencedColumns.length > 0) {
+          issues.push({
+            id: nextId(), severity: 'error', category: 'Foreign Key',
+            message: `Foreign key "${constraint.name || constraint.id}" on "${table.name}" references missing columns in "${referencedTable.name}".`,
+            tableId: table.id, tableName: table.name,
+            suggestion: 'Select existing columns from the referenced table.',
+          });
+        }
+
+        if (
+          referencedTable &&
+          constraint.referencedColumnIds.length > 0 &&
+          !hasPrimaryOrUniqueKey(referencedTable, constraint.referencedColumnIds)
+        ) {
+          issues.push({
+            id: nextId(), severity: 'error', category: 'Foreign Key',
+            message: `Foreign key "${constraint.name || constraint.id}" references columns that are not primary or unique in "${referencedTable.name}".`,
+            tableId: table.id, tableName: table.name,
+            suggestion: 'PostgreSQL requires referenced columns to be covered by a primary key or unique constraint.',
+          });
+        }
+      }
+    }
+
+    for (const [name, count] of constraintNames) {
+      if (count > 1) {
+        issues.push({
+          id: nextId(), severity: 'error', category: 'Naming',
+          message: `Table "${table.name}" has ${count} constraints named "${name}".`,
+          tableId: table.id, tableName: table.name,
+          suggestion: 'Constraint names should be unique within the table.',
+        });
+      }
+    }
+
+    const primaryKeyCount = tableConstraints.filter((constraint) => constraint.type === 'primary_key').length;
+    if (primaryKeyCount > 1) {
+      issues.push({
+        id: nextId(), severity: 'error', category: 'Primary Key',
+        message: `Table "${table.name}" has ${primaryKeyCount} primary key constraints.`,
+        tableId: table.id, tableName: table.name,
+        suggestion: 'PostgreSQL allows only one primary key per table. Use a composite primary key if needed.',
+      });
+    }
+
+    // 6c. PostgreSQL table indexes
+    const indexNames = new Map<string, number>();
+    for (const index of tableIndexes) {
+      const name = index.name?.trim().toLowerCase();
+      if (name) indexNames.set(name, (indexNames.get(name) || 0) + 1);
+      if (index.columns.length === 0) {
+        issues.push({
+          id: nextId(), severity: 'error', category: 'Index',
+          message: `Index "${index.name || index.id}" on "${table.name}" has no columns or expressions.`,
+          tableId: table.id, tableName: table.name,
+          suggestion: 'Select at least one column or add an expression.',
+        });
+      }
+    }
+    for (const [name, count] of indexNames) {
+      if (count > 1) {
+        issues.push({
+          id: nextId(), severity: 'error', category: 'Naming',
+          message: `Table "${table.name}" has ${count} indexes named "${name}".`,
+          tableId: table.id, tableName: table.name,
+          suggestion: 'Index names should be unique within the schema.',
+        });
       }
     }
 
@@ -201,4 +338,13 @@ export function validateSchema(tables: Table[], relations: Relation[]): Validati
   }
 
   return issues;
+}
+
+function hasPrimaryOrUniqueKey(table: Table, columnIds: string[]): boolean {
+  const constraints = table.constraints ?? [];
+  return constraints.some((constraint) => {
+    if (constraint.type !== 'primary_key' && constraint.type !== 'unique') return false;
+    if (constraint.columnIds.length !== columnIds.length) return false;
+    return constraint.columnIds.every((columnId, index) => columnIds[index] === columnId);
+  });
 }

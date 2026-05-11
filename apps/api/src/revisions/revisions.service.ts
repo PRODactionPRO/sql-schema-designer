@@ -39,8 +39,8 @@ export class RevisionsService {
 
     const nextRevision = (aggregate._max.revision ?? 0) + 1;
 
-    const [revision] = await this.prisma.$transaction([
-      this.prisma.projectRevision.create({
+    const revision = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.projectRevision.create({
         data: {
           projectId,
           revision: nextRevision,
@@ -48,14 +48,17 @@ export class RevisionsService {
           comment: dto.comment,
           authorId,
         },
-      }),
-      this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          schemaJson: this.toInputJson(dto.schemaJson),
-        },
-      }),
-    ]);
+      });
+
+      await this.projectsService.updateProjectSchemaJsonInTransaction(
+        tx,
+        projectId,
+        ownerId,
+        dto.schemaJson,
+      );
+
+      return created;
+    });
 
     return revision;
   }
@@ -91,8 +94,8 @@ export class RevisionsService {
 
     const nextRevision = (aggregate._max.revision ?? 0) + 1;
 
-    const [newRevision] = await this.prisma.$transaction([
-      this.prisma.projectRevision.create({
+    const newRevision = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.projectRevision.create({
         data: {
           projectId,
           revision: nextRevision,
@@ -100,14 +103,17 @@ export class RevisionsService {
           comment: `Restore from r${revision}`,
           authorId,
         },
-      }),
-      this.prisma.project.update({
-        where: { id: projectId },
-        data: {
-          schemaJson: this.toInputJson(sourceRevision.schemaJson),
-        },
-      }),
-    ]);
+      });
+
+      await this.projectsService.updateProjectSchemaJsonInTransaction(
+        tx,
+        projectId,
+        ownerId,
+        sourceRevision.schemaJson,
+      );
+
+      return created;
+    });
 
     return newRevision;
   }
