@@ -13,10 +13,14 @@ import { CATALOG_DISPLAY_BY_TYPE } from '../model/catalog-icons';
 import type { WorkspaceTab, WorkspaceWindow, WorkspaceWindowId } from '../model/types';
 import { IconButton } from '@/shared/ui/icon-button';
 import { cn } from '@/shared/ui/utils';
+import type { ProjectData } from '@/shared/types/project';
 import { EmptyPane, TabContent } from './WorkspaceTabContent';
 
 export function WorkspacePane({
   windowState,
+  project,
+  projectLoading = false,
+  projectError = null,
   className,
   draggingTabId,
   heldTabId,
@@ -34,6 +38,9 @@ export function WorkspacePane({
   onStartTabDrag,
 }: {
   windowState: WorkspaceWindow;
+  project?: ProjectData;
+  projectLoading?: boolean;
+  projectError?: string | null;
   className?: string;
   draggingTabId: string | null;
   heldTabId: string | null;
@@ -58,7 +65,13 @@ export function WorkspacePane({
       data-window-id={windowState.id}
       className={cn('flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-white bg-[#f8f8f9]', className)}
     >
-      {windowState.id === 'project' ? <ProjectTitleHeader onCollapseLeft={onCollapseLeft} /> : null}
+      {windowState.id === 'project' ? (
+        <ProjectTitleHeader
+          projectName={project?.name ?? 'Data Design Schema'}
+          status={projectLoading ? 'Loading project' : projectError ? 'Project unavailable' : 'Saved'}
+          onCollapseLeft={onCollapseLeft}
+        />
+      ) : null}
       <div
         className={cn(
           'flex h-12 shrink-0 items-center justify-between gap-2 border-b border-[#e6e7e9] px-2',
@@ -119,18 +132,34 @@ export function WorkspacePane({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {activeTab ? <TabContent tab={activeTab} windowId={windowState.id} /> : <EmptyPane />}
+        {activeTab ? (
+          <TabContent
+            tab={activeTab}
+            windowId={windowState.id}
+            project={project}
+            projectLoading={projectLoading}
+            projectError={projectError}
+          />
+        ) : <EmptyPane />}
       </div>
     </section>
   );
 }
 
-function ProjectTitleHeader({ onCollapseLeft }: { onCollapseLeft: () => void }) {
+function ProjectTitleHeader({
+  projectName,
+  status,
+  onCollapseLeft,
+}: {
+  projectName: string;
+  status: string;
+  onCollapseLeft: () => void;
+}) {
   return (
     <div className="relative flex h-[70px] shrink-0 items-center border-b border-[#e6e7e9] px-5">
       <div className="min-w-0 pr-10">
-        <h1 className="truncate text-base font-medium leading-4 text-black">Data Design Schema</h1>
-        <p className="mt-1 text-[10px] leading-4 text-[#b2b8be]">Saved</p>
+        <h1 className="truncate text-base font-medium leading-4 text-black">{projectName}</h1>
+        <p className="mt-1 text-[10px] leading-4 text-[#b2b8be]">{status}</p>
       </div>
       <div className="absolute right-4 top-4">
         <IconButton label="Collapse left panel" onClick={onCollapseLeft}>

@@ -1,5 +1,10 @@
 import { createPortal } from 'react-dom';
+import { useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import { getProjectById } from '@/shared/api/projects';
+import { useAuthStore } from '@/shared/auth/store';
 import { cn } from '@/shared/ui/utils';
 import { useWorkspaceLayout } from '../model/useWorkspaceLayout';
 import { ResizeHandle, TopApplicationBar } from './WorkspaceChrome';
@@ -8,6 +13,23 @@ import { WorkspacePane } from './WorkspacePane';
 import type { WorkspaceWindowId } from '../model/types';
 
 export function WorkspaceLayoutPage() {
+  const { projectId } = useParams();
+  const navigate = useNavigate();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isProjectWorkspace = Boolean(projectId);
+
+  useEffect(() => {
+    if (isProjectWorkspace && !isAuthenticated) {
+      navigate('/auth', { replace: true });
+    }
+  }, [isAuthenticated, isProjectWorkspace, navigate]);
+
+  const projectQuery = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => getProjectById(projectId!),
+    enabled: isProjectWorkspace && isAuthenticated,
+  });
+
   const {
     windows,
     addMenu,
@@ -41,10 +63,17 @@ export function WorkspaceLayoutPage() {
     startTabPointerDrag,
   } = useWorkspaceLayout();
 
+  if (isProjectWorkspace && !isAuthenticated) {
+    return null;
+  }
+
   const renderWindow = (windowId: WorkspaceWindowId, className?: string) => (
     <WorkspacePane
       key={windowId}
       windowState={windows[windowId]}
+      project={projectQuery.data}
+      projectLoading={projectQuery.isLoading}
+      projectError={projectQuery.error instanceof Error ? projectQuery.error.message : null}
       className={className}
       draggingTabId={draggingTabId}
       heldTabId={heldTabId}
