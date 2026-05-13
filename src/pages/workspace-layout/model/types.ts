@@ -1,5 +1,3 @@
-import type { ReactNode } from 'react';
-
 export type WorkspaceWindowId = 'project' | 'library' | 'canvas' | 'behavior' | 'inspector';
 
 export type TabType =
@@ -45,7 +43,6 @@ export interface TabCatalogItem {
   type: TabType;
   title: string;
   group: string;
-  icon: ReactNode;
 }
 
 export interface AddMenuState {

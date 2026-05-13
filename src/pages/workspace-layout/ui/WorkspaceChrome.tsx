@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import {
   PanelBottom,
   PanelBottomClose,
@@ -9,6 +8,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { PanelResizeHandle } from 'react-resizable-panels';
+import { IconButton } from '@/shared/ui/icon-button';
 import { cn } from '@/shared/ui/utils';
 
 export function TopApplicationBar({
@@ -45,49 +45,38 @@ export function TopApplicationBar({
         </nav>
       </div>
       <div className="flex items-center gap-2">
-        <TopIcon label="Left panel" active={!leftVisible} onClick={onToggleLeft}>
+        <IconButton
+          label="Left panel"
+          active={!leftVisible}
+          inactiveClassName="text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          onClick={onToggleLeft}
+        >
           {leftVisible ? <PanelLeft className="size-4" /> : <PanelLeftClose className="size-4" />}
-        </TopIcon>
-        <TopIcon label="Bottom panel" active={!bottomVisible} onClick={onToggleBottom}>
+        </IconButton>
+        <IconButton
+          label="Bottom panel"
+          active={!bottomVisible}
+          inactiveClassName="text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          onClick={onToggleBottom}
+        >
           {bottomVisible ? <PanelBottom className="size-4" /> : <PanelBottomClose className="size-4" />}
-        </TopIcon>
-        <TopIcon label="Right panel" active={!rightVisible} onClick={onToggleRight}>
+        </IconButton>
+        <IconButton
+          label="Right panel"
+          active={!rightVisible}
+          inactiveClassName="text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          onClick={onToggleRight}
+        >
           {rightVisible ? <PanelRight className="size-4" /> : <PanelRightClose className="size-4" />}
-        </TopIcon>
-        <TopIcon label="AI mode" active>
+        </IconButton>
+        <IconButton label="AI mode" active>
           <Sparkles className="size-4" />
-        </TopIcon>
+        </IconButton>
         <div className="ml-1 size-8 overflow-hidden rounded-full border border-white bg-gradient-to-br from-slate-200 via-slate-100 to-slate-400 shadow-sm">
           <div className="flex size-full items-end justify-center text-[10px] font-semibold text-slate-600">MP</div>
         </div>
       </div>
     </header>
-  );
-}
-
-function TopIcon({
-  label,
-  active,
-  children,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  children: ReactNode;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      className={cn(
-        'flex size-7 items-center justify-center rounded-lg transition-colors',
-        active ? 'bg-[#030213] text-white' : 'text-slate-500 hover:bg-white/70 hover:text-slate-800',
-      )}
-    >
-      {children}
-    </button>
   );
 }
 

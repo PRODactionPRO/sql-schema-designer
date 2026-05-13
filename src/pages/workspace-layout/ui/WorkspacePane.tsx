@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   Maximize2,
   Menu,
@@ -9,8 +9,9 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
-import { CATALOG_BY_TYPE } from '../model/catalog';
+import { CATALOG_DISPLAY_BY_TYPE } from '../model/catalog-icons';
 import type { WorkspaceTab, WorkspaceWindow, WorkspaceWindowId } from '../model/types';
+import { IconButton } from '@/shared/ui/icon-button';
 import { cn } from '@/shared/ui/utils';
 import { EmptyPane, TabContent } from './WorkspaceTabContent';
 
@@ -206,7 +207,7 @@ function DraggableTab({
   onClose: (windowId: WorkspaceWindowId, tabId: string) => void;
   onStartDrag: (windowId: WorkspaceWindowId, tabId: string, event: ReactPointerEvent<HTMLElement>) => void;
 }) {
-  const catalogItem = showIcon ? CATALOG_BY_TYPE.get(tab.type) : null;
+  const catalogItem = showIcon ? CATALOG_DISPLAY_BY_TYPE.get(tab.type) : null;
   const [closeVisible, setCloseVisible] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const highlighted = active || dragging || held;
@@ -257,20 +258,23 @@ function DraggableTab({
       }}
       onPointerDown={(event) => onStartDrag(windowId, tab.id, event)}
     >
-      <button
-        type="button"
+      <div
         className={cn(
           'group flex h-7 max-w-[170px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium leading-4 transition-colors',
           highlighted ? 'bg-[#eeeff0] text-[#111827]' : 'text-[#8a919c] hover:bg-[#eeeff0]/70 hover:text-[#111827]',
         )}
-        onClick={() => onActivate(windowId, tab.id)}
       >
-        {catalogItem ? <span className="text-slate-400">{catalogItem.icon}</span> : null}
-        <span className="truncate">{tab.title}</span>
-        <span
-          role="button"
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          onClick={() => onActivate(windowId, tab.id)}
+        >
+          {catalogItem ? <span className="shrink-0 text-slate-400">{catalogItem.icon}</span> : null}
+          <span className="truncate">{tab.title}</span>
+        </button>
+        <button
+          type="button"
           aria-label={`Close ${tab.title}`}
-          tabIndex={0}
           className={cn(
             'ml-0.5 size-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700',
             closeVisible && !dragging && !held ? 'flex' : 'hidden',
@@ -280,44 +284,10 @@ function DraggableTab({
             onClose(windowId, tab.id);
           }}
           onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              event.stopPropagation();
-              onClose(windowId, tab.id);
-            }
-          }}
         >
           <X className="size-3" />
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
-  );
-}
-
-function IconButton({
-  label,
-  active,
-  children,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  children: ReactNode;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={cn(
-        'flex size-7 items-center justify-center rounded-lg transition-colors',
-        active ? 'bg-[#030213] text-white' : 'text-slate-500 hover:bg-[#eeeff0] hover:text-slate-900',
-      )}
-    >
-      {children}
-    </button>
   );
 }

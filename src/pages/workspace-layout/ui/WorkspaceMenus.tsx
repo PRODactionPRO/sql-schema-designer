@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { Check, Layers3 } from 'lucide-react';
-import type { SearchFilterMenuState, TabCatalogItem, TabType } from '../model/types';
+import type { TabCatalogDisplayItem } from '../model/catalog-icons';
+import type { SearchFilterMenuState, TabType } from '../model/types';
 
 export function AddTabMenu({
   groups,
@@ -8,7 +9,7 @@ export function AddTabMenu({
   position,
   onAdd,
 }: {
-  groups: Record<string, TabCatalogItem[]>;
+  groups: Record<string, TabCatalogDisplayItem[]>;
   menuRef: RefObject<HTMLDivElement | null>;
   position: { left: number; top: number };
   onAdd: (type: TabType) => void;
@@ -52,7 +53,7 @@ export function SearchFilterMenu({
   menuRef,
   position,
 }: {
-  groups: Record<string, TabCatalogItem[]>;
+  groups: Record<string, TabCatalogDisplayItem[]>;
   menuRef: RefObject<HTMLDivElement | null>;
   position: SearchFilterMenuState;
 }) {
