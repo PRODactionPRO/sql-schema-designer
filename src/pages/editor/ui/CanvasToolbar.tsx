@@ -17,6 +17,7 @@ interface CanvasToolbarProps {
   onZoomToFit?: () => void;
   onOpenValidation?: () => void;
   onOpenDiff?: () => void;
+  showCodeModeButton?: boolean;
 }
 
 export function CanvasToolbar({
@@ -24,6 +25,7 @@ export function CanvasToolbar({
   onUndo, onRedo, canUndo, canRedo, onAutoLayout,
   highlightRelations, onToggleHighlightRelations,
   onZoomToFit, onOpenValidation, onOpenDiff,
+  showCodeModeButton = true,
 }: CanvasToolbarProps) {
   return (
     <div className={`rounded-lg shadow-md px-2 py-1 flex items-center gap-1 transition-colors ${
@@ -142,22 +144,26 @@ export function CanvasToolbar({
           <Copy className="size-4" />
         </Button>
       </ProTooltip>
-      <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
-      <ProTooltip label={codeMode ? 'Exit code mode' : 'Code mode'}>
-        <Button
-          size="sm"
-          onClick={onToggleCodeMode}
-          className={`h-8 gap-1.5 px-3 text-xs transition-all ${
-            codeMode
-              ? 'bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]'
-              : 'bg-indigo-600 text-white hover:bg-indigo-700'
-          }`}
-          style={{ fontFamily: codeMode ? '"JetBrains Mono", monospace' : undefined, fontWeight: 600 }}
-        >
-          {codeMode ? <X className="size-3.5" /> : <Code className="size-3.5" />}
-          {codeMode ? 'Exit Code' : 'Code Mode'}
-        </Button>
-      </ProTooltip>
+      {showCodeModeButton ? (
+        <>
+          <div className={`w-px h-6 mx-1 ${codeMode ? 'bg-[#45475a]' : 'bg-gray-200'}`} />
+          <ProTooltip label={codeMode ? 'Exit code mode' : 'Code mode'}>
+            <Button
+              size="sm"
+              onClick={onToggleCodeMode}
+              className={`h-8 gap-1.5 px-3 text-xs transition-all ${
+                codeMode
+                  ? 'bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
+              }`}
+              style={{ fontFamily: codeMode ? '"JetBrains Mono", monospace' : undefined, fontWeight: 600 }}
+            >
+              {codeMode ? <X className="size-3.5" /> : <Code className="size-3.5" />}
+              {codeMode ? 'Exit Code' : 'Code Mode'}
+            </Button>
+          </ProTooltip>
+        </>
+      ) : null}
     </div>
   );
 }
