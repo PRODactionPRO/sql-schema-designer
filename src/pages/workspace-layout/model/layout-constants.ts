@@ -1,0 +1,5 @@
+export const ADD_MENU_WIDTH = 280;
+export const ADD_MENU_MAX_HEIGHT = 420;
+export const SEARCH_FILTER_MENU_WIDTH = 250;
+export const SEARCH_FILTER_MENU_MAX_HEIGHT = 430;
+export const PANEL_ANIMATION_MS = 260;
