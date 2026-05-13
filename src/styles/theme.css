@@ -226,3 +226,59 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
 }
+
+.diagram-grid {
+  background-image:
+    radial-gradient(circle, rgba(148, 163, 184, 0.45) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.workspace-layout-animating [data-panel] {
+  transition:
+    flex-basis 260ms ease,
+    flex-grow 260ms ease;
+}
+
+.workspace-tabs-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.workspace-tabs-scroll::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+.workspace-popup-scroll::-webkit-scrollbar,
+.workspace-dark-popup-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.workspace-popup-scroll::-webkit-scrollbar-track,
+.workspace-dark-popup-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.workspace-popup-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+.workspace-dark-popup-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+}
+
+.workspace-popup-scroll,
+.workspace-dark-popup-scroll {
+  scrollbar-width: thin;
+}
+
+.workspace-popup-scroll {
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.workspace-dark-popup-scroll {
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
