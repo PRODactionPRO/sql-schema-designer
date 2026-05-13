@@ -211,6 +211,7 @@ function DraggableTab({
   const [closeVisible, setCloseVisible] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const highlighted = active || dragging || held;
+  const tabTextClassName = 'text-[12px] font-medium leading-4';
 
   useEffect(() => () => {
     if (closeTimerRef.current) {
@@ -266,7 +267,7 @@ function DraggableTab({
       >
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+          className={cn('flex min-w-0 flex-1 items-center gap-1.5 text-left', tabTextClassName)}
           onClick={() => onActivate(windowId, tab.id)}
         >
           {catalogItem ? <span className="shrink-0 text-slate-400">{catalogItem.icon}</span> : null}
