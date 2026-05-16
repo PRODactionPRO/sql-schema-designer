@@ -1,20 +1,19 @@
-import { Table2 } from 'lucide-react';
+import { FileText, Table2 } from 'lucide-react';
 import type { ProjectData } from '@/shared/types/project';
 import { cn } from '@/shared/ui/utils';
 import {
   EVENT_ROWS,
   GENERIC_ROWS_BY_TYPE,
-  PROPERTY_ROWS,
   SEMANTIC_LISTS,
   TABLE_ITEMS,
 } from '../model/workspace-mock-data';
-import type { WorkspaceTab, WorkspaceWindowId } from '../model/types';
+import type { WorkspaceSelection, WorkspaceTab, WorkspaceWindowId } from '../model/types';
+import { getProjectDomains, selectionMatches } from '../model/workspace-project-utils';
 
-function getProjectDomains(project: ProjectData) {
-  return project.domains.length > 0 ? project.domains : project.schema.domains;
-}
-
-function getSemanticItems(type: 'schemas' | 'domains' | 'entities', project?: ProjectData): Array<{ id: string; label: string; count?: number; color?: string }> {
+function getSemanticItems(
+  type: 'schemas' | 'domains' | 'entities',
+  project?: ProjectData,
+): Array<{ id: string; label: string; count?: number; color?: string }> {
   if (!project) {
     return SEMANTIC_LISTS[type].map((item, index) => ({ id: `${type}-${index}`, label: item, count: index + 1 }));
   }
@@ -31,7 +30,12 @@ function getSemanticItems(type: 'schemas' | 'domains' | 'entities', project?: Pr
   if (type === 'entities') {
     return [
       ...project.schema.tables.map((table) => ({ id: table.id, label: table.name, count: table.fields.length, color: table.color })),
-      ...project.schema.enums.map((enumType) => ({ id: enumType.id, label: enumType.name, count: enumType.values.length, color: enumType.domainId ? getProjectDomains(project).find((domain) => domain.id === enumType.domainId)?.color : undefined })),
+      ...project.schema.enums.map((enumType) => ({
+        id: enumType.id,
+        label: enumType.name,
+        count: enumType.values.length,
+        color: enumType.domainId ? getProjectDomains(project).find((domain) => domain.id === enumType.domainId)?.color : undefined,
+      })),
     ];
   }
 
@@ -46,7 +50,15 @@ function getSemanticItems(type: 'schemas' | 'domains' | 'entities', project?: Pr
   ];
 }
 
-export function TablesPane({ project }: { project?: ProjectData }) {
+export function TablesPane({
+  project,
+  selection,
+  onSelectionChange,
+}: {
+  project?: ProjectData;
+  selection: WorkspaceSelection | null;
+  onSelectionChange: (selection: WorkspaceSelection | null) => void;
+}) {
   const tables = project?.schema.tables;
 
   return (
@@ -55,35 +67,26 @@ export function TablesPane({ project }: { project?: ProjectData }) {
         {(tables ?? TABLE_ITEMS).map((table, index) => {
           const tableName = typeof table === 'string' ? table : table.name;
           const fieldCount = typeof table === 'string' ? 8 + index : table.fields.length;
+          const tableId = typeof table === 'string' ? table : table.id;
 
           return (
-          <div key={typeof table === 'string' ? table : table.id} className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
-              <Table2 className="size-3.5 text-slate-400" />
-              {tableName}
-            </div>
-            <span className="text-[11px] text-slate-400">{fieldCount} fields</span>
-          </div>
+            <button
+              key={tableId}
+              type="button"
+              className={cn(
+                'flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-left',
+                typeof table !== 'string' && selectionMatches(selection, { kind: 'table', id: table.id, sourceView: 'model' }) && 'border-[#f39b12] ring-1 ring-[#f39b12]',
+              )}
+              onClick={typeof table !== 'string' ? () => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' }) : undefined}
+            >
+              <div className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                <Table2 className="size-3.5 text-slate-400" />
+                {tableName}
+              </div>
+              <span className="text-[11px] text-slate-400">{fieldCount} fields</span>
+            </button>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-export function PropertiesPane() {
-  return (
-    <div className="h-full overflow-auto p-4">
-      <div className="rounded-lg border border-[#f39b12]/50 bg-white p-4 shadow-sm">
-        <div className="text-sm font-semibold text-slate-800">JourneyStage</div>
-        <div className="mt-4 grid gap-3 text-xs">
-          {PROPERTY_ROWS.map(([label, value]) => (
-            <div key={label} className="flex justify-between gap-3 border-b border-slate-100 pb-2">
-              <span className="text-slate-400">{label}</span>
-              <span className="font-medium text-slate-700">{value}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -104,8 +107,32 @@ export function EventsPane() {
   );
 }
 
-export function SemanticList({ type, project }: { type: 'schemas' | 'domains' | 'entities'; project?: ProjectData }) {
+export function SemanticList({
+  type,
+  project,
+  selection,
+  onSelectionChange,
+}: {
+  type: 'schemas' | 'domains' | 'entities';
+  project?: ProjectData;
+  selection: WorkspaceSelection | null;
+  onSelectionChange: (selection: WorkspaceSelection | null) => void;
+}) {
   const items = getSemanticItems(type, project);
+
+  const selectItem = (item: { id: string }) => {
+    if (!project) return;
+    if (type === 'entities') {
+      const table = project.schema.tables.find((candidate) => candidate.id === item.id);
+      if (table) onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' });
+      const enumType = project.schema.enums.find((candidate) => candidate.id === item.id);
+      if (enumType) onSelectionChange({ kind: 'enum', id: enumType.id, sourceView: 'model' });
+    }
+    if (type === 'schemas') {
+      const jsonSchema = (project.schema.jsonSchemas ?? []).find((candidate) => candidate.id === item.id);
+      if (jsonSchema) onSelectionChange({ kind: 'jsonSchema', id: jsonSchema.id, sourceView: 'model' });
+    }
+  };
 
   return (
     <div className="h-full overflow-auto p-3">
@@ -116,11 +143,12 @@ export function SemanticList({ type, project }: { type: 'schemas' | 'domains' | 
             type="button"
             className={cn(
               'flex items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors',
-              index === 0 ? 'bg-[#eeeff0] text-slate-900' : 'text-slate-500 hover:bg-white hover:text-slate-800',
+              selection?.id === item.id ? 'bg-[#eeeff0] text-slate-900' : 'text-slate-500 hover:bg-white hover:text-slate-800',
             )}
+            onClick={() => selectItem(item)}
           >
             <span className="flex min-w-0 items-center gap-2">
-              {item.color ? <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /> : null}
+              {item.color ? <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} /> : <FileText className="size-3.5 shrink-0 text-slate-400" />}
               <span className="truncate">{item.label}</span>
             </span>
             <span className="text-[10px] text-slate-400">{item.count ?? index + 1}</span>

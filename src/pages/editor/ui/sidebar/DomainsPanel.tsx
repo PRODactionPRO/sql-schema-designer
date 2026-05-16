@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { MoreVertical, Plus, Pencil, Trash2 } from 'lucide-react';
+import { GripVertical, MoreVertical, Plus, Pencil, Trash2 } from 'lucide-react';
 import { DOMAIN_COLORS } from '../../model/types';
 import { Input } from '@/shared/ui/input';
 import { Button } from '@/shared/ui/button';
@@ -7,6 +7,8 @@ import { DropdownMenu, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
 import { ProTooltip } from '@/shared/ui/pro-tooltip';
 import { ActionMenuContent, ActionMenuItem } from '@/shared/ui/action-menu';
 import { GhostActionButton } from '@/shared/ui/ghost-action-button';
+import { useReorderableDragList } from '@/shared/ui/useReorderableDragList';
+import { cn } from '@/shared/ui/utils';
 import { SidebarListRow } from './SidebarListRow';
 import type { DomainsPanelViewModel } from './useDomainsPanelViewModel';
 
@@ -37,6 +39,7 @@ export function DomainsPanel({
     onAssignDomain,
     onUpdateDomain,
     onDeleteDomain,
+    onReorderDomains,
   } = viewModel;
 
   const domainTableCounts = useMemo(() => {
@@ -48,16 +51,58 @@ export function DomainsPanel({
     return counts;
   }, [tables]);
 
+  const domainIds = useMemo(() => domains.map((domain) => domain.id), [domains]);
+  const domainById = useMemo(() => new Map(domains.map((domain) => [domain.id, domain])), [domains]);
+  const domainDnd = useReorderableDragList({
+    itemIds: domainIds,
+    enabled: domains.length > 1 && !isAddingDomain && !renamingDomainId,
+    onCommit: (fromIndex, toIndex) => {
+      const nextIds = [...domainIds];
+      const [movedId] = nextIds.splice(fromIndex, 1);
+      if (!movedId) return;
+      nextIds.splice(toIndex, 0, movedId);
+      onReorderDomains(nextIds);
+    },
+  });
+  const renderedDomains = domainDnd.renderedIds
+    .map((id) => domainById.get(id))
+    .filter((domain): domain is typeof domains[number] => Boolean(domain));
+  const domainIndexById = useMemo(
+    () => new Map(domainDnd.renderedIds.map((id, index) => [id, index])),
+    [domainDnd.renderedIds],
+  );
+
   return (
     <div className="flex-1 overflow-y-auto panel-scroll pb-12">
-      {domains.map(domain => {
+      {renderedDomains.map(domain => {
         const domainTableCount = domainTableCounts.get(domain.id) ?? 0;
+        const dragIndex = domainIndexById.get(domain.id) ?? -1;
+        const canReorder = dragIndex >= 0 && domains.length > 1 && !isAddingDomain && !renamingDomainId;
+        const isDragSource = domainDnd.draggingItemId === domain.id;
+        const isDragTarget = domainDnd.dragOverIndex === dragIndex;
+
         return (
           <SidebarListRow
             key={domain.id}
-            className="hover:bg-gray-50 group relative"
+            className={cn(
+              'group relative hover:bg-gray-50',
+              canReorder && 'cursor-grab active:cursor-grabbing',
+              domainDnd.isDragging && !isDragSource && 'opacity-60',
+              isDragSource && 'bg-blue-50 ring-1 ring-inset ring-blue-300',
+              isDragTarget && 'ring-2 ring-inset ring-blue-300',
+            )}
+            draggable={canReorder}
+            onDragStart={canReorder ? (event) => {
+              domainDnd.handleDragStart({ index: dragIndex, itemId: domain.id, event });
+              event.dataTransfer.setData('text/domain-id', domain.id);
+            } : undefined}
+            onDragOver={canReorder ? (event) => domainDnd.handleDragOver({ index: dragIndex, itemId: domain.id, event }) : undefined}
+            onDragLeave={canReorder ? domainDnd.handleDragLeave : undefined}
+            onDrop={canReorder ? (event) => domainDnd.handleDrop({ event }) : undefined}
+            onDragEnd={canReorder ? domainDnd.handleDragEnd : undefined}
             left={(
-              <div className="relative mr-2">
+              <div className="relative mr-2 flex items-center gap-1">
+                <GripVertical className={cn('size-3.5 shrink-0 text-gray-300', canReorder && 'text-gray-400')} />
                 <button
                   onClick={() => onSetEditingDomainId(editingDomainId === domain.id ? null : domain.id)}
                   className="size-5 rounded-full border-2 border-white shadow-sm flex-shrink-0 cursor-pointer hover:scale-110 transition-transform"

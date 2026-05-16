@@ -6,6 +6,7 @@ import { CreateProjectDocumentDto } from './dto/create-project-document.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDocumentDto } from './dto/update-project-document.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { UpdateWorkspaceLayoutDto } from './dto/update-workspace-layout.dto';
 
 type LegacyDocument = Record<string, unknown>;
 type ProjectWithDocuments = Project & {
@@ -308,6 +309,58 @@ export class ProjectsService {
     });
 
     return this.attachDocuments(project);
+  }
+
+  async getWorkspaceLayout(projectId: string, ownerId: string) {
+    await this.findOwnedProjectOrThrow(projectId, ownerId);
+
+    const preference = await this.prisma.workspaceLayoutPreference.findUnique({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: ownerId,
+        },
+      },
+    });
+
+    return {
+      projectId,
+      userId: ownerId,
+      state: preference?.state ?? null,
+      updatedAt: preference?.updatedAt.toISOString() ?? null,
+    };
+  }
+
+  async updateWorkspaceLayout(
+    projectId: string,
+    ownerId: string,
+    dto: UpdateWorkspaceLayoutDto,
+  ) {
+    await this.findOwnedProjectOrThrow(projectId, ownerId);
+
+    const preference = await this.prisma.workspaceLayoutPreference.upsert({
+      where: {
+        projectId_userId: {
+          projectId,
+          userId: ownerId,
+        },
+      },
+      create: {
+        projectId,
+        userId: ownerId,
+        state: this.toInputJson(dto.state),
+      },
+      update: {
+        state: this.toInputJson(dto.state),
+      },
+    });
+
+    return {
+      projectId,
+      userId: ownerId,
+      state: preference.state,
+      updatedAt: preference.updatedAt.toISOString(),
+    };
   }
 
   async updateProjectSchemaJsonInTransaction(

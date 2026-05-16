@@ -39,6 +39,14 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+  --canvas-background: #f9fafb;
+  --canvas-background-dark: #11111b;
+  --canvas-grid-dot: #d1d5db;
+  --canvas-grid-dot-dark: #313244;
+  --canvas-grid-base-step: 20px;
+  --canvas-zoom-background: rgb(255 255 255 / 0.9);
+  --canvas-zoom-border: #e5e7eb;
+  --canvas-zoom-foreground: #4b5563;
 }
 
 .dark {
@@ -76,6 +84,11 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
+  --canvas-background: var(--canvas-background-dark);
+  --canvas-grid-dot: var(--canvas-grid-dot-dark);
+  --canvas-zoom-background: rgb(30 30 46 / 0.9);
+  --canvas-zoom-border: #45475a;
+  --canvas-zoom-foreground: #a6adc8;
 }
 
 @theme inline {
@@ -225,6 +238,18 @@
   overflow-y: overlay;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.canvas-surface {
+  background-color: var(--canvas-background);
+}
+
+.canvas-surface[data-canvas-theme='dark'] {
+  --canvas-background: var(--canvas-background-dark);
+  --canvas-grid-dot: var(--canvas-grid-dot-dark);
+  --canvas-zoom-background: rgb(30 30 46 / 0.9);
+  --canvas-zoom-border: #45475a;
+  --canvas-zoom-foreground: #a6adc8;
 }
 
 .diagram-grid {

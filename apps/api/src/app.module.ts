@@ -9,6 +9,7 @@ import { MigrationsModule } from './migrations/migrations.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProjectsModule } from './projects/projects.module';
 import { RevisionsModule } from './revisions/revisions.module';
+import { SemanticModelModule } from './semantic-model/semantic-model.module';
 import { UsersModule } from './users/users.module';
 import { ViewsModule } from './views/views.module';
 import { AppController } from './app.controller';
@@ -24,6 +25,7 @@ import { AppController } from './app.controller';
     AuthModule,
     ProjectsModule,
     RevisionsModule,
+    SemanticModelModule,
     ViewsModule,
     MigrationsModule,
   ],

@@ -1,11 +1,22 @@
 import { Code2 } from 'lucide-react';
 import { CODE_MODE_SNIPPET } from '../model/workspace-mock-data';
-import type { WorkspaceTab, WorkspaceWindowId } from '../model/types';
+import type {
+  WorkspaceCanvasViewport,
+  WorkspaceCanvasViewportId,
+  WorkspaceSelection,
+  WorkspaceTab,
+  WorkspaceWindowId,
+} from '../model/types';
 import type { ProjectData } from '@/shared/types/project';
 import { AiAssistantPane } from './WorkspaceAssistantPane';
 import { ClassDiagramCanvas, DiagramCanvas } from './WorkspaceDiagramCanvases';
-import { EventsPane, GenericPane, PropertiesPane, SemanticList, TablesPane } from './WorkspaceInspectorPanes';
+import { EventsPane, GenericPane, SemanticList } from './WorkspaceInspectorPanes';
+import { WorkspaceDomainsPane } from './WorkspaceDomainsPane';
+import { WorkspaceEntitiesPane } from './WorkspaceEntitiesPane';
+import { ProjectTreePane } from './WorkspaceProjectTreePane';
+import { PropertiesPane } from './WorkspacePropertiesPane';
 import { ProjectErDiagramCanvas } from './WorkspaceProjectCanvas';
+import { WorkspaceTablesPane } from './WorkspaceTablesPane';
 
 export function TabContent({
   tab,
@@ -13,24 +24,62 @@ export function TabContent({
   project,
   projectLoading = false,
   projectError = null,
+  selection,
+  canvasViewports,
+  viewportRestoreKey,
+  onProjectChange,
+  onSelectionChange,
+  onCanvasViewportChange,
 }: {
   tab: WorkspaceTab;
   windowId: WorkspaceWindowId;
   project?: ProjectData;
   projectLoading?: boolean;
   projectError?: string | null;
+  selection: WorkspaceSelection | null;
+  canvasViewports: Partial<Record<WorkspaceCanvasViewportId, WorkspaceCanvasViewport>>;
+  viewportRestoreKey: string | number;
+  onProjectChange: (project: ProjectData) => void;
+  onSelectionChange: (selection: WorkspaceSelection | null) => void;
+  onCanvasViewportChange: (viewId: WorkspaceCanvasViewportId, viewport: WorkspaceCanvasViewport) => void;
 }) {
   if (projectLoading) return <PaneMessage>Loading project workspace...</PaneMessage>;
   if (projectError) return <PaneMessage>{projectError}</PaneMessage>;
 
-  if (tab.type === 'erDiagram') return project ? <ProjectErDiagramCanvas project={project} /> : <DiagramCanvas />;
-  if (tab.type === 'classDiagram') return <ClassDiagramCanvas />;
+  if (tab.type === 'file') return <ProjectTreePane project={project} selection={selection} onSelectionChange={onSelectionChange} />;
+  if (tab.type === 'erDiagram') {
+    return project ? (
+      <ProjectErDiagramCanvas
+        project={project}
+        initialViewport={canvasViewports.erDiagram}
+        viewportRestoreKey={`erd-${viewportRestoreKey}`}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onViewportChange={(viewport) => onCanvasViewportChange('erDiagram', viewport)}
+      />
+    ) : <DiagramCanvas />;
+  }
+  if (tab.type === 'classDiagram') {
+    return (
+      <ClassDiagramCanvas
+        project={project}
+        selection={selection}
+        initialViewport={canvasViewports.classDiagram}
+        viewportRestoreKey={`class-${viewportRestoreKey}`}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onViewportChange={(viewport) => onCanvasViewportChange('classDiagram', viewport)}
+      />
+    );
+  }
   if (tab.type === 'aiAssistant') return <AiAssistantPane />;
   if (tab.type === 'codeMode') return <CodeModePane />;
-  if (tab.type === 'tables') return <TablesPane project={project} />;
-  if (tab.type === 'properties') return <PropertiesPane />;
+  if (tab.type === 'tables') return <WorkspaceTablesPane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} />;
+  if (tab.type === 'properties') return <PropertiesPane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} />;
   if (tab.type === 'events') return <EventsPane />;
-  if (tab.type === 'schemas' || tab.type === 'domains' || tab.type === 'entities') return <SemanticList type={tab.type} project={project} />;
+  if (tab.type === 'domains') return <WorkspaceDomainsPane project={project} selection={selection} onProjectChange={onProjectChange} />;
+  if (tab.type === 'entities') return <WorkspaceEntitiesPane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} />;
+  if (tab.type === 'schemas') return <SemanticList type={tab.type} project={project} selection={selection} onSelectionChange={onSelectionChange} />;
 
   return <GenericPane tab={tab} windowId={windowId} />;
 }

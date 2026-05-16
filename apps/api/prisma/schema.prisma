@@ -20,25 +20,210 @@ model User {
   revisions    ProjectRevision[]
   sqlViews     ProjectSqlView[]
   migrations   ProjectMigration[]
+  workspaceLayouts WorkspaceLayoutPreference[]
 }
 
 model Project {
-  id          String            @id @default(uuid())
-  name        String
-  description String?
-  schemaJson  Json
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  deletedAt   DateTime?
-  ownerId     String
-  owner       User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  documents   ProjectDocument[]
-  revisions   ProjectRevision[]
-  sqlViews    ProjectSqlView[]
-  migrations  ProjectMigration[]
+  id              String            @id @default(uuid())
+  name            String
+  description     String?
+  schemaJson      Json
+  modelVersion    Int               @default(1)
+  ontologyVersion String            @default("2026-05-13")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  deletedAt       DateTime?
+  ownerId         String
+  owner           User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents       ProjectDocument[]
+  revisions       ProjectRevision[]
+  sqlViews        ProjectSqlView[]
+  migrations      ProjectMigration[]
+  objectTypes     ObjectType[]
+  relationTypes   RelationType[]
+  modelObjects    ModelObject[]
+  modelRelations  ModelRelation[]
+  modelViews      ModelView[]
+  workspaceLayouts WorkspaceLayoutPreference[]
 
   @@index([ownerId])
   @@index([updatedAt])
+}
+
+model WorkspaceLayoutPreference {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state     Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, userId])
+  @@index([userId, updatedAt])
+  @@index([projectId])
+}
+
+model ObjectType {
+  id                   String   @id @default(uuid())
+  projectId            String?
+  project              Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key                  String
+  name                 String
+  category             String?
+  icon                 String?
+  color                String?
+  schema               Json     @default("{}")
+  allowedParentTypes   Json?
+  allowedRelationTypes Json?
+  scope                String   @default("system")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([projectId, key])
+  @@index([key])
+  @@index([scope])
+}
+
+model RelationType {
+  id          String   @id @default(uuid())
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key         String
+  name        String
+  sourceType  String?
+  targetType  String?
+  cardinality String?
+  required    Boolean  @default(false)
+  metadata    Json     @default("{}")
+  scope       String   @default("system")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId, key])
+  @@index([key])
+  @@index([sourceType, targetType])
+  @@index([scope])
+}
+
+model ModelObject {
+  id                String          @id @default(uuid())
+  projectId         String
+  project           Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type              String
+  name              String
+  slug              String?
+  description       String?
+  domainId          String?
+  domain            ModelObject?    @relation("ModelObjectDomain", fields: [domainId], references: [id], onDelete: SetNull)
+  domainObjects     ModelObject[]   @relation("ModelObjectDomain")
+  parentId          String?
+  parent            ModelObject?    @relation("ModelObjectParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children          ModelObject[]   @relation("ModelObjectParent")
+  status            String          @default("active")
+  metadata          Json            @default("{}")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deletedAt         DateTime?
+  outgoingRelations ModelRelation[] @relation("ModelRelationSource")
+  incomingRelations ModelRelation[] @relation("ModelRelationTarget")
+  viewNodes         ViewNode[]
+
+  @@index([projectId, type])
+  @@index([projectId, parentId])
+  @@index([projectId, domainId])
+  @@index([projectId, slug])
+  @@index([projectId, updatedAt])
+  @@index([deletedAt])
+}
+
+model ModelRelation {
+  id                 String       @id @default(uuid())
+  projectId          String
+  project            Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceObjectId     String
+  sourceObject       ModelObject  @relation("ModelRelationSource", fields: [sourceObjectId], references: [id], onDelete: Cascade)
+  targetObjectId     String
+  targetObject       ModelObject  @relation("ModelRelationTarget", fields: [targetObjectId], references: [id], onDelete: Cascade)
+  type               String
+  direction          String       @default("directed")
+  cardinalitySource  String?
+  cardinalityTarget  String?
+  required           Boolean      @default(false)
+  metadata           Json         @default("{}")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  deletedAt          DateTime?
+  viewEdges          ViewEdge[]
+
+  @@index([projectId, type])
+  @@index([projectId, sourceObjectId])
+  @@index([projectId, targetObjectId])
+  @@index([deletedAt])
+}
+
+model ModelView {
+  id          String     @id @default(uuid())
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type        String
+  name        String
+  description String?
+  scope       Json       @default("{}")
+  filters     Json       @default("{}")
+  settings    Json       @default("{}")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+  nodes       ViewNode[]
+  edges       ViewEdge[]
+
+  @@index([projectId, type])
+  @@index([projectId, updatedAt])
+  @@index([deletedAt])
+}
+
+model ViewNode {
+  id              String     @id @default(uuid())
+  viewId          String
+  view            ModelView  @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  objectId        String
+  object          ModelObject @relation(fields: [objectId], references: [id], onDelete: Cascade)
+  x               Float      @default(0)
+  y               Float      @default(0)
+  width           Float?
+  height          Float?
+  collapsed       Boolean    @default(false)
+  visible         Boolean    @default(true)
+  style           Json       @default("{}")
+  settings        Json       @default("{}")
+  sourceViewEdges ViewEdge[] @relation("ViewEdgeSource")
+  targetViewEdges ViewEdge[] @relation("ViewEdgeTarget")
+
+  @@index([viewId, objectId])
+  @@index([objectId])
+}
+
+model ViewEdge {
+  id                 String         @id @default(uuid())
+  viewId             String
+  view               ModelView      @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  relationId         String?
+  relation           ModelRelation? @relation(fields: [relationId], references: [id], onDelete: SetNull)
+  sourceViewNodeId   String
+  sourceViewNode     ViewNode       @relation("ViewEdgeSource", fields: [sourceViewNodeId], references: [id], onDelete: Cascade)
+  targetViewNodeId   String
+  targetViewNode     ViewNode       @relation("ViewEdgeTarget", fields: [targetViewNodeId], references: [id], onDelete: Cascade)
+  isModelRelation    Boolean        @default(true)
+  routing            Json?
+  visible            Boolean        @default(true)
+  style              Json           @default("{}")
+
+  @@index([viewId])
+  @@index([relationId])
+  @@index([sourceViewNodeId])
+  @@index([targetViewNodeId])
 }
 
 model ProjectDocument {

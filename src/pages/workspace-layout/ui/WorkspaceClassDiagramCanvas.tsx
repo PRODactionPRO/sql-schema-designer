@@ -1,0 +1,349 @@
+import { useMemo } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
+import { Copy, GitBranch, LayoutGrid, Maximize2, Plus, Rows3, Trash2 } from 'lucide-react';
+import type { ClassDiagramProjectDocument, ProjectData } from '@/shared/types/project';
+import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
+import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
+import { ContextMenu } from '@/shared/ui/ContextMenu';
+import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
+import { useContextMenu } from '@/shared/ui/useContextMenu';
+import {
+  CLASS_CANVAS_WORLD_SIZE,
+  getClassDiagramBounds,
+  getClassEntityKindMeta,
+  getClassRelationPath,
+} from '../model/class-diagram-view-utils';
+import type { WorkspaceSelection } from '../model/types';
+import { useWorkspaceClassDiagramCanvas } from '../model/useWorkspaceClassDiagramCanvas';
+import { withClassDiagram } from '../model/workspace-project-utils';
+import { ClassEntityCard } from './WorkspaceClassEntityCard';
+import { WorkspaceFloatingCanvasToolbar } from './WorkspaceFloatingCanvasToolbar';
+import { MockClassDiagramCanvas } from './WorkspaceMockDiagramCanvases';
+
+export function ClassDiagramCanvas({
+  project,
+  selection,
+  initialViewport,
+  viewportRestoreKey,
+  onProjectChange,
+  onSelectionChange,
+  onViewportChange,
+}: {
+  project?: ProjectData;
+  selection: WorkspaceSelection | null;
+  initialViewport?: CanvasViewport;
+  viewportRestoreKey?: string | number;
+  onProjectChange?: (project: ProjectData) => void;
+  onSelectionChange?: (selection: WorkspaceSelection | null) => void;
+  onViewportChange?: (viewport: CanvasViewport) => void;
+}) {
+  const document = project?.documents.find((item): item is ClassDiagramProjectDocument => item.type === 'class-diagram');
+
+  if (!project || !document?.classDiagram) return <MockClassDiagramCanvas />;
+
+  return (
+    <ProjectClassDiagramCanvas
+      project={project}
+      sourceDiagram={document.classDiagram}
+      selection={selection}
+      initialViewport={initialViewport}
+      viewportRestoreKey={viewportRestoreKey}
+      onProjectChange={onProjectChange}
+      onSelectionChange={onSelectionChange}
+      onViewportChange={onViewportChange}
+    />
+  );
+}
+
+function ProjectClassDiagramCanvas({
+  project,
+  sourceDiagram,
+  selection,
+  initialViewport,
+  viewportRestoreKey,
+  onProjectChange,
+  onSelectionChange,
+  onViewportChange,
+}: {
+  project: ProjectData;
+  sourceDiagram: ClassDiagramProjectDocument['classDiagram'];
+  selection: WorkspaceSelection | null;
+  initialViewport?: CanvasViewport;
+  viewportRestoreKey?: string | number;
+  onProjectChange?: (project: ProjectData) => void;
+  onSelectionChange?: (selection: WorkspaceSelection | null) => void;
+  onViewportChange?: (viewport: CanvasViewport) => void;
+}) {
+  const canvas = useWorkspaceClassDiagramCanvas(sourceDiagram, {
+    projectId: project.id,
+    semanticBinding: project.semantic?.classDiagram,
+    initialViewport,
+    viewportRestoreKey,
+    onViewportChange,
+    onCommit: (diagram) => onProjectChange?.(withClassDiagram(project, diagram)),
+  });
+  const diagram = canvas.diagram;
+  const selectedParentId = selection?.sourceView === 'classDiagram' ? selection.parentId : undefined;
+  const selectedClassId = selection?.sourceView === 'classDiagram' ? selection.id : undefined;
+  const domainColorById = useMemo(() => new Map(diagram.domains.map((domain) => [domain.id, domain.color])), [diagram.domains]);
+  const classById = useMemo(() => new Map(diagram.classes.map((entity) => [entity.id, entity])), [diagram.classes]);
+  const bounds = getClassDiagramBounds(diagram.classes);
+  const selectedRelationId = selection?.sourceView === 'classDiagram' && selection.kind === 'relation' ? selection.id : undefined;
+  const contextMenu = useContextMenu();
+  const boxSelection = useCanvasBoxSelection({
+    screenToWorld: canvas.screenToWorld,
+    onSelect: (rect) => {
+      const ids = canvas.selectClassesInRect(rect);
+      onSelectionChange?.(ids[0] ? { kind: 'class', id: ids[0], sourceView: 'classDiagram' } : null);
+    },
+  });
+
+  const handleCanvasMouseDown = (event: ReactMouseEvent) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-class-card-id]') || target.closest('[data-class-relation-id]')) return;
+
+    contextMenu.closeContextMenu();
+    if (!event.shiftKey) {
+      canvas.clearClassSelection();
+      onSelectionChange?.(null);
+    }
+    boxSelection.startSelection(event);
+  };
+
+  const openCanvasContextMenu = (event: ReactMouseEvent) => {
+    const worldPoint = canvas.screenToWorld(event.nativeEvent) ?? { x: 160, y: 140 };
+    contextMenu.openContextMenu(event, [
+      {
+        id: 'create-class',
+        label: 'Create class',
+        icon: <Plus className="size-3.5" />,
+        onSelect: () => canvas.addClassEntity('class', worldPoint),
+      },
+      {
+        id: 'create-interface',
+        label: 'Create interface',
+        icon: <Rows3 className="size-3.5" />,
+        onSelect: () => canvas.addClassEntity('interface', worldPoint),
+      },
+      {
+        id: 'create-enum',
+        label: 'Create enum',
+        icon: <Rows3 className="size-3.5" />,
+        onSelect: () => canvas.addClassEntity('enum', worldPoint),
+      },
+      {
+        id: 'auto-layout',
+        label: 'Auto-layout',
+        icon: <LayoutGrid className="size-3.5" />,
+        separatorBefore: true,
+        onSelect: canvas.autoLayout,
+      },
+      {
+        id: 'zoom-to-fit',
+        label: 'Zoom to fit',
+        icon: <Maximize2 className="size-3.5" />,
+        onSelect: () => canvas.zoomToBounds(bounds),
+      },
+    ]);
+  };
+
+  const openEntityContextMenu = (event: ReactMouseEvent, classId: string) => {
+    onSelectionChange?.({ kind: 'class', id: classId, sourceView: 'classDiagram' });
+    canvas.clearClassSelection();
+    contextMenu.openContextMenu(event, [
+      {
+        id: 'add-attribute',
+        label: 'Add attribute',
+        icon: <Plus className="size-3.5" />,
+        onSelect: () => canvas.addAttribute(classId),
+      },
+      {
+        id: 'add-method',
+        label: 'Add method',
+        icon: <Plus className="size-3.5" />,
+        onSelect: () => canvas.addMethod(classId),
+      },
+      {
+        id: 'duplicate-class',
+        label: 'Duplicate',
+        icon: <Copy className="size-3.5" />,
+        separatorBefore: true,
+        onSelect: () => canvas.duplicateClassEntity(classId),
+      },
+      {
+        id: 'delete-class',
+        label: 'Delete class',
+        icon: <Trash2 className="size-3.5" />,
+        destructive: true,
+        separatorBefore: true,
+        onSelect: () => {
+          canvas.deleteClassEntity(classId);
+          onSelectionChange?.(null);
+        },
+      },
+    ]);
+  };
+
+  const openMemberContextMenu = (
+    event: ReactMouseEvent,
+    classId: string,
+    memberId: string,
+    kind: 'classAttribute' | 'classMethod',
+  ) => {
+    onSelectionChange?.({ kind, id: memberId, parentId: classId, sourceView: 'classDiagram' });
+    contextMenu.openContextMenu(event, [
+      {
+        id: kind === 'classAttribute' ? 'add-attribute' : 'add-method',
+        label: kind === 'classAttribute' ? 'Add attribute' : 'Add method',
+        icon: <Plus className="size-3.5" />,
+        onSelect: () => {
+          if (kind === 'classAttribute') canvas.addAttribute(classId);
+          else canvas.addMethod(classId);
+        },
+      },
+    ]);
+  };
+
+  const openRelationContextMenu = (event: ReactMouseEvent, relationId: string) => {
+    onSelectionChange?.({ kind: 'relation', id: relationId, sourceView: 'classDiagram' });
+    contextMenu.openContextMenu(event, [
+      {
+        id: 'select-relation',
+        label: 'Open relation properties',
+        icon: <GitBranch className="size-3.5" />,
+        onSelect: () => onSelectionChange?.({ kind: 'relation', id: relationId, sourceView: 'classDiagram' }),
+      },
+      {
+        id: 'delete-relation',
+        label: 'Delete relation',
+        icon: <Trash2 className="size-3.5" />,
+        destructive: true,
+        separatorBefore: true,
+        onSelect: () => {
+          canvas.deleteClassRelation(relationId);
+          onSelectionChange?.(null);
+        },
+      },
+    ]);
+  };
+
+  if (diagram.classes.length === 0) {
+    return (
+      <div
+        ref={canvas.containerRef}
+        className="canvas-surface relative flex h-full items-center justify-center overflow-hidden"
+        onContextMenu={openCanvasContextMenu}
+        onMouseDown={handleCanvasMouseDown}
+      >
+        <CanvasGridBackground pan={canvas.pan} zoom={canvas.zoom} />
+        <p className="relative text-xs font-medium text-slate-400">No class diagram objects yet</p>
+        <ContextMenu menu={contextMenu.menu} onClose={contextMenu.closeContextMenu} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={canvas.containerRef}
+      className="canvas-surface relative h-full overflow-hidden"
+      onContextMenu={openCanvasContextMenu}
+      onMouseDown={handleCanvasMouseDown}
+      style={{ cursor: canvas.isPanning ? 'grabbing' : boxSelection.isSelecting ? 'crosshair' : undefined }}
+    >
+      <CanvasGridBackground pan={canvas.pan} zoom={canvas.zoom} />
+      <div
+        className="absolute left-0 top-0 origin-top-left"
+        style={{ transform: `translate(${canvas.pan.x}px, ${canvas.pan.y}px) scale(${canvas.zoom})` }}
+      >
+        <svg
+          className="absolute left-0 top-0 text-[#bcc7d5]"
+          width={CLASS_CANVAS_WORLD_SIZE}
+          height={CLASS_CANVAS_WORLD_SIZE}
+          style={{ overflow: 'visible' }}
+          aria-hidden="true"
+        >
+          {diagram.relations.map((relation) => {
+            const path = getClassRelationPath(relation, classById);
+            if (!path) return null;
+            const isSelected = selectedRelationId === relation.id;
+            return (
+              <g key={relation.id} data-class-relation-id={relation.id} opacity={selectedRelationId && !isSelected ? 0.35 : 1}>
+                <path
+                  d={path.d}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth="14"
+                  className="cursor-pointer"
+                  onClick={() => onSelectionChange?.({ kind: 'relation', id: relation.id, sourceView: 'classDiagram' })}
+                  onContextMenu={(event) => openRelationContextMenu(event, relation.id)}
+                />
+                <path
+                  d={path.d}
+                  fill="none"
+                  stroke={isSelected ? '#3b82f6' : 'currentColor'}
+                  strokeWidth={isSelected ? '2.6' : '1.6'}
+                  className="pointer-events-none"
+                />
+                {relation.label ? (
+                  <text
+                    x={path.labelX}
+                    y={path.labelY}
+                    className={isSelected ? 'cursor-pointer fill-blue-500 text-[10px] font-semibold' : 'cursor-pointer fill-slate-400 text-[10px] font-medium'}
+                    onClick={() => onSelectionChange?.({ kind: 'relation', id: relation.id, sourceView: 'classDiagram' })}
+                    onContextMenu={(event) => openRelationContextMenu(event, relation.id)}
+                  >
+                    {relation.label}
+                  </text>
+                ) : null}
+              </g>
+            );
+          })}
+        </svg>
+        {diagram.classes.map((entity) => (
+          <ClassEntityCard
+            key={entity.id}
+            entity={entity}
+            accent={entity.color ?? (entity.domainId ? domainColorById.get(entity.domainId) : undefined) ?? getClassEntityKindMeta(entity.kind).color}
+            selected={canvas.selectedClassIds.has(entity.id) || (selectedParentId ? selectedParentId === entity.id : selectedClassId === entity.id)}
+            selectedMemberId={selectedParentId === entity.id ? selectedClassId : undefined}
+            onStartDrag={canvas.startClassDrag}
+            onSelectEntity={(classId) => {
+              canvas.clearClassSelection();
+              onSelectionChange?.({ kind: 'class', id: classId, sourceView: 'classDiagram' });
+            }}
+            onSelectAttribute={(classId, attributeId) => {
+              canvas.clearClassSelection();
+              onSelectionChange?.({ kind: 'classAttribute', id: attributeId, parentId: classId, sourceView: 'classDiagram' });
+            }}
+            onSelectMethod={(classId, methodId) => {
+              canvas.clearClassSelection();
+              onSelectionChange?.({ kind: 'classMethod', id: methodId, parentId: classId, sourceView: 'classDiagram' });
+            }}
+            onEntityContextMenu={openEntityContextMenu}
+            onAttributeContextMenu={(event, classId, attributeId) => openMemberContextMenu(event, classId, attributeId, 'classAttribute')}
+            onMethodContextMenu={(event, classId, methodId) => openMemberContextMenu(event, classId, methodId, 'classMethod')}
+            onAttributeTypeChange={canvas.updateAttributeType}
+            onMethodReturnTypeChange={canvas.updateMethodReturnType}
+            onReorderAttributes={canvas.reorderAttributes}
+            onReorderMethods={canvas.reorderMethods}
+          />
+        ))}
+      </div>
+      <WorkspaceFloatingCanvasToolbar
+        canUndo={canvas.canUndo}
+        canRedo={canvas.canRedo}
+        onUndo={canvas.undo}
+        onRedo={canvas.redo}
+        onZoomToFit={() => canvas.zoomToBounds(bounds)}
+      />
+      <CanvasZoomIndicator>
+        {Math.round(canvas.zoom * 100)}%
+      </CanvasZoomIndicator>
+      {boxSelection.rectStyle ? (
+        <div className="pointer-events-none fixed z-40 border-2 border-blue-400 bg-blue-400/10" style={boxSelection.rectStyle} />
+      ) : null}
+      <ContextMenu menu={contextMenu.menu} onClose={contextMenu.closeContextMenu} />
+    </div>
+  );
+}

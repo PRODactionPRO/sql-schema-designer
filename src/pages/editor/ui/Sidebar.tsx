@@ -389,6 +389,7 @@ export function Sidebar({
     onAssignDomain,
     onUpdateDomain,
     onDeleteDomain,
+    onReorderDomains,
     handleAddDomain,
   });
 

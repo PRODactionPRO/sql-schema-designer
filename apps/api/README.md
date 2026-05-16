@@ -43,6 +43,7 @@ npm run start:dev
 
 API base URL: `http://localhost:3000/api`
 Swagger UI: `http://localhost:3000/api/docs`
+Scalar API Reference: `http://localhost:3000/api/reference`
 
 ## Main endpoints
 

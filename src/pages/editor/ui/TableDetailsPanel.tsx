@@ -77,6 +77,7 @@ interface TableDetailsPanelProps {
   selectedTableIds: Set<string>;
   onToggleCollapse: () => void;
   darkMode?: boolean;
+  hideHeader?: boolean;
   onUpdateTableName: (name: string) => void;
   onUpdateTableDescription: (description: string) => void;
   onUpdateTableNotes?: (notes: string) => void;
@@ -133,6 +134,7 @@ export function TableDetailsPanel({
   onSelectRevision,
   onDeleteRevision,
   darkMode,
+  hideHeader = false,
   isEnumTable = false,
   enumType = null,
   enumUsageItems = [],
@@ -207,7 +209,7 @@ export function TableDetailsPanel({
       <PanelRightClose className="size-3.5" />
     </PanelIconButton>
   );
-  const renderPropertiesHeader = () => (
+  const renderPropertiesHeader = () => hideHeader ? null : (
     <PanelHeader darkMode={dk}>
       <div className="flex items-center gap-1">
         <PanelTabButton active={activePanelTab === 'properties'} onClick={() => setActivePanelTab('properties')} darkMode={dk}>
