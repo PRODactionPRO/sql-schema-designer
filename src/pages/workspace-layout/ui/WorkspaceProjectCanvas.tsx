@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { Canvas } from '@/pages/editor/ui/Canvas';
+import {
+  createObjectInViewCommand,
+  deleteObjectFromViewCommand,
+  moveViewNodeCommand,
+} from '@/shared/api/semantic-model';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import type { Field, JsonSchemaDocument, JsonSchemaFieldType, Relation } from '@/shared/types/schema';
 import type { ProjectData } from '@/shared/types/project';
@@ -18,6 +23,9 @@ import {
   isJsonSchemaTableId,
   jsonSchemaToTable,
   nextWorkspaceId,
+  getObjectBinding,
+  saveObjectMetadata,
+  updateProjectBinding,
   withSchema,
 } from '../model/workspace-project-utils';
 import { WorkspaceFloatingCanvasToolbar } from './WorkspaceFloatingCanvasToolbar';
@@ -61,6 +69,7 @@ export function ProjectErDiagramCanvas({
 }) {
   const canvas = useWorkspaceErdCanvas(project);
   const viewportRef = useRef<{ pan: { x: number; y: number }; zoom: number; width: number; height: number } | null>(null);
+  const projectedObjectCreatesRef = useRef(new Set<string>());
   const jsonSchemas = useMemo(() => project.schema.jsonSchemas ?? [], [project.schema.jsonSchemas]);
   const projectedEnumTables = useMemo(() => (
     project.schema.enums.map((enumType, index) => enumToTable(enumType, canvas.domains, index))
@@ -121,6 +130,102 @@ export function ProjectErDiagramCanvas({
     onProjectChange?.(withSchema(project, schema));
   }, [onProjectChange, project]);
 
+  const createObjectTableInView = useCallback((
+    legacyId: string,
+    type: 'enum' | 'json_schema',
+    name: string,
+    metadata: Record<string, unknown>,
+    position: { x: number; y: number },
+    nextProject: ProjectData,
+  ) => {
+    const viewId = project.semantic?.erd?.viewId;
+    if (!viewId) return;
+
+    void createObjectInViewCommand(project.id, {
+      viewId,
+      type,
+      name,
+      metadata,
+      position,
+    }).then(({ object, node }) => {
+      onProjectChange?.(updateProjectBinding(nextProject, legacyId, object.id, metadata, node.id));
+    }).catch((error) => {
+      console.error('[workspace] Failed to create semantic table object', error);
+    });
+  }, [onProjectChange, project.id, project.semantic?.erd?.viewId]);
+
+  const saveProjectedObject = useCallback((legacyId: string, metadata: unknown) => {
+    const binding = getObjectBinding(project, legacyId);
+    if (binding) {
+      saveObjectMetadata(project, legacyId, metadata);
+      return;
+    }
+
+    const viewId = project.semantic?.erd?.viewId;
+    if (!viewId || projectedObjectCreatesRef.current.has(legacyId)) return;
+
+    const enumType = project.schema.enums.find((item) => item.id === legacyId);
+    const jsonSchema = (project.schema.jsonSchemas ?? []).find((item) => item.id === legacyId);
+    const source = enumType ?? jsonSchema;
+    if (!source) return;
+
+    const objectType = enumType ? 'enum' : 'json_schema';
+    const position = source.position ?? (
+      enumType
+        ? { x: 260 + project.schema.enums.findIndex((item) => item.id === legacyId) * 40, y: 140 + project.schema.enums.findIndex((item) => item.id === legacyId) * 40 }
+        : { x: 320 + (project.schema.jsonSchemas ?? []).findIndex((item) => item.id === legacyId) * 40, y: 220 + (project.schema.jsonSchemas ?? []).findIndex((item) => item.id === legacyId) * 40 }
+    );
+
+    projectedObjectCreatesRef.current.add(legacyId);
+    void createObjectInViewCommand(project.id, {
+      viewId,
+      type: objectType,
+      name: source.name,
+      metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? metadata as Record<string, unknown>
+        : { ...source },
+      position,
+    }).then(({ object, node }) => {
+      onProjectChange?.(updateProjectBinding(project, legacyId, object.id, object.metadata, node.id));
+    }).catch((error) => {
+      console.error('[workspace] Failed to create projected semantic object', error);
+    }).finally(() => {
+      projectedObjectCreatesRef.current.delete(legacyId);
+    });
+  }, [onProjectChange, project]);
+
+  const saveProjectedObjectPosition = useCallback((legacyId: string, position: { x: number; y: number }) => {
+    const binding = getObjectBinding(project, legacyId);
+    const viewId = project.semantic?.erd?.viewId;
+    if (!binding?.viewNodeId || !viewId) {
+      const enumType = project.schema.enums.find((item) => item.id === legacyId);
+      const jsonSchema = (project.schema.jsonSchemas ?? []).find((item) => item.id === legacyId);
+      const source = enumType ?? jsonSchema;
+      if (source) saveProjectedObject(legacyId, { ...source, position });
+      return;
+    }
+
+    void moveViewNodeCommand(project.id, {
+      viewId,
+      nodeId: binding.viewNodeId,
+      ...position,
+    }).catch((error) => {
+      console.error('[workspace] Failed to save semantic table position', error);
+    });
+  }, [project, saveProjectedObject]);
+
+  const deleteProjectedObject = useCallback((legacyId: string) => {
+    const binding = getObjectBinding(project, legacyId);
+    if (!binding) return;
+
+    void deleteObjectFromViewCommand(project.id, {
+      objectId: binding.objectId,
+      viewId: project.semantic?.erd?.viewId,
+    }).catch((error) => {
+      console.error('[workspace] Failed to delete semantic table object', error);
+    });
+  }, [project]);
+
   const commitSchemaWithCanvasSnapshot = useCallback((schemaUpdates: Partial<ProjectData['schema']> = {}) => {
     if (!onProjectChange) return;
     const snapshot = canvas.getSnapshot();
@@ -134,21 +239,31 @@ export function ProjectErDiagramCanvas({
 
   const createEnumTable = useCallback((position?: { x: number; y: number }) => {
     const name = getUniqueName(project.schema.enums.map((item) => item.name), 'NewEnum');
-    commitSchema({
+    const enumType = {
+      id: nextWorkspaceId('enum'),
+      name,
+      values: ['value_1', 'value_2'],
+      storageStrategy: 'postgres_enum' as const,
+      position,
+    };
+    const nextProject = withSchema(project, {
       ...project.schema,
       enums: [
         ...project.schema.enums,
-        {
-          id: nextWorkspaceId('enum'),
-          name,
-          values: ['value_1', 'value_2'],
-          storageStrategy: 'postgres_enum',
-          position,
-        },
+        enumType,
       ],
     });
+    onProjectChange?.(nextProject);
+    createObjectTableInView(
+      enumType.id,
+      'enum',
+      enumType.name,
+      { ...enumType },
+      enumType.position ?? { x: 260 + project.schema.enums.length * 40, y: 140 + project.schema.enums.length * 40 },
+      nextProject,
+    );
     toast.success(`Created ENAM "${name}"`);
-  }, [commitSchema, project.schema]);
+  }, [createObjectTableInView, onProjectChange, project]);
 
   const createJsonSchemaTable = useCallback((position?: { x: number; y: number }) => {
     const name = getUniqueName(jsonSchemas.map((item) => item.name), 'NewJsonSchema');
@@ -166,36 +281,59 @@ export function ProjectErDiagramCanvas({
       ],
       position,
     };
-    commitSchema({
+    const nextProject = withSchema(project, {
       ...project.schema,
       jsonSchemas: [...jsonSchemas, doc],
     });
+    onProjectChange?.(nextProject);
+    createObjectTableInView(
+      doc.id,
+      'json_schema',
+      doc.name,
+      { ...doc },
+      doc.position ?? { x: 320 + jsonSchemas.length * 40, y: 220 + jsonSchemas.length * 40 },
+      nextProject,
+    );
     toast.success(`Created JSON Schema "${name}"`);
-  }, [commitSchema, jsonSchemas, project.schema]);
+  }, [createObjectTableInView, jsonSchemas, onProjectChange, project]);
 
   const updateProjectedTablePosition = useCallback((tableId: string, position: { x: number; y: number }) => {
     if (isEnumTableId(tableId)) {
       const enumId = getEnumIdFromTableId(tableId);
+      let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
       commitSchema({
         ...project.schema,
-        enums: project.schema.enums.map((enumType) => (
-          enumType.id === enumId ? { ...enumType, position } : enumType
-        )),
+        enums: project.schema.enums.map((enumType) => {
+          if (enumType.id !== enumId) return enumType;
+          updatedEnum = { ...enumType, position };
+          return updatedEnum;
+        }),
       });
+      if (updatedEnum) {
+        saveProjectedObject(enumId, updatedEnum);
+        saveProjectedObjectPosition(enumId, position);
+      }
       return true;
     }
     if (isJsonSchemaTableId(tableId)) {
       const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
+      let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
       commitSchema({
         ...project.schema,
-        jsonSchemas: jsonSchemas.map((doc) => (
-          doc.id === jsonSchemaId ? { ...doc, position } : doc
-        )),
+        jsonSchemas: jsonSchemas.map((doc) => {
+          if (doc.id !== jsonSchemaId) return doc;
+          updatedDocument = { ...doc, position };
+          return updatedDocument;
+        }),
       });
+      if (updatedDocument) {
+        saveProjectedObject(jsonSchemaId, updatedDocument);
+        saveProjectedObjectPosition(jsonSchemaId, position);
+      }
       return true;
     }
     return false;
-  }, [commitSchema, jsonSchemas, project.schema]);
+  }, [commitSchema, jsonSchemas, project.schema, saveProjectedObject, saveProjectedObjectPosition]);
 
   const handleTablePositionChange = useCallback((tableId: string, position: { x: number; y: number }) => {
     if (updateProjectedTablePosition(tableId, position)) return;
@@ -278,7 +416,19 @@ export function ProjectErDiagramCanvas({
       enums: nextEnums,
       jsonSchemas: nextJsonSchemas,
     });
-  }, [canvas, commitSchemaWithCanvasSnapshot, jsonSchemas, project.schema.enums]);
+    nextEnums
+      .filter((enumType) => canvas.selectedTableIds.has(`enum::${enumType.id}`))
+      .forEach((enumType) => {
+        saveProjectedObject(enumType.id, enumType);
+        if (enumType.position) saveProjectedObjectPosition(enumType.id, enumType.position);
+      });
+    nextJsonSchemas
+      .filter((doc) => canvas.selectedTableIds.has(`jsonschema::${doc.id}`))
+      .forEach((doc) => {
+        saveProjectedObject(doc.id, doc);
+        if (doc.position) saveProjectedObjectPosition(doc.id, doc.position);
+      });
+  }, [canvas, commitSchemaWithCanvasSnapshot, jsonSchemas, project.schema.enums, saveProjectedObject, saveProjectedObjectPosition]);
 
   const handleDeleteTables = useCallback((tableIds: string[]) => {
     const enumIds = tableIds.filter(isEnumTableId).map(getEnumIdFromTableId);
@@ -288,6 +438,8 @@ export function ProjectErDiagramCanvas({
     if (regularTableIds.length > 0) {
       canvas.deleteTables(regularTableIds);
     }
+    enumIds.forEach(deleteProjectedObject);
+    jsonSchemaIds.forEach(deleteProjectedObject);
 
     commitSchemaWithCanvasSnapshot({
       enums: enumIds.length > 0
@@ -297,7 +449,7 @@ export function ProjectErDiagramCanvas({
         ? jsonSchemas.filter((doc) => !jsonSchemaIds.includes(doc.id))
         : jsonSchemas,
     });
-  }, [canvas, commitSchemaWithCanvasSnapshot, jsonSchemas, project.schema.enums]);
+  }, [canvas, commitSchemaWithCanvasSnapshot, deleteProjectedObject, jsonSchemas, project.schema.enums]);
 
   const handleAssignDomain = useCallback((domainId: string, tableIds: string[]) => {
     const enumIds = tableIds.filter(isEnumTableId).map(getEnumIdFromTableId);
@@ -308,71 +460,83 @@ export function ProjectErDiagramCanvas({
       canvas.assignDomain(domainId, regularTableIds);
     }
 
-    commitSchemaWithCanvasSnapshot({
-      enums: project.schema.enums.map((enumType) => (
+    const nextEnums = project.schema.enums.map((enumType) => (
         enumIds.includes(enumType.id) ? { ...enumType, domainId } : enumType
-      )),
-      jsonSchemas: jsonSchemas.map((doc) => (
+      ));
+    const nextJsonSchemas = jsonSchemas.map((doc) => (
         jsonSchemaIds.includes(doc.id) ? { ...doc, domainId } : doc
-      )),
+      ));
+
+    commitSchemaWithCanvasSnapshot({
+      enums: nextEnums,
+      jsonSchemas: nextJsonSchemas,
     });
-  }, [canvas, commitSchemaWithCanvasSnapshot, jsonSchemas, project.schema.enums]);
+    nextEnums.filter((enumType) => enumIds.includes(enumType.id)).forEach((enumType) => saveProjectedObject(enumType.id, enumType));
+    nextJsonSchemas.filter((doc) => jsonSchemaIds.includes(doc.id)).forEach((doc) => saveProjectedObject(doc.id, doc));
+  }, [canvas, commitSchemaWithCanvasSnapshot, jsonSchemas, project.schema.enums, saveProjectedObject]);
 
   const handleReorderEnumValue = useCallback((enumTableId: string, fromIndex: number, toIndex: number) => {
     const enumId = getEnumIdFromTableId(enumTableId);
+    let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
     commitSchema({
       ...project.schema,
       enums: project.schema.enums.map((enumType) => {
         if (enumType.id !== enumId) return enumType;
-        return {
+        updatedEnum = {
           ...enumType,
           values: moveArrayItem(enumType.values, fromIndex, toIndex),
           valueComments: enumType.valueComments ? moveArrayItem(enumType.valueComments, fromIndex, toIndex) : enumType.valueComments,
           valueMetadata: enumType.valueMetadata ? moveArrayItem(enumType.valueMetadata, fromIndex, toIndex) : enumType.valueMetadata,
         };
+        return updatedEnum;
       }),
     });
-  }, [commitSchema, project.schema]);
+    if (updatedEnum) saveProjectedObject(enumId, updatedEnum);
+  }, [commitSchema, project.schema, saveProjectedObject]);
 
   const handleJsonSchemaToggleCollapse = useCallback((tableId: string, fieldId: string) => {
     if (!isJsonSchemaTableId(tableId)) return;
     const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
     const nodeId = fieldId.split('::node::')[1];
     if (!nodeId) return;
+    let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
     commitSchema({
       ...project.schema,
-      jsonSchemas: jsonSchemas.map((doc) => (
-        doc.id === jsonSchemaId
-          ? {
+      jsonSchemas: jsonSchemas.map((doc) => {
+        if (doc.id !== jsonSchemaId) return doc;
+        updatedDocument = {
               ...doc,
               nodes: doc.nodes.map((node) => (
                 node.id === nodeId ? { ...node, collapsed: !node.collapsed } : node
               )),
-            }
-          : doc
-      )),
+            };
+        return updatedDocument;
+      }),
     });
-  }, [commitSchema, jsonSchemas, project.schema]);
+    if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
+  }, [commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleJsonSchemaFieldTypeChange = useCallback((tableId: string, fieldId: string, schemaType: string) => {
     if (!isJsonSchemaTableId(tableId)) return;
     const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
     const nodeId = fieldId.split('::node::')[1];
     if (!nodeId) return;
+    let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
     commitSchema({
       ...project.schema,
-      jsonSchemas: jsonSchemas.map((doc) => (
-        doc.id === jsonSchemaId
-          ? {
+      jsonSchemas: jsonSchemas.map((doc) => {
+        if (doc.id !== jsonSchemaId) return doc;
+        updatedDocument = {
               ...doc,
               nodes: doc.nodes.map((node) => (
                 node.id === nodeId ? { ...node, type: schemaType as JsonSchemaFieldType } : node
               )),
-            }
-          : doc
-      )),
+            };
+        return updatedDocument;
+      }),
     });
-  }, [commitSchema, jsonSchemas, project.schema]);
+    if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
+  }, [commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleCopySelection = useCallback(async () => {
     const payload = canvas.exportSelectionForClipboard();
@@ -460,6 +624,7 @@ export function ProjectErDiagramCanvas({
       const enumId = getEnumIdFromTableId(tableId);
       const valueIndex = getEnumValueIndex(fieldId);
       if (valueIndex < 0) return;
+      let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
       commitSchema({
         ...project.schema,
         enums: project.schema.enums.map((enumType) => {
@@ -470,13 +635,15 @@ export function ProjectErDiagramCanvas({
           if (Object.prototype.hasOwnProperty.call(updates, 'comment')) {
             nextComments[valueIndex] = updates.comment?.trim() || undefined;
           }
-          return {
+          updatedEnum = {
             ...enumType,
             values: nextValues,
             valueComments: nextComments,
           };
+          return updatedEnum;
         }),
       });
+      if (updatedEnum) saveProjectedObject(enumId, updatedEnum);
       return;
     }
 
@@ -484,11 +651,12 @@ export function ProjectErDiagramCanvas({
       const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
       const nodeId = fieldId.split('::node::')[1];
       if (!nodeId) return;
+      let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
       commitSchema({
         ...project.schema,
-        jsonSchemas: jsonSchemas.map((doc) => (
-          doc.id === jsonSchemaId
-            ? {
+        jsonSchemas: jsonSchemas.map((doc) => {
+          if (doc.id !== jsonSchemaId) return doc;
+          updatedDocument = {
                 ...doc,
                 nodes: doc.nodes.map((node) => (
                   node.id === nodeId
@@ -501,16 +669,17 @@ export function ProjectErDiagramCanvas({
                       }
                     : node
                 )),
-              }
-            : doc
-        )),
+              };
+          return updatedDocument;
+        }),
       });
+      if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
       return;
     }
 
     canvas.updateField(tableId, fieldId, updates);
     commitCanvasSnapshot();
-  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema]);
+  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleFieldTypeChange = useCallback((tableId: string, fieldId: string, type: Field['type']) => {
     if (isJsonSchemaTableId(tableId)) {
@@ -527,63 +696,71 @@ export function ProjectErDiagramCanvas({
       const enumId = getEnumIdFromTableId(tableId);
       const valueIndex = getEnumValueIndex(fieldId);
       if (valueIndex < 0) return;
+      let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
       commitSchema({
         ...project.schema,
         enums: project.schema.enums.map((enumType) => {
           if (enumType.id !== enumId || valueIndex >= enumType.values.length) return enumType;
-          return {
+          updatedEnum = {
             ...enumType,
             values: enumType.values.filter((_, index) => index !== valueIndex),
             valueComments: enumType.valueComments?.filter((_, index) => index !== valueIndex),
             valueMetadata: enumType.valueMetadata?.filter((_, index) => index !== valueIndex),
           };
+          return updatedEnum;
         }),
       });
+      if (updatedEnum) saveProjectedObject(enumId, updatedEnum);
       return;
     }
     if (isJsonSchemaTableId(tableId)) {
       const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
       const nodeId = fieldId.split('::node::')[1];
       if (!nodeId) return;
+      let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
       commitSchema({
         ...project.schema,
-        jsonSchemas: jsonSchemas.map((doc) => (
-          doc.id === jsonSchemaId
-            ? {
+        jsonSchemas: jsonSchemas.map((doc) => {
+          if (doc.id !== jsonSchemaId) return doc;
+          updatedDocument = {
                 ...doc,
                 nodes: doc.nodes
                   .filter((node) => node.id !== nodeId && node.parentId !== nodeId)
                   .map((node, index) => ({ ...node, order: index })),
-              }
-            : doc
-        )),
+              };
+          return updatedDocument;
+        }),
       });
+      if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
       return;
     }
     canvas.deleteField(tableId, fieldId);
     commitCanvasSnapshot();
-  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema]);
+  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleAddFieldToTable = useCallback((tableId: string) => {
     if (isEnumTableId(tableId)) {
       const enumId = getEnumIdFromTableId(tableId);
+      let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
       commitSchema({
         ...project.schema,
-        enums: project.schema.enums.map((enumType) => (
-          enumType.id === enumId
-            ? { ...enumType, values: [...enumType.values, `value_${enumType.values.length + 1}`] }
-            : enumType
-        )),
+        enums: project.schema.enums.map((enumType) => {
+          if (enumType.id !== enumId) return enumType;
+          updatedEnum = { ...enumType, values: [...enumType.values, `value_${enumType.values.length + 1}`] };
+          return updatedEnum;
+        }),
       });
+      if (updatedEnum) saveProjectedObject(enumId, updatedEnum);
       return;
     }
     if (isJsonSchemaTableId(tableId)) {
       const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
+      let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
       commitSchema({
         ...project.schema,
-        jsonSchemas: jsonSchemas.map((doc) => (
-          doc.id === jsonSchemaId
-            ? {
+        jsonSchemas: jsonSchemas.map((doc) => {
+          if (doc.id !== jsonSchemaId) return doc;
+          updatedDocument = {
                 ...doc,
                 nodes: [
                   ...doc.nodes,
@@ -594,15 +771,16 @@ export function ProjectErDiagramCanvas({
                     order: doc.nodes.length,
                   },
                 ],
-              }
-            : doc
-        )),
+              };
+          return updatedDocument;
+        }),
       });
+      if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
       return;
     }
     canvas.addFieldToTable(tableId);
     commitCanvasSnapshot();
-  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema]);
+  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleCreateRelation = useCallback((fromTableId: string, fromFieldId: string, toTableId: string, toFieldId: string | null) => {
     if (isEnumTableId(fromTableId) || isJsonSchemaTableId(fromTableId)) return;

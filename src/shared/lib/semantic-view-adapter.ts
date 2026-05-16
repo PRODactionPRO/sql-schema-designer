@@ -56,14 +56,15 @@ function getLegacyRelationId(edge: SemanticViewEdge): string | undefined {
 
 function buildViewBinding(
   payload: SemanticViewPayload,
-  objectType: string,
+  objectTypes: string | string[],
 ): ProjectSemanticViewBinding | undefined {
   if (!payload.view) return undefined;
 
+  const allowedObjectTypes = new Set(Array.isArray(objectTypes) ? objectTypes : [objectTypes]);
   const objectsByLegacyId: ProjectSemanticViewBinding['objectsByLegacyId'] = {};
   const relationsByLegacyId: NonNullable<ProjectSemanticViewBinding['relationsByLegacyId']> = {};
   for (const node of payload.view.nodes) {
-    if (node.object.type !== objectType) continue;
+    if (!allowedObjectTypes.has(node.object.type)) continue;
 
     objectsByLegacyId[getLegacyObjectId(node.object)] = {
       objectId: node.object.id,
@@ -136,6 +137,15 @@ function mapEnumObject(object: SemanticModelObject): EnumType {
   };
 }
 
+function mapEnumNode(node: SemanticViewNode): EnumType | null {
+  if (node.object.type !== 'enum') return null;
+
+  return {
+    ...mapEnumObject(node.object),
+    position: { x: node.x, y: node.y },
+  };
+}
+
 function mapJsonSchemaObject(object: SemanticModelObject): JsonSchemaDocument {
   const metadata = getObjectMetadata(object);
   return {
@@ -144,6 +154,15 @@ function mapJsonSchemaObject(object: SemanticModelObject): JsonSchemaDocument {
     name: asString(metadata.name, object.name),
     description: asOptionalString(metadata.description) ?? object.description ?? undefined,
     nodes: Array.isArray(metadata.nodes) ? metadata.nodes as JsonSchemaDocument['nodes'] : [],
+  };
+}
+
+function mapJsonSchemaNode(node: SemanticViewNode): JsonSchemaDocument | null {
+  if (node.object.type !== 'json_schema') return null;
+
+  return {
+    ...mapJsonSchemaObject(node.object),
+    position: { x: node.x, y: node.y },
   };
 }
 
@@ -236,6 +255,14 @@ export function semanticErdViewToProjectSchema(
     const table = mapTableNode(node);
     return table ? [table] : [];
   });
+  const nodeEnums = view.nodes.flatMap((node) => {
+    const enumType = mapEnumNode(node);
+    return enumType ? [enumType] : [];
+  });
+  const nodeJsonSchemas = view.nodes.flatMap((node) => {
+    const jsonSchema = mapJsonSchemaNode(node);
+    return jsonSchema ? [jsonSchema] : [];
+  });
   const relations = view.edges.flatMap((edge) => {
     const relation = mapRelationEdge(edge);
     return relation ? [relation] : [];
@@ -246,8 +273,16 @@ export function semanticErdViewToProjectSchema(
     tables,
     relations,
     domains: context.domains.length > 0 ? context.domains : fallbackSchema.domains,
-    enums: context.enums.length > 0 ? context.enums : fallbackSchema.enums,
-    jsonSchemas: context.jsonSchemas.length > 0 ? context.jsonSchemas : fallbackSchema.jsonSchemas,
+    enums: nodeEnums.length > 0
+      ? nodeEnums
+      : context.enums.length > 0
+        ? context.enums
+        : fallbackSchema.enums,
+    jsonSchemas: nodeJsonSchemas.length > 0
+      ? nodeJsonSchemas
+      : context.jsonSchemas.length > 0
+        ? context.jsonSchemas
+        : fallbackSchema.jsonSchemas,
   });
 }
 
@@ -264,7 +299,7 @@ export function applySemanticErdViewToProject(
     domains: schema.domains,
     semantic: {
       ...project.semantic,
-      erd: buildViewBinding(payload, 'table'),
+      erd: buildViewBinding(payload, ['table', 'enum', 'json_schema']),
       objectsByLegacyId: {
         ...project.semantic?.objectsByLegacyId,
         ...buildObjectBindings(payload),

@@ -99,8 +99,30 @@ describe('semantic view adapter', () => {
       name: 'posts',
       metadata: postsTable,
     });
+    const statusEnumObject = modelObject({
+      id: 'model:project-1:enum:enum-status',
+      type: 'enum',
+      name: 'Status',
+      metadata: {
+        id: 'enum-status',
+        name: 'Status',
+        values: ['draft', 'published'],
+      },
+    });
+    const payloadJsonSchemaObject = modelObject({
+      id: 'model:project-1:json_schema:json-payload',
+      type: 'json_schema',
+      name: 'Payload',
+      metadata: {
+        id: 'json-payload',
+        name: 'Payload',
+        nodes: [{ id: 'json-root', name: 'root', type: 'object', order: 0 }],
+      },
+    });
     const usersNode = viewNode(usersObject, 120, 160);
     const postsNode = viewNode(postsObject, 440, 160);
+    const statusEnumNode = viewNode(statusEnumObject, 760, 160);
+    const payloadJsonSchemaNode = viewNode(payloadJsonSchemaObject, 920, 160);
     const payload: SemanticErdViewPayload = {
       view: {
         id: 'view-1',
@@ -114,7 +136,7 @@ describe('semantic view adapter', () => {
         createdAt: now,
         updatedAt: now,
         deletedAt: null,
-        nodes: [usersNode, postsNode],
+        nodes: [usersNode, postsNode, statusEnumNode, payloadJsonSchemaNode],
         edges: [{
           id: 'edge-1',
           viewId: 'view-1',
@@ -171,6 +193,18 @@ describe('semantic view adapter', () => {
       toFieldId: 'users-id',
       type: '1:N',
     }]);
+    expect(schema.enums[0]).toMatchObject({
+      id: 'enum-status',
+      name: 'Status',
+      values: ['draft', 'published'],
+      position: { x: 760, y: 160 },
+    });
+    expect(schema.jsonSchemas?.[0]).toMatchObject({
+      id: 'json-payload',
+      name: 'Payload',
+      nodes: [{ id: 'json-root', name: 'root', type: 'object', order: 0 }],
+      position: { x: 920, y: 160 },
+    });
   });
 
   it('applies the semantic schema to the workspace project without dropping documents', () => {

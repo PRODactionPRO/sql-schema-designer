@@ -16,8 +16,8 @@ import type {
 import type { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import type { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
 
-const ERD_CONTEXT_OBJECT_TYPES = ['domain', 'enum', 'json_schema'];
-const CLASS_DIAGRAM_CONTEXT_OBJECT_TYPES = ['domain', 'enum', 'json_schema'];
+const ERD_CONTEXT_OBJECT_TYPES = ['domain'];
+const CLASS_DIAGRAM_CONTEXT_OBJECT_TYPES = ['domain'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
