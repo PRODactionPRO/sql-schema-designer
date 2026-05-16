@@ -552,7 +552,12 @@ export function useWorkspaceClassDiagramCanvas(
     if (!source || !target) return null;
 
     const existingRelation = diagramRef.current.relations.find((relation) => (
-      relation.fromClassId === fromClassId && relation.toClassId === toClassId
+      (relation.fromClassId === fromClassId && relation.toClassId === toClassId)
+      || (
+        relation.type === 'association'
+        && relation.fromClassId === toClassId
+        && relation.toClassId === fromClassId
+      )
     ));
     if (existingRelation) return existingRelation;
 

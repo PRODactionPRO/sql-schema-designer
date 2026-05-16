@@ -257,6 +257,34 @@ describe('API critical flow (e2e)', () => {
       semanticRelation.edge.id,
     );
 
+    const semanticDuplicateByFieldsResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        sourceViewNodeId: postsSemantic.node.id,
+        targetViewNodeId: usersSemantic.node.id,
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users-copy',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:N',
+        },
+      });
+
+    expect(semanticDuplicateByFieldsResponse.status).toBe(201);
+    expect(semanticDuplicateByFieldsResponse.body.relation.id).toBe(
+      semanticRelation.relation.id,
+    );
+    expect(semanticDuplicateByFieldsResponse.body.edge.id).toBe(
+      semanticRelation.edge.id,
+    );
+
     const updateSemanticRelationResponse = await request(app.getHttpServer())
       .post(`/api/projects/${projectId}/semantic/commands/update-relation`)
       .set('Authorization', `Bearer ${token}`)

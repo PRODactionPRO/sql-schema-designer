@@ -370,13 +370,22 @@ export class SemanticModelService {
 
     return this.prisma.$transaction(async (tx) => {
       const legacyRelationId = this.getLegacyRelationId(dto.metadata);
-      const existingRelation = legacyRelationId
+      const existingRelationByLegacyId = legacyRelationId
         ? await this.findRelationByLegacyIdInTransaction(
-            tx,
-            projectId,
-            legacyRelationId,
-          )
+          tx,
+          projectId,
+          legacyRelationId,
+        )
         : null;
+      const existingRelation = existingRelationByLegacyId
+        ?? await this.findDuplicateRelationInTransaction(
+          tx,
+          projectId,
+          sourceNode.objectId,
+          targetNode.objectId,
+          dto.type,
+          dto.metadata,
+        );
 
       const relation = existingRelation
         ? await tx.modelRelation.update({
@@ -389,7 +398,11 @@ export class SemanticModelService {
               cardinalitySource: dto.cardinalitySource,
               cardinalityTarget: dto.cardinalityTarget,
               required: dto.required ?? existingRelation.required,
-              metadata: (dto.metadata ?? existingRelation.metadata) as Prisma.InputJsonValue,
+              metadata: (
+                existingRelationByLegacyId
+                  ? dto.metadata ?? existingRelation.metadata
+                  : existingRelation.metadata
+              ) as Prisma.InputJsonValue,
             },
           })
         : await tx.modelRelation.create({
@@ -697,6 +710,24 @@ export class SemanticModelService {
       : undefined;
   }
 
+  private getRelationDuplicateSignature(metadata: unknown) {
+    if (!isRecord(metadata)) return '';
+
+    const signatureKeys = [
+      'fromTableId',
+      'fromFieldId',
+      'toTableId',
+      'toFieldId',
+      'fromClassId',
+      'toClassId',
+      'type',
+    ];
+
+    return signatureKeys
+      .map((key) => `${key}:${typeof metadata[key] === 'string' ? metadata[key] : ''}`)
+      .join('|');
+  }
+
   private async findRelationByLegacyIdInTransaction(
     tx: Pick<Prisma.TransactionClient, 'modelRelation'>,
     projectId: string,
@@ -710,6 +741,30 @@ export class SemanticModelService {
     });
 
     return relations.find((relation) => this.getLegacyRelationId(relation.metadata) === legacyRelationId) ?? null;
+  }
+
+  private async findDuplicateRelationInTransaction(
+    tx: Pick<Prisma.TransactionClient, 'modelRelation'>,
+    projectId: string,
+    sourceObjectId: string,
+    targetObjectId: string,
+    type: string,
+    metadata: unknown,
+  ) {
+    const requestedSignature = this.getRelationDuplicateSignature(metadata);
+    const relations = await tx.modelRelation.findMany({
+      where: {
+        projectId,
+        sourceObjectId,
+        targetObjectId,
+        type,
+        deletedAt: null,
+      },
+    });
+
+    return relations.find((relation) => (
+      this.getRelationDuplicateSignature(relation.metadata) === requestedSignature
+    )) ?? null;
   }
 
   private async findProjectViewNodeOrThrow(

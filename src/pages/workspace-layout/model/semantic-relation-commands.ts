@@ -17,6 +17,35 @@ function relationKey(projectId: string, viewId: string, legacyRelationId: string
   return `${projectId}:${viewId}:${legacyRelationId}`;
 }
 
+function relationSemanticKey(
+  projectId: string,
+  viewId: string,
+  sourceViewNodeId: string,
+  targetViewNodeId: string,
+  type: string,
+  signature: string,
+) {
+  return `${projectId}:${viewId}:${sourceViewNodeId}:${targetViewNodeId}:${type}:${signature}`;
+}
+
+function erdRelationSignature(relation: Relation) {
+  return [
+    relation.fromTableId,
+    relation.fromFieldId,
+    relation.toTableId,
+    relation.toFieldId,
+    relation.type,
+  ].join(':');
+}
+
+function classRelationSignature(relation: ClassRelation) {
+  return [
+    relation.fromClassId,
+    relation.toClassId,
+    relation.type,
+  ].join(':');
+}
+
 function getRelationBinding(
   projectId: string,
   semanticBinding: ProjectSemanticViewBinding | undefined,
@@ -25,6 +54,17 @@ function getRelationBinding(
   if (!semanticBinding?.viewId) return undefined;
   return semanticBinding.relationsByLegacyId?.[legacyRelationId]
     ?? relationBindingCache.get(relationKey(projectId, semanticBinding.viewId, legacyRelationId));
+}
+
+function deleteCachedRelationBinding(key: string, binding?: ProjectSemanticRelationBinding | null) {
+  relationBindingCache.delete(key);
+  if (!binding) return;
+
+  for (const [cacheKey, cachedBinding] of relationBindingCache.entries()) {
+    if (cachedBinding.relationId === binding.relationId) {
+      relationBindingCache.delete(cacheKey);
+    }
+  }
 }
 
 export function createErdRelationInView(
@@ -37,7 +77,20 @@ export function createErdRelationInView(
   if (!semanticBinding?.viewId || !sourceBinding?.viewNodeId || !targetBinding?.viewNodeId) return;
 
   const key = relationKey(projectId, semanticBinding.viewId, relation.id);
-  if (pendingRelationCreates.has(key) || relationBindingCache.has(key)) return;
+  const semanticKey = relationSemanticKey(
+    projectId,
+    semanticBinding.viewId,
+    sourceBinding.viewNodeId,
+    targetBinding.viewNodeId,
+    'references',
+    erdRelationSignature(relation),
+  );
+  if (
+    pendingRelationCreates.has(key)
+    || pendingRelationCreates.has(semanticKey)
+    || relationBindingCache.has(key)
+    || relationBindingCache.has(semanticKey)
+  ) return;
 
   const pending = createRelationInViewCommand(projectId, {
     viewId: semanticBinding.viewId,
@@ -57,6 +110,7 @@ export function createErdRelationInView(
         metadata: modelRelation.metadata,
       };
       relationBindingCache.set(key, binding);
+      relationBindingCache.set(semanticKey, binding);
       return binding;
     })
     .catch((error) => {
@@ -65,9 +119,11 @@ export function createErdRelationInView(
     })
     .finally(() => {
       pendingRelationCreates.delete(key);
+      pendingRelationCreates.delete(semanticKey);
     });
 
   pendingRelationCreates.set(key, pending);
+  pendingRelationCreates.set(semanticKey, pending);
 }
 
 export function createClassRelationInView(
@@ -82,7 +138,20 @@ export function createClassRelationInView(
   if (!semanticBinding?.viewId || !resolvedSourceBinding?.viewNodeId || !resolvedTargetBinding?.viewNodeId) return;
 
   const key = relationKey(projectId, semanticBinding.viewId, relation.id);
-  if (pendingRelationCreates.has(key) || relationBindingCache.has(key)) return;
+  const semanticKey = relationSemanticKey(
+    projectId,
+    semanticBinding.viewId,
+    resolvedSourceBinding.viewNodeId,
+    resolvedTargetBinding.viewNodeId,
+    relation.type,
+    classRelationSignature(relation),
+  );
+  if (
+    pendingRelationCreates.has(key)
+    || pendingRelationCreates.has(semanticKey)
+    || relationBindingCache.has(key)
+    || relationBindingCache.has(semanticKey)
+  ) return;
 
   const pending = createRelationInViewCommand(projectId, {
     viewId: semanticBinding.viewId,
@@ -102,6 +171,7 @@ export function createClassRelationInView(
         metadata: modelRelation.metadata,
       };
       relationBindingCache.set(key, binding);
+      relationBindingCache.set(semanticKey, binding);
       return binding;
     })
     .catch((error) => {
@@ -110,9 +180,11 @@ export function createClassRelationInView(
     })
     .finally(() => {
       pendingRelationCreates.delete(key);
+      pendingRelationCreates.delete(semanticKey);
     });
 
   pendingRelationCreates.set(key, pending);
+  pendingRelationCreates.set(semanticKey, pending);
 }
 
 export function deleteRelationFromSemanticView(
@@ -132,7 +204,7 @@ export function deleteRelationFromSemanticView(
       viewId: semanticBinding.viewId,
     })
       .then(() => {
-        relationBindingCache.delete(key);
+        deleteCachedRelationBinding(key, resolvedBinding);
       })
       .catch((error) => {
         console.error('[workspace] Failed to delete relation', error);
