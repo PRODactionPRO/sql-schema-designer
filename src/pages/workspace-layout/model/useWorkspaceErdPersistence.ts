@@ -1,13 +1,13 @@
 import { useCallback } from 'react';
 import type { RefObject } from 'react';
-import { moveViewNodeCommand, updateObjectCommand } from '@/shared/api/semantic-model';
 import type { ProjectSemanticViewBinding } from '@/shared/types/project';
 import type { Table } from '@/shared/types/schema';
+import {
+  moveSemanticObjectProjection,
+  objectMetadata,
+  updateSemanticObjectProjection,
+} from './semantic-object-commands';
 import type { ErdCanvasSnapshot } from './workspace-erd-canvas-utils';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 export function useWorkspaceErdPersistence({
   projectId,
@@ -24,21 +24,20 @@ export function useWorkspaceErdPersistence({
     const objectBinding = semanticBinding?.objectsByLegacyId[table.id];
     if (!objectBinding) return;
 
-    const baseMetadata = isRecord(objectBinding.metadata) ? objectBinding.metadata : {};
+    const baseMetadata = objectMetadata(objectBinding.metadata);
     const metadata = {
       ...baseMetadata,
       ...table,
       position: table.position,
       fields: table.fields,
     };
-    void updateObjectCommand(projectId, {
-      objectId: objectBinding.objectId,
+    updateSemanticObjectProjection({
+      projectId,
+      binding: objectBinding,
       name: table.name,
       description: table.description,
       domainId: table.domainId,
       metadata,
-    }).catch((error) => {
-      console.error('[workspace] Failed to save table metadata', error);
     });
   }, [projectId, semanticBinding]);
 
@@ -50,12 +49,11 @@ export function useWorkspaceErdPersistence({
       ?? tablesRef.current.find((table) => table.id === tableId)?.position;
     if (!position) return;
 
-    void moveViewNodeCommand(projectId, {
-      viewId: semanticBinding.viewId,
-      nodeId: objectBinding.viewNodeId,
-      ...position,
-    }).catch((error) => {
-      console.error('[workspace] Failed to save table position', error);
+    moveSemanticObjectProjection({
+      projectId,
+      semanticBinding,
+      binding: objectBinding,
+      position,
     });
   }, [projectId, semanticBinding, tablePositionsRef, tablesRef]);
 

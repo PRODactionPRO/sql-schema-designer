@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { Canvas } from '@/pages/editor/ui/Canvas';
-import {
-  createObjectInViewCommand,
-  deleteObjectFromViewCommand,
-  moveViewNodeCommand,
-} from '@/shared/api/semantic-model';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import type { Field, JsonSchemaDocument, JsonSchemaFieldType, Relation, Table } from '@/shared/types/schema';
 import type { ProjectData } from '@/shared/types/project';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceErdCanvas } from '../model/useWorkspaceErdCanvas';
+import {
+  createSemanticObjectProjection,
+  deleteSemanticObjectProjection,
+  moveSemanticObjectProjection,
+} from '../model/semantic-object-commands';
 import {
   ENUM_HEADER_FIELD_ID,
   JSON_SCHEMA_HEADER_FIELD_ID,
@@ -141,14 +141,15 @@ export function ProjectErDiagramCanvas({
     const viewId = project.semantic?.erd?.viewId;
     if (!viewId) return;
 
-    void createObjectInViewCommand(project.id, {
+    void createSemanticObjectProjection({
+      projectId: project.id,
       viewId,
       type,
       name,
       metadata,
       position,
-    }).then(({ object, node }) => {
-      onProjectChange?.(updateProjectBinding(nextProject, legacyId, object.id, metadata, node.id));
+    }).then((binding) => {
+      onProjectChange?.(updateProjectBinding(nextProject, legacyId, binding.objectId, binding.metadata, binding.viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create semantic table object', error);
     });
@@ -177,7 +178,8 @@ export function ProjectErDiagramCanvas({
     );
 
     projectedObjectCreatesRef.current.add(legacyId);
-    void createObjectInViewCommand(project.id, {
+    void createSemanticObjectProjection({
+      projectId: project.id,
       viewId,
       type: objectType,
       name: source.name,
@@ -185,8 +187,8 @@ export function ProjectErDiagramCanvas({
         ? metadata as Record<string, unknown>
         : { ...source },
       position,
-    }).then(({ object, node }) => {
-      onProjectChange?.(updateProjectBinding(project, legacyId, object.id, object.metadata, node.id));
+    }).then((binding) => {
+      onProjectChange?.(updateProjectBinding(project, legacyId, binding.objectId, binding.metadata, binding.viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create projected semantic object', error);
     }).finally(() => {
@@ -205,12 +207,11 @@ export function ProjectErDiagramCanvas({
       return;
     }
 
-    void moveViewNodeCommand(project.id, {
-      viewId,
-      nodeId: binding.viewNodeId,
-      ...position,
-    }).catch((error) => {
-      console.error('[workspace] Failed to save semantic table position', error);
+    moveSemanticObjectProjection({
+      projectId: project.id,
+      semanticBinding: project.semantic?.erd,
+      binding,
+      position,
     });
   }, [project, saveProjectedObject]);
 
@@ -218,11 +219,10 @@ export function ProjectErDiagramCanvas({
     const binding = getObjectBinding(project, legacyId);
     if (!binding) return;
 
-    void deleteObjectFromViewCommand(project.id, {
-      objectId: binding.objectId,
-      viewId: project.semantic?.erd?.viewId,
-    }).catch((error) => {
-      console.error('[workspace] Failed to delete semantic table object', error);
+    deleteSemanticObjectProjection({
+      projectId: project.id,
+      semanticBinding: project.semantic?.erd,
+      binding,
     });
   }, [project]);
 
@@ -230,7 +230,8 @@ export function ProjectErDiagramCanvas({
     const viewId = project.semantic?.erd?.viewId;
     if (!viewId) return;
 
-    void createObjectInViewCommand(project.id, {
+    void createSemanticObjectProjection({
+      projectId: project.id,
       viewId,
       type: 'table',
       name: table.name,
@@ -238,8 +239,8 @@ export function ProjectErDiagramCanvas({
       domainId: table.domainId,
       metadata: { ...table },
       position: table.position,
-    }).then(({ object, node }) => {
-      onProjectChange?.(updateProjectBinding(nextProject, table.id, object.id, object.metadata, node.id));
+    }).then((binding) => {
+      onProjectChange?.(updateProjectBinding(nextProject, table.id, binding.objectId, binding.metadata, binding.viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create semantic table object', error);
     });
@@ -249,11 +250,10 @@ export function ProjectErDiagramCanvas({
     const binding = getObjectBinding(project, tableId);
     if (!binding) return;
 
-    void deleteObjectFromViewCommand(project.id, {
-      objectId: binding.objectId,
-      viewId: project.semantic?.erd?.viewId,
-    }).catch((error) => {
-      console.error('[workspace] Failed to delete semantic table object', error);
+    deleteSemanticObjectProjection({
+      projectId: project.id,
+      semanticBinding: project.semantic?.erd,
+      binding,
     });
   }, [project]);
 

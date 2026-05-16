@@ -1,12 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
-import { createObjectInViewCommand, createSemanticModelObject, deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type { ClassEntity, ClassEntityKind, ProjectData } from '@/shared/types/project';
 import type { Domain } from '@/shared/types/schema';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceCatalogOrdering } from '../model/useWorkspaceCatalogOrdering';
 import type { WorkspaceCatalogSortMode } from '../model/useWorkspaceCatalogOrdering';
 import { ENTITY_KIND_META } from '../model/entity-kind-meta';
+import {
+  createSemanticObjectProjection,
+  deleteSemanticObjectProjection,
+} from '../model/semantic-object-commands';
 import {
   getClassDiagramDocument,
   getObjectBinding,
@@ -144,24 +147,17 @@ export function WorkspaceEntitiesPane({
     });
     onProjectChange(nextProject);
 
-    const classViewId = project.semantic?.classDiagram?.viewId;
-    const entityType = 'entity';
-    const createEntityObject = classViewId
-      ? createObjectInViewCommand(project.id, {
-          viewId: classViewId,
-          type: entityType,
-          name: entity.name,
-          metadata: { ...entity },
-          position: entity.position,
-        }).then(({ object, node }) => ({ object, viewNodeId: node.id }))
-      : createSemanticModelObject(project.id, {
-          type: entityType,
-          name: entity.name,
-          metadata: { ...entity },
-        }).then((object) => ({ object, viewNodeId: undefined }));
-
-    void createEntityObject.then(({ object, viewNodeId }) => {
-      onProjectChange(updateProjectBinding(nextProject, entity.id, object.id, entity, viewNodeId));
+    void createSemanticObjectProjection({
+      projectId: project.id,
+      viewId: project.semantic?.classDiagram?.viewId,
+      type: 'entity',
+      name: entity.name,
+      description: entity.description,
+      domainId: entity.domainId,
+      metadata: { ...entity },
+      position: entity.position,
+    }).then((binding) => {
+      onProjectChange(updateProjectBinding(nextProject, entity.id, binding.objectId, binding.metadata, binding.viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create entity object', error);
     });
@@ -178,11 +174,10 @@ export function WorkspaceEntitiesPane({
 
     const binding = getObjectBinding(project, entityId);
     if (binding) {
-      void deleteObjectFromViewCommand(project.id, {
-        objectId: binding.objectId,
-        viewId: project.semantic?.classDiagram?.viewId,
-      }).catch((error) => {
-        console.error('[workspace] Failed to delete entity object', error);
+      deleteSemanticObjectProjection({
+        projectId: project.id,
+        semanticBinding: project.semantic?.classDiagram,
+        binding,
       });
     }
   };

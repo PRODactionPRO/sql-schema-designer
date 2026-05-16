@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import {
-  createObjectInViewCommand,
-  createSemanticModelObject,
-  deleteObjectFromViewCommand,
-  moveViewNodeCommand,
-  updateObjectCommand,
-} from '@/shared/api/semantic-model';
 import { deepClone } from '@/shared/lib/json';
 import type {
   ClassDiagramModel,
@@ -23,6 +16,13 @@ import {
   createClassRelationInView,
   deleteRelationFromSemanticView,
 } from './semantic-relation-commands';
+import {
+  createSemanticObjectProjection,
+  deleteSemanticObjectProjection,
+  moveSemanticObjectProjection,
+  objectMetadata,
+  updateSemanticObjectProjection,
+} from './semantic-object-commands';
 import { reorderClassMembers } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
 
@@ -35,10 +35,6 @@ interface UseWorkspaceClassDiagramCanvasOptions {
   initialViewport?: CanvasViewport;
   viewportRestoreKey?: string | number;
   onViewportChange?: (viewport: CanvasViewport) => void;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function createClassPositionMap(diagram: ClassDiagramModel) {
@@ -178,12 +174,11 @@ export function useWorkspaceClassDiagramCanvas(
       ?? diagramRef.current.classes.find((entity) => entity.id === classId)?.position;
     if (!position) return;
 
-    void moveViewNodeCommand(projectId, {
-      viewId: semanticBinding.viewId,
-      nodeId: objectBinding.viewNodeId,
-      ...position,
-    }).catch((error) => {
-      console.error('[workspace] Failed to save class position', error);
+    moveSemanticObjectProjection({
+      projectId,
+      semanticBinding,
+      binding: objectBinding,
+      position,
     });
   }, [getClassObjectBinding, projectId, semanticBinding]);
 
@@ -191,7 +186,7 @@ export function useWorkspaceClassDiagramCanvas(
     const objectBinding = getClassObjectBinding(entity.id);
     if (!projectId || !objectBinding) return;
 
-    const baseMetadata = isRecord(objectBinding.metadata) ? objectBinding.metadata : {};
+    const baseMetadata = objectMetadata(objectBinding.metadata);
     const metadata = {
       ...baseMetadata,
       ...entity,
@@ -199,40 +194,29 @@ export function useWorkspaceClassDiagramCanvas(
       attributes: entity.attributes,
       methods: entity.methods,
     };
-    void updateObjectCommand(projectId, {
-      objectId: objectBinding.objectId,
+    updateSemanticObjectProjection({
+      projectId,
+      binding: objectBinding,
       name: entity.name,
       description: entity.description,
       domainId: entity.domainId,
       metadata,
-    }).catch((error) => {
-      console.error('[workspace] Failed to save class metadata', error);
     });
   }, [getClassObjectBinding, projectId]);
 
   const createClassObject = useCallback((entity: ClassEntity) => {
     if (!projectId) return;
 
-    const pending = semanticBinding?.viewId
-      ? createObjectInViewCommand(projectId, {
-          viewId: semanticBinding.viewId,
-          type: 'entity',
-          name: entity.name,
-          metadata: { ...entity },
-          position: entity.position,
-        }).then(({ object, node }) => ({
-          objectId: object.id,
-          viewNodeId: node.id,
-          metadata: object.metadata,
-        }))
-      : createSemanticModelObject(projectId, {
-          type: 'entity',
-          name: entity.name,
-          metadata: { ...entity },
-        }).then((object) => ({
-          objectId: object.id,
-          metadata: object.metadata,
-        }));
+    const pending = createSemanticObjectProjection({
+      projectId,
+      viewId: semanticBinding?.viewId,
+      type: 'entity',
+      name: entity.name,
+      description: entity.description,
+      domainId: entity.domainId,
+      metadata: { ...entity },
+      position: entity.position,
+    });
 
     const tracked = pending
       .then((binding) => {
@@ -255,16 +239,12 @@ export function useWorkspaceClassDiagramCanvas(
 
     const deleteBinding = (binding: ProjectSemanticObjectBinding | null | undefined) => {
       if (!binding) return;
-      void deleteObjectFromViewCommand(projectId, {
-        objectId: binding.objectId,
-        viewId: semanticBinding?.viewId,
-      })
-        .then(() => {
-          localObjectBindingsRef.current.delete(classId);
-        })
-        .catch((error) => {
-          console.error('[workspace] Failed to delete class object', error);
-        });
+      deleteSemanticObjectProjection({
+        projectId,
+        semanticBinding,
+        binding,
+      });
+      localObjectBindingsRef.current.delete(classId);
     };
 
     const binding = getClassObjectBinding(classId);
@@ -275,7 +255,7 @@ export function useWorkspaceClassDiagramCanvas(
 
     const pending = pendingObjectCreatesRef.current.get(classId);
     if (pending) void pending.then(deleteBinding);
-  }, [getClassObjectBinding, projectId, semanticBinding?.viewId]);
+  }, [getClassObjectBinding, projectId, semanticBinding]);
 
   const saveClassRelation = useCallback((relation: ClassRelation) => {
     if (!projectId) return;

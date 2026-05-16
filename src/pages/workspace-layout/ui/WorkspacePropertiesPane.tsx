@@ -1,7 +1,3 @@
-import {
-  deleteObjectFromViewCommand,
-  updateRelationCommand,
-} from '@/shared/api/semantic-model';
 import type {
   ClassEntity,
   ClassRelation,
@@ -21,7 +17,6 @@ import {
   getClassDiagram,
   getObjectBinding,
   getProjectDomains,
-  getRelationBinding,
   saveObjectMetadata,
   updateClassInProject,
   withClassDiagram,
@@ -30,8 +25,10 @@ import {
 import {
   createErdRelationInView,
   deleteRelationFromSemanticView,
+  updateClassRelationInView,
   updateErdRelationInView,
 } from '../model/semantic-relation-commands';
+import { deleteSemanticObjectProjection } from '../model/semantic-object-commands';
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
 import { EnumProperties } from './WorkspaceEnumPropertiesPane';
@@ -183,11 +180,10 @@ export function PropertiesPane({
 
     const binding = getObjectBinding(project, classId);
     if (binding) {
-      void deleteObjectFromViewCommand(project.id, {
-        objectId: binding.objectId,
-        viewId: project.semantic?.classDiagram?.viewId,
-      }).catch((error) => {
-        console.error('[workspace] Failed to delete class object', error);
+      deleteSemanticObjectProjection({
+        projectId: project.id,
+        semanticBinding: project.semantic?.classDiagram,
+        binding,
       });
     }
   };
@@ -202,24 +198,8 @@ export function PropertiesPane({
       ...classDiagram,
       relations,
     }));
-    const binding = getRelationBinding(project, relationId, 'classDiagram');
-    if (binding && updatedRelation) {
-      void updateRelationCommand(project.id, {
-        relationId: binding.relationId,
-        legacyRelationId: updatedRelation.id,
-        type: updatedRelation.type,
-        metadata: { ...updatedRelation },
-      }).catch((error) => {
-        console.error('[workspace] Failed to update class relation', error);
-      });
-    } else if (updatedRelation) {
-      void updateRelationCommand(project.id, {
-        legacyRelationId: updatedRelation.id,
-        type: updatedRelation.type,
-        metadata: { ...updatedRelation },
-      }).catch((error) => {
-        console.error('[workspace] Failed to update class relation', error);
-      });
+    if (updatedRelation) {
+      updateClassRelationInView(project.id, project.semantic?.classDiagram, updatedRelation);
     }
   };
 

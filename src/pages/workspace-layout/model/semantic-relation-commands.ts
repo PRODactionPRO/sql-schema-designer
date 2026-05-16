@@ -272,3 +272,51 @@ export function updateErdRelationInView(
 
   updateBinding(null);
 }
+
+export function updateClassRelationInView(
+  projectId: string,
+  semanticBinding: ProjectSemanticViewBinding | undefined,
+  relation: ClassRelation,
+) {
+  if (!semanticBinding?.viewId) return;
+
+  const key = relationKey(projectId, semanticBinding.viewId, relation.id);
+  const binding = getRelationBinding(projectId, semanticBinding, relation.id);
+
+  const updateBinding = (resolvedBinding: ProjectSemanticRelationBinding | null | undefined) => {
+    void updateRelationCommand(projectId, {
+      relationId: resolvedBinding?.relationId,
+      legacyRelationId: relation.id,
+      type: relation.type,
+      direction: 'directed',
+      cardinalitySource: relation.fromMultiplicity,
+      cardinalityTarget: relation.toMultiplicity,
+      required: false,
+      metadata: { ...relation },
+    })
+      .then((modelRelation) => {
+        const nextBinding: ProjectSemanticRelationBinding = {
+          relationId: modelRelation.id,
+          viewEdgeId: resolvedBinding?.viewEdgeId,
+          metadata: modelRelation.metadata,
+        };
+        relationBindingCache.set(key, nextBinding);
+      })
+      .catch((error) => {
+        console.error('[workspace] Failed to update class relation', error);
+      });
+  };
+
+  if (binding) {
+    updateBinding(binding);
+    return;
+  }
+
+  const pendingCreate = pendingRelationCreates.get(key);
+  if (pendingCreate) {
+    void pendingCreate.then(updateBinding);
+    return;
+  }
+
+  updateBinding(null);
+}

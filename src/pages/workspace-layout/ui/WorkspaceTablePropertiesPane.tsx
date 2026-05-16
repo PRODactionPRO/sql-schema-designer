@@ -1,5 +1,4 @@
 import { TableDetailsPanel } from '@/pages/editor/ui/TableDetailsPanel';
-import { deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type { ProjectData } from '@/shared/types/project';
 import type {
   Domain,
@@ -8,6 +7,7 @@ import type {
   TableConstraint,
   TableConstraintType,
 } from '@/shared/types/schema';
+import { deleteSemanticObjectProjection } from '../model/semantic-object-commands';
 import { getObjectBinding, nextWorkspaceId, saveObjectMetadata } from '../model/workspace-project-utils';
 
 export function TableProperties({
@@ -101,11 +101,10 @@ export function TableProperties({
             const binding = getObjectBinding(project, tableId);
             if (!binding) return;
 
-            void deleteObjectFromViewCommand(project.id, {
-              objectId: binding.objectId,
-              viewId: project.semantic?.erd?.viewId,
-            }).catch((error) => {
-              console.error('[workspace] Failed to delete table object', error);
+            deleteSemanticObjectProjection({
+              projectId: project.id,
+              semanticBinding: project.semantic?.erd,
+              binding,
             });
           });
         }}

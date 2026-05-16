@@ -1,4 +1,3 @@
-import { updateObjectCommand } from '@/shared/api/semantic-model';
 import type {
   ClassDiagramProjectDocument,
   ClassEntity,
@@ -8,6 +7,10 @@ import type {
 } from '@/shared/types/project';
 import type { Domain, EnumType, FieldType, JsonSchemaDocument, Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from './types';
+import {
+  objectMetadata,
+  updateSemanticObjectProjection,
+} from './semantic-object-commands';
 
 export const ENUM_TABLE_PREFIX = 'enum::';
 export const JSON_SCHEMA_TABLE_PREFIX = 'jsonschema::';
@@ -44,25 +47,17 @@ export function saveObjectMetadata(project: ProjectData, legacyId: string, metad
   const binding = getObjectBinding(project, legacyId);
   if (!binding) return;
 
-  const baseMetadata = binding.metadata && typeof binding.metadata === 'object' && !Array.isArray(binding.metadata)
-    ? binding.metadata as Record<string, unknown>
-    : {};
-  const nextMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-    ? metadata as Record<string, unknown>
-    : {};
+  const baseMetadata = objectMetadata(binding.metadata);
+  const nextMetadata = objectMetadata(metadata);
   const mergedMetadata = {
     ...baseMetadata,
     ...nextMetadata,
   };
 
-  void updateObjectCommand(project.id, {
-    objectId: binding.objectId,
-    name: typeof mergedMetadata.name === 'string' ? mergedMetadata.name : undefined,
-    description: typeof mergedMetadata.description === 'string' ? mergedMetadata.description : undefined,
-    domainId: typeof mergedMetadata.domainId === 'string' ? mergedMetadata.domainId : undefined,
+  updateSemanticObjectProjection({
+    projectId: project.id,
+    binding,
     metadata: mergedMetadata,
-  }).catch((error) => {
-    console.error('[workspace] Failed to save object metadata', error);
   });
 }
 
