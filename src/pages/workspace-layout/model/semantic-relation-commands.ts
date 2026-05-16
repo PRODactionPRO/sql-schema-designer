@@ -3,6 +3,8 @@ import {
   deleteRelationFromViewCommand,
 } from '@/shared/api/semantic-model';
 import type {
+  ClassRelation,
+  ProjectSemanticObjectBinding,
   ProjectSemanticRelationBinding,
   ProjectSemanticViewBinding,
 } from '@/shared/types/project';
@@ -59,6 +61,51 @@ export function createErdRelationInView(
     })
     .catch((error) => {
       console.error('[workspace] Failed to create ERD relation', error);
+      return null;
+    })
+    .finally(() => {
+      pendingRelationCreates.delete(key);
+    });
+
+  pendingRelationCreates.set(key, pending);
+}
+
+export function createClassRelationInView(
+  projectId: string,
+  semanticBinding: ProjectSemanticViewBinding | undefined,
+  relation: ClassRelation,
+  sourceBinding?: ProjectSemanticObjectBinding,
+  targetBinding?: ProjectSemanticObjectBinding,
+) {
+  const resolvedSourceBinding = sourceBinding ?? semanticBinding?.objectsByLegacyId[relation.fromClassId];
+  const resolvedTargetBinding = targetBinding ?? semanticBinding?.objectsByLegacyId[relation.toClassId];
+  if (!semanticBinding?.viewId || !resolvedSourceBinding?.viewNodeId || !resolvedTargetBinding?.viewNodeId) return;
+
+  const key = relationKey(projectId, semanticBinding.viewId, relation.id);
+  if (pendingRelationCreates.has(key) || relationBindingCache.has(key)) return;
+
+  const pending = createRelationInViewCommand(projectId, {
+    viewId: semanticBinding.viewId,
+    sourceViewNodeId: resolvedSourceBinding.viewNodeId,
+    targetViewNodeId: resolvedTargetBinding.viewNodeId,
+    type: relation.type,
+    direction: 'directed',
+    cardinalitySource: relation.fromMultiplicity,
+    cardinalityTarget: relation.toMultiplicity,
+    required: false,
+    metadata: { ...relation },
+  })
+    .then(({ relation: modelRelation, edge }) => {
+      const binding: ProjectSemanticRelationBinding = {
+        relationId: modelRelation.id,
+        viewEdgeId: edge.id,
+        metadata: modelRelation.metadata,
+      };
+      relationBindingCache.set(key, binding);
+      return binding;
+    })
+    .catch((error) => {
+      console.error('[workspace] Failed to create class relation', error);
       return null;
     })
     .finally(() => {

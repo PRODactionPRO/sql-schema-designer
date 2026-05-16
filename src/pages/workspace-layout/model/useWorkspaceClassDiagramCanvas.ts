@@ -1,12 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { moveViewNodeCommand, updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
+import {
+  createObjectInViewCommand,
+  createSemanticModelObject,
+  deleteObjectFromViewCommand,
+  moveViewNodeCommand,
+  updateSemanticObjectMetadata,
+} from '@/shared/api/semantic-model';
 import { deepClone } from '@/shared/lib/json';
-import type { ClassDiagramModel, ClassEntity, ClassEntityKind, ProjectSemanticViewBinding } from '@/shared/types/project';
+import type {
+  ClassDiagramModel,
+  ClassEntity,
+  ClassEntityKind,
+  ClassRelation,
+  ProjectSemanticObjectBinding,
+  ProjectSemanticViewBinding,
+} from '@/shared/types/project';
 import { useCanvasNavigation } from '@/shared/ui/useCanvasNavigation';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CLASS_CARD_WIDTH, estimateClassCardHeight } from './class-diagram-view-utils';
-import { deleteRelationFromSemanticView } from './semantic-relation-commands';
+import {
+  createClassRelationInView,
+  deleteRelationFromSemanticView,
+} from './semantic-relation-commands';
 import { reorderClassMembers } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
 
@@ -88,6 +104,8 @@ export function useWorkspaceClassDiagramCanvas(
   });
   const diagramRef = useRef(diagram);
   const classPositionsRef = useRef(createClassPositionMap(diagram));
+  const localObjectBindingsRef = useRef(new Map<string, ProjectSemanticObjectBinding>());
+  const pendingObjectCreatesRef = useRef(new Map<string, Promise<ProjectSemanticObjectBinding | null>>());
   const historyPastRef = useRef(historyPast);
   const historyFutureRef = useRef(historyFuture);
   const { projectId, semanticBinding, onCommit } = options;
@@ -99,6 +117,8 @@ export function useWorkspaceClassDiagramCanvas(
     classPositionsRef.current = createClassPositionMap(nextDiagram);
     historyPastRef.current = [];
     historyFutureRef.current = [];
+    localObjectBindingsRef.current.clear();
+    pendingObjectCreatesRef.current.clear();
     setDiagram(nextDiagram);
     setHistoryPast([]);
     setHistoryFuture([]);
@@ -132,6 +152,10 @@ export function useWorkspaceClassDiagramCanvas(
     screenToWorld(event)
   ), [screenToWorld]);
 
+  const getClassObjectBinding = useCallback((classId: string) => (
+    semanticBinding?.objectsByLegacyId[classId] ?? localObjectBindingsRef.current.get(classId)
+  ), [semanticBinding]);
+
   const updateClassPosition = useCallback((classId: string, position: { x: number; y: number }) => {
     classPositionsRef.current.set(classId, position);
     setDiagram((current) => {
@@ -147,7 +171,7 @@ export function useWorkspaceClassDiagramCanvas(
   }, []);
 
   const saveClassPosition = useCallback((classId: string) => {
-    const objectBinding = semanticBinding?.objectsByLegacyId[classId];
+    const objectBinding = getClassObjectBinding(classId);
     if (!projectId || !semanticBinding?.viewId || !objectBinding?.viewNodeId) return;
 
     const position = classPositionsRef.current.get(classId)
@@ -161,10 +185,10 @@ export function useWorkspaceClassDiagramCanvas(
     }).catch((error) => {
       console.error('[workspace] Failed to save class position', error);
     });
-  }, [projectId, semanticBinding]);
+  }, [getClassObjectBinding, projectId, semanticBinding]);
 
   const saveClassMetadata = useCallback((entity: ClassEntity) => {
-    const objectBinding = semanticBinding?.objectsByLegacyId[entity.id];
+    const objectBinding = getClassObjectBinding(entity.id);
     if (!projectId || !objectBinding) return;
 
     const baseMetadata = isRecord(objectBinding.metadata) ? objectBinding.metadata : {};
@@ -177,7 +201,103 @@ export function useWorkspaceClassDiagramCanvas(
     }).catch((error) => {
       console.error('[workspace] Failed to save class metadata', error);
     });
+  }, [getClassObjectBinding, projectId]);
+
+  const createClassObject = useCallback((entity: ClassEntity) => {
+    if (!projectId) return;
+
+    const pending = semanticBinding?.viewId
+      ? createObjectInViewCommand(projectId, {
+          viewId: semanticBinding.viewId,
+          type: 'entity',
+          name: entity.name,
+          metadata: { ...entity },
+          position: entity.position,
+        }).then(({ object, node }) => ({
+          objectId: object.id,
+          viewNodeId: node.id,
+          metadata: object.metadata,
+        }))
+      : createSemanticModelObject(projectId, {
+          type: 'entity',
+          name: entity.name,
+          metadata: { ...entity },
+        }).then((object) => ({
+          objectId: object.id,
+          metadata: object.metadata,
+        }));
+
+    const tracked = pending
+      .then((binding) => {
+        localObjectBindingsRef.current.set(entity.id, binding);
+        return binding;
+      })
+      .catch((error) => {
+        console.error('[workspace] Failed to create class object', error);
+        return null;
+      })
+      .finally(() => {
+        pendingObjectCreatesRef.current.delete(entity.id);
+      });
+
+    pendingObjectCreatesRef.current.set(entity.id, tracked);
   }, [projectId, semanticBinding]);
+
+  const deleteClassObject = useCallback((classId: string) => {
+    if (!projectId) return;
+
+    const deleteBinding = (binding: ProjectSemanticObjectBinding | null | undefined) => {
+      if (!binding) return;
+      void deleteObjectFromViewCommand(projectId, {
+        objectId: binding.objectId,
+        viewId: semanticBinding?.viewId,
+      })
+        .then(() => {
+          localObjectBindingsRef.current.delete(classId);
+        })
+        .catch((error) => {
+          console.error('[workspace] Failed to delete class object', error);
+        });
+    };
+
+    const binding = getClassObjectBinding(classId);
+    if (binding) {
+      deleteBinding(binding);
+      return;
+    }
+
+    const pending = pendingObjectCreatesRef.current.get(classId);
+    if (pending) void pending.then(deleteBinding);
+  }, [getClassObjectBinding, projectId, semanticBinding?.viewId]);
+
+  const saveClassRelation = useCallback((relation: ClassRelation) => {
+    if (!projectId) return;
+
+    const sourceBinding = getClassObjectBinding(relation.fromClassId);
+    const targetBinding = getClassObjectBinding(relation.toClassId);
+    if (sourceBinding && targetBinding) {
+      createClassRelationInView(projectId, semanticBinding, relation, sourceBinding, targetBinding);
+      return;
+    }
+
+    const pendingSource = pendingObjectCreatesRef.current.get(relation.fromClassId);
+    const pendingTarget = pendingObjectCreatesRef.current.get(relation.toClassId);
+    if (!pendingSource && !pendingTarget) return;
+
+    void Promise.all([
+      pendingSource ?? Promise.resolve(sourceBinding ?? null),
+      pendingTarget ?? Promise.resolve(targetBinding ?? null),
+    ]).then(([resolvedSourceBinding, resolvedTargetBinding]) => {
+      if (!resolvedSourceBinding || !resolvedTargetBinding) return;
+      createClassRelationInView(
+        projectId,
+        semanticBinding,
+        relation,
+        resolvedSourceBinding,
+        resolvedTargetBinding,
+      );
+    });
+  }, [getClassObjectBinding, projectId, semanticBinding]);
 
   const persistDiagram = useCallback((nextDiagram: ClassDiagramModel) => {
     nextDiagram.classes.forEach((entity) => {
@@ -273,24 +393,32 @@ export function useWorkspaceClassDiagramCanvas(
           ? 'DataType'
           : 'Class';
     const name = getUniqueClassName(diagramRef.current.classes, baseName);
+    const entity = createClassEntity(kind, name, position);
     const nextDiagram = {
       ...diagramRef.current,
       classes: [
         ...diagramRef.current.classes,
-        createClassEntity(kind, name, position),
+        entity,
       ],
     };
     applyDiagram(nextDiagram);
-  }, [applyDiagram, pushHistory]);
+    createClassObject(entity);
+    return entity;
+  }, [applyDiagram, createClassObject, pushHistory]);
 
   const deleteClassEntity = useCallback((classId: string) => {
     pushHistory();
+    const removedRelations = diagramRef.current.relations.filter((relation) => relation.fromClassId === classId || relation.toClassId === classId);
     applyDiagram({
       ...diagramRef.current,
       classes: diagramRef.current.classes.filter((entity) => entity.id !== classId),
       relations: diagramRef.current.relations.filter((relation) => relation.fromClassId !== classId && relation.toClassId !== classId),
     });
-  }, [applyDiagram, pushHistory]);
+    removedRelations.forEach((relation) => {
+      if (projectId) deleteRelationFromSemanticView(projectId, semanticBinding, relation.id);
+    });
+    deleteClassObject(classId);
+  }, [applyDiagram, deleteClassObject, projectId, pushHistory, semanticBinding]);
 
   const duplicateClassEntity = useCallback((classId: string) => {
     const entity = diagramRef.current.classes.find((item) => item.id === classId);
@@ -319,7 +447,8 @@ export function useWorkspaceClassDiagramCanvas(
       ...diagramRef.current,
       classes: [...diagramRef.current.classes, nextEntity],
     });
-  }, [applyDiagram, pushHistory]);
+    createClassObject(nextEntity);
+  }, [applyDiagram, createClassObject, pushHistory]);
 
   const addAttribute = useCallback((classId: string) => {
     const entity = diagramRef.current.classes.find((item) => item.id === classId);
@@ -415,6 +544,39 @@ export function useWorkspaceClassDiagramCanvas(
     setSelectedClassIds(new Set());
   }, []);
 
+  const addClassRelation = useCallback((fromClassId: string, toClassId: string) => {
+    if (fromClassId === toClassId) return null;
+
+    const source = diagramRef.current.classes.find((entity) => entity.id === fromClassId);
+    const target = diagramRef.current.classes.find((entity) => entity.id === toClassId);
+    if (!source || !target) return null;
+
+    const existingRelation = diagramRef.current.relations.find((relation) => (
+      relation.fromClassId === fromClassId && relation.toClassId === toClassId
+    ));
+    if (existingRelation) return existingRelation;
+
+    const relation: ClassRelation = {
+      id: nextWorkspaceId('class_relation'),
+      fromClassId,
+      toClassId,
+      type: 'association',
+      label: `${source.name} has ${target.name}`,
+      fromRole: source.name,
+      toRole: target.name,
+      fromMultiplicity: '1',
+      toMultiplicity: '*',
+    };
+
+    pushHistory();
+    applyDiagram({
+      ...diagramRef.current,
+      relations: [...diagramRef.current.relations, relation],
+    });
+    saveClassRelation(relation);
+    return relation;
+  }, [applyDiagram, pushHistory, saveClassRelation]);
+
   const selectClassesInRect = useCallback((rect: { x: number; y: number; w: number; h: number }) => {
     const selectedIds = diagramRef.current.classes
       .filter((entity) => {
@@ -498,6 +660,7 @@ export function useWorkspaceClassDiagramCanvas(
     updateAttributeType,
     updateMethodReturnType,
     clearClassSelection,
+    addClassRelation,
     selectClassesInRect,
     deleteClassRelation,
     autoLayout,
