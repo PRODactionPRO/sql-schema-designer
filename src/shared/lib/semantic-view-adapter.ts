@@ -273,16 +273,8 @@ export function semanticErdViewToProjectSchema(
     tables,
     relations,
     domains: context.domains.length > 0 ? context.domains : fallbackSchema.domains,
-    enums: nodeEnums.length > 0
-      ? nodeEnums
-      : context.enums.length > 0
-        ? context.enums
-        : fallbackSchema.enums,
-    jsonSchemas: nodeJsonSchemas.length > 0
-      ? nodeJsonSchemas
-      : context.jsonSchemas.length > 0
-        ? context.jsonSchemas
-        : fallbackSchema.jsonSchemas,
+    enums: nodeEnums.length > 0 ? nodeEnums : context.enums,
+    jsonSchemas: nodeJsonSchemas.length > 0 ? nodeJsonSchemas : context.jsonSchemas,
   });
 }
 

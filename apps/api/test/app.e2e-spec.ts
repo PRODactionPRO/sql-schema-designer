@@ -201,6 +201,52 @@ describe('API critical flow (e2e)', () => {
     const postsSemantic =
       createPostsObjectResponse.body as CreateObjectInViewResponse;
 
+    const createStatusEnumResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'enum',
+        name: 'Status',
+        metadata: {
+          id: 'enum-status',
+          name: 'Status',
+          values: ['draft', 'published'],
+        },
+        position: { x: 760, y: 120 },
+      });
+
+    expect(createStatusEnumResponse.status).toBe(201);
+    const statusEnumSemantic =
+      createStatusEnumResponse.body as CreateObjectInViewResponse;
+    expect(statusEnumSemantic.object.type).toBe('enum');
+    expect(statusEnumSemantic.node.x).toBe(760);
+
+    const createPayloadJsonSchemaResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'json_schema',
+        name: 'Payload',
+        metadata: {
+          id: 'json-payload',
+          name: 'Payload',
+          nodes: [{ id: 'json-root', name: 'root', type: 'object', order: 0 }],
+        },
+        position: { x: 920, y: 120 },
+      });
+
+    expect(createPayloadJsonSchemaResponse.status).toBe(201);
+    const payloadJsonSchemaSemantic =
+      createPayloadJsonSchemaResponse.body as CreateObjectInViewResponse;
+    expect(payloadJsonSchemaSemantic.object.type).toBe('json_schema');
+    expect(payloadJsonSchemaSemantic.node.x).toBe(920);
+
     const createSemanticRelationResponse = await request(app.getHttpServer())
       .post(
         `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
@@ -340,8 +386,14 @@ describe('API critical flow (e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(primaryErdResponse.status).toBe(200);
-    expect(primaryErdResponse.body.view.nodes).toHaveLength(2);
+    expect(primaryErdResponse.body.view.nodes).toHaveLength(4);
     expect(primaryErdResponse.body.view.edges).toHaveLength(1);
+    expect(primaryErdResponse.body.view.nodes.map((node) => node.object.type).sort())
+      .toEqual(['enum', 'json_schema', 'table', 'table']);
+    expect(primaryErdResponse.body.context.objects.map((object) => object.type))
+      .not.toContain('enum');
+    expect(primaryErdResponse.body.context.objects.map((object) => object.type))
+      .not.toContain('json_schema');
 
     const deleteRelationResponse = await request(app.getHttpServer())
       .post(
@@ -366,7 +418,7 @@ describe('API critical flow (e2e)', () => {
 
     expect(primaryErdAfterRelationDeleteResponse.status).toBe(200);
     expect(primaryErdAfterRelationDeleteResponse.body.view.nodes).toHaveLength(
-      2,
+      4,
     );
     expect(primaryErdAfterRelationDeleteResponse.body.view.edges).toHaveLength(
       0,

@@ -275,6 +275,58 @@ describe('semantic view adapter', () => {
     });
   });
 
+  it('treats semantic ERD projected nodes as authoritative after refresh', () => {
+    const staleFallbackSchema: ProjectSchemaModel = {
+      ...fallbackSchema,
+      enums: [{
+        id: 'enum-stale',
+        name: 'StaleStatus',
+        values: ['old'],
+        position: { x: 40, y: 80 },
+      }],
+      jsonSchemas: [{
+        id: 'json-stale',
+        name: 'StalePayload',
+        nodes: [{ id: 'stale-root', name: 'root', type: 'object', order: 0 }],
+        position: { x: 60, y: 120 },
+      }],
+    };
+    const tableObject = modelObject({
+      id: 'model:project-1:table:table-users',
+      type: 'table',
+      name: 'users',
+      metadata: {
+        id: 'table-users',
+        name: 'users',
+        fields: [field('users-id', 'id')],
+      },
+    });
+    const payload: SemanticErdViewPayload = {
+      view: {
+        id: 'view-1',
+        projectId: 'project-1',
+        type: 'erd',
+        name: 'Primary ERD',
+        description: null,
+        scope: {},
+        filters: {},
+        settings: {},
+        createdAt: now,
+        updatedAt: '2026-05-13T19:30:00.000Z',
+        deletedAt: null,
+        nodes: [viewNode(tableObject, 10, 20)],
+        edges: [],
+      },
+      context: { objects: [] },
+    };
+
+    const schema = semanticErdViewToProjectSchema(payload, staleFallbackSchema);
+
+    expect(schema.tables.map((table) => table.id)).toEqual(['table-users']);
+    expect(schema.enums).toEqual([]);
+    expect(schema.jsonSchemas).toEqual([]);
+  });
+
   it('maps semantic class diagram views back to class diagram documents', () => {
     const fallbackDiagram: ClassDiagramModel = {
       classes: [],
