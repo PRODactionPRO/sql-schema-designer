@@ -6,6 +6,9 @@ import type { DragFieldInfo } from './TableNode';
 import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
 import { actionMenuClasses } from '@/shared/ui/action-menu-styles';
+import { useCanvasNavigation, type CanvasBounds, type CanvasViewport } from '@/shared/ui/useCanvasNavigation';
+import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
+import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 
 interface CanvasProps {
   tables: Table[];
@@ -43,6 +46,11 @@ interface CanvasProps {
   onOpenInCodeEditor?: (tableId: string, fieldId?: string) => void;
   highlightRelations?: boolean;
   onPushHistory?: () => void;
+  onTableDragStop?: (tableId: string) => void;
+  onTablesDragStop?: (tableIds: string[]) => void;
+  initialViewport?: CanvasViewport;
+  viewportRestoreKey?: string | number;
+  onViewportChange?: (viewport: CanvasViewport) => void;
   isEnumTableId?: (id: string) => boolean;
   isJsonSchemaTableId?: (id: string) => boolean;
   getJsonSchemaFieldMeta?: (tableId: string) => Record<string, { depth: number; hasChildren: boolean; collapsed: boolean; schemaType: string }>;
@@ -57,10 +65,6 @@ interface CanvasProps {
   onValidateTable?: (tableId: string) => void;
 }
 
-const MIN_ZOOM = 0.2;
-const MAX_ZOOM = 3;
-const ZOOM_SENSITIVITY = 0.001;
-const SCROLL_SPEED = 1.5;
 const TABLE_WIDTH = 280;
 const HEADER_HEIGHT = 40;
 const FIELD_HEIGHT = 36;
@@ -75,8 +79,6 @@ interface DragState {
   targetTableId: string | null; targetFieldId: string | null;
 }
 
-interface SelectionRect { startX: number; startY: number; currentX: number; currentY: number; }
-
 interface ContextMenuState {
   x: number;
   y: number;
@@ -85,6 +87,31 @@ interface ContextMenuState {
   fieldId?: string;
   worldX?: number;
   worldY?: number;
+}
+
+function getTablesCanvasBounds(tables: Table[]): CanvasBounds | null {
+  if (tables.length === 0) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const table of tables) {
+    minX = Math.min(minX, table.position.x);
+    minY = Math.min(minY, table.position.y);
+    maxX = Math.max(maxX, table.position.x + TABLE_WIDTH);
+    maxY = Math.max(maxY, table.position.y + HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT);
+  }
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
 }
 
 export function Canvas({
@@ -99,6 +126,11 @@ export function Canvas({
   onUpdateField, onDeleteField, onAssignDomain, onOpenInCodeEditor,
   highlightRelations,
   onPushHistory,
+  onTableDragStop,
+  onTablesDragStop,
+  initialViewport,
+  viewportRestoreKey,
+  onViewportChange,
   isEnumTableId,
   isJsonSchemaTableId,
   getJsonSchemaFieldMeta,
@@ -112,20 +144,24 @@ export function Canvas({
   onAddFieldToTable,
   onValidateTable,
 }: CanvasProps) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const isPanning = useRef(false);
-  const panStart = useRef({ x: 0, y: 0 });
-  const panOrigin = useRef({ x: 0, y: 0 });
-  const panRef = useRef(pan);
-  const zoomRef = useRef(zoom);
-  panRef.current = pan;
-  zoomRef.current = zoom;
+  const {
+    containerRef: canvasRef,
+    pan,
+    zoom,
+    isPanning: isCanvasPanning,
+    zoomRef,
+    screenToWorld,
+    centerOnBounds,
+    zoomToBounds,
+  } = useCanvasNavigation({
+    initialPan: initialViewport?.pan,
+    initialZoom: initialViewport?.zoom,
+    restoreKey: viewportRestoreKey,
+    onViewportChange,
+  });
   const [dragState, setDragState] = useState<DragState | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   dragStateRef.current = dragState;
-  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [convertConfirmTableId, setConvertConfirmTableId] = useState<string | null>(null);
@@ -157,55 +193,15 @@ export function Canvas({
     return ids;
   }, [relations]);
 
-  // Panning + wheel zoom + scroll
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const handleMouseDown = (e: MouseEvent) => {
-      if (e.button === 1) {
-        e.preventDefault();
-        isPanning.current = true;
-        panStart.current = { x: e.clientX, y: e.clientY };
-        panOrigin.current = { ...panRef.current };
-        canvas.style.cursor = 'grabbing';
-      }
-    };
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isPanning.current) return;
-      setPan({ x: panOrigin.current.x + e.clientX - panStart.current.x, y: panOrigin.current.y + e.clientY - panStart.current.y });
-    };
-    const handleMouseUp = (e: MouseEvent) => {
-      if (e.button === 1 && isPanning.current) { isPanning.current = false; canvas.style.cursor = ''; }
-    };
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-        const curPan = panRef.current;
-        const curZoom = zoomRef.current;
-        const wx = (mx - curPan.x) / curZoom, wy = (my - curPan.y) / curZoom;
-        const nz = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, curZoom * (1 - e.deltaY * ZOOM_SENSITIVITY)));
-        setPan({ x: mx - wx * nz, y: my - wy * nz }); setZoom(nz);
-      } else {
-        e.preventDefault();
-        if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-          const dx = (e.deltaX !== 0 ? e.deltaX : e.deltaY) * SCROLL_SPEED;
-          setPan(prev => ({ ...prev, x: prev.x - dx }));
-        } else {
-          const dy = e.deltaY * SCROLL_SPEED;
-          setPan(prev => ({ ...prev, y: prev.y - dy }));
-        }
-      }
-    };
-    const handleAuxClick = (e: MouseEvent) => { if (e.button === 1) e.preventDefault(); };
-    canvas.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    canvas.addEventListener('wheel', handleWheel, { passive: false });
-    canvas.addEventListener('auxclick', handleAuxClick);
-    return () => { canvas.removeEventListener('mousedown', handleMouseDown); window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); canvas.removeEventListener('wheel', handleWheel); canvas.removeEventListener('auxclick', handleAuxClick); };
-  }, []);
+  const {
+    isSelecting: isBoxSelecting,
+    rectStyle: boxSelectionRectStyle,
+    startSelection: startBoxSelection,
+    cancelSelection: cancelBoxSelection,
+  } = useCanvasBoxSelection({
+    screenToWorld,
+    onSelect: onSelectTablesInRect,
+  });
 
   // Drag-to-connect — use ref for latest dragState to fix timing bug
   useEffect(() => {
@@ -242,32 +238,6 @@ export function Canvas({
     return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
   }, [dragState, isEnumTableId, onCreateRelation]);
 
-  // Rubber-band selection
-  useEffect(() => {
-    if (!selectionRect) return;
-    const handleMouseMove = (e: MouseEvent) => {
-      setSelectionRect(prev => prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null);
-    };
-    const handleMouseUp = () => {
-      if (selectionRect) {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const rect = canvas.getBoundingClientRect();
-          const s = selectionRect;
-          const x1 = (Math.min(s.startX, s.currentX) - rect.left - pan.x) / zoom;
-          const y1 = (Math.min(s.startY, s.currentY) - rect.top - pan.y) / zoom;
-          const x2 = (Math.max(s.startX, s.currentX) - rect.left - pan.x) / zoom;
-          const y2 = (Math.max(s.startY, s.currentY) - rect.top - pan.y) / zoom;
-          onSelectTablesInRect({ x: x1, y: y1, w: x2 - x1, h: y2 - y1 });
-        }
-      }
-      setSelectionRect(null);
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
-  }, [selectionRect, pan, zoom, onSelectTablesInRect]);
-
   // Group drag — now state-based for proper lifecycle
   useEffect(() => {
     if (!groupDragging) return;
@@ -277,11 +247,14 @@ export function Canvas({
       groupDragStart.current = { x: e.clientX, y: e.clientY };
       onMoveSelectedTables(dx, dy);
     };
-    const handleMouseUp = () => { setGroupDragging(false); };
+    const handleMouseUp = () => {
+      onTablesDragStop?.(Array.from(selectedTableIds));
+      setGroupDragging(false);
+    };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
-  }, [groupDragging, onMoveSelectedTables]);
+  }, [groupDragging, onMoveSelectedTables, onTablesDragStop, selectedTableIds, zoomRef]);
 
   // Delete key
   useEffect(() => {
@@ -299,24 +272,25 @@ export function Canvas({
         setContextMenu(null);
         setPendingDeleteIds(null);
         setConvertConfirmTableId(null);
+        cancelBoxSelection();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedTableIds, onClearMultiSelection]);
+  }, [cancelBoxSelection, selectedTableId, selectedTableIds, onClearMultiSelection]);
 
   const handleFieldDragStart = useCallback((info: DragFieldInfo, e: React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
+    const worldPoint = screenToWorld(e.nativeEvent);
+    if (!worldPoint) return;
+
     setDragState({
       source: info,
-      startWorldX: (e.clientX - rect.left - pan.x) / zoom,
-      startWorldY: (e.clientY - rect.top - pan.y) / zoom,
+      startWorldX: worldPoint.x,
+      startWorldY: worldPoint.y,
       currentScreenX: e.clientX, currentScreenY: e.clientY,
       targetTableId: null, targetFieldId: null,
     });
-  }, [pan, zoom]);
+  }, [screenToWorld]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -325,17 +299,15 @@ export function Canvas({
     setContextMenu(null);
     setShowDomainSubmenu(false);
     if (!e.shiftKey) onClearMultiSelection();
-    setSelectionRect({ startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY });
+    startBoxSelection(e);
   };
 
   // Context menu handler - rich context-aware menu
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const worldX = (e.clientX - rect.left - pan.x) / zoom;
-    const worldY = (e.clientY - rect.top - pan.y) / zoom;
+    const worldPoint = screenToWorld(e.nativeEvent);
+    if (!worldPoint) return;
+    const { x: worldX, y: worldY } = worldPoint;
 
     const target = e.target as HTMLElement;
     const isInCurrentSelection = (tableId: string) =>
@@ -498,16 +470,18 @@ export function Canvas({
 
   const drawDragLine = () => {
     if (!dragState) return null;
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
     const st = tables.find(t => t.id === dragState.source.tableId);
     if (!st) return null;
     const fi = st.fields.findIndex(f => f.id === dragState.source.fieldId);
     if (fi === -1) return null;
     const startY = st.position.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
-    const rect = canvas.getBoundingClientRect();
-    const endX = (dragState.currentScreenX - rect.left - pan.x) / zoom;
-    const endY = (dragState.currentScreenY - rect.top - pan.y) / zoom;
+    const endPoint = screenToWorld({
+      clientX: dragState.currentScreenX,
+      clientY: dragState.currentScreenY,
+    });
+    if (!endPoint) return null;
+    const endX = endPoint.x;
+    const endY = endPoint.y;
     const startX = endX > st.position.x + TABLE_WIDTH / 2 ? st.position.x + TABLE_WIDTH : st.position.x;
     const hasTarget = !!dragState.targetTableId;
     let compat: TypeCompatibility = 'exact';
@@ -525,15 +499,6 @@ export function Canvas({
     const cpOff = Math.max(60, Math.abs(startX - endX) * 0.4);
     const path = `M ${startX} ${startY} C ${startX + dir * cpOff} ${startY}, ${endX} ${endY}, ${endX} ${endY}`;
     return (<g><path d={path} fill="none" stroke={color} strokeWidth={2} strokeDasharray="6 3" className="pointer-events-none" /><circle cx={endX} cy={endY} r={5} fill={color} className="pointer-events-none" /></g>);
-  };
-
-  const getSelectionRectStyle = () => {
-    if (!selectionRect) return null;
-    const x = Math.min(selectionRect.startX, selectionRect.currentX);
-    const y = Math.min(selectionRect.startY, selectionRect.currentY);
-    const w = Math.abs(selectionRect.currentX - selectionRect.startX);
-    const h = Math.abs(selectionRect.currentY - selectionRect.startY);
-    return { left: x, top: y, width: w, height: h };
   };
 
   const handleTablePositionChange = useCallback((id: string, position: { x: number; y: number }) => {
@@ -612,14 +577,15 @@ export function Canvas({
       if (hitPath) hitPath.setAttribute('d', pathD);
       if (visPath) visPath.setAttribute('d', pathD);
     }
-  }, []);
+  }, [canvasRef]);
 
-  const handleTableDragStop = useCallback((_tableId: string) => {
+  const handleTableDragStop = useCallback((tableId: string) => {
     dragOverrideRef.current = null;
-  }, []);
+    onTableDragStop?.(tableId);
+  }, [onTableDragStop]);
 
   const zoomPercent = Math.round(zoom * 100);
-  const selRectStyle = getSelectionRectStyle();
+  const selRectStyle = boxSelectionRectStyle;
 
   // LOD level based on zoom
   const lodLevel: 'full' | 'compact' | 'minimal' = zoom > 0.45 ? 'full' : zoom > 0.2 ? 'compact' : 'minimal';
@@ -644,7 +610,7 @@ export function Canvas({
       const ty2 = t.position.y + tableH;
       return tx2 >= x1 && t.position.x <= x2 && ty2 >= y1 && t.position.y <= y2;
     });
-  }, [tables, pan.x, pan.y, zoom, selectedTableId, selectedTableIds]);
+  }, [canvasRef, tables, pan.x, pan.y, zoom, selectedTableId, selectedTableIds]);
 
   // Determine which tables are "focused" for the dimming feature (#6)
   const hasSelection = !!selectedTableId || selectedTableIds.size > 0;
@@ -661,7 +627,7 @@ export function Canvas({
       const rect = canvasRef.current.getBoundingClientRect();
       viewportRef.current = { pan, zoom, width: rect.width, height: rect.height };
     }
-  }, [pan, zoom, viewportRef]);
+  }, [canvasRef, pan, zoom, viewportRef]);
 
   // Expose centerOnTable function to parent
   useEffect(() => {
@@ -669,51 +635,30 @@ export function Canvas({
       centerOnTableRef.current = (tableId: string) => {
         const table = tables.find(t => t.id === tableId);
         if (table) {
-          const canvas = canvasRef.current;
-          if (canvas) {
-            const rect = canvas.getBoundingClientRect();
-            const tableHeight = HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT;
-            const centerX = table.position.x + TABLE_WIDTH / 2;
-            const centerY = table.position.y + tableHeight / 2;
-            setPan({ x: rect.width / 2 - centerX * zoom, y: rect.height / 2 - centerY * zoom });
-          }
+          const tableHeight = HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT;
+          centerOnBounds({
+            minX: table.position.x,
+            minY: table.position.y,
+            maxX: table.position.x + TABLE_WIDTH,
+            maxY: table.position.y + tableHeight,
+            width: TABLE_WIDTH,
+            height: tableHeight,
+          }, zoomRef.current);
         }
       };
     }
-  }, [tables, canvasRef, centerOnTableRef, zoom]);
+  }, [centerOnBounds, centerOnTableRef, tables, zoomRef]);
 
   // Expose zoomToFit function to parent
   useEffect(() => {
     if (zoomToFitRef) {
       zoomToFitRef.current = () => {
-        if (tables.length === 0) return;
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const PADDING = 60;
-
-        // Calculate bounding box of all tables
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const t of tables) {
-          minX = Math.min(minX, t.position.x);
-          minY = Math.min(minY, t.position.y);
-          maxX = Math.max(maxX, t.position.x + TABLE_WIDTH);
-          maxY = Math.max(maxY, t.position.y + HEADER_HEIGHT + t.fields.length * FIELD_HEIGHT);
-        }
-
-        const contentW = maxX - minX + PADDING * 2;
-        const contentH = maxY - minY + PADDING * 2;
-        const newZoom = Math.min(
-          Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, rect.width / contentW, rect.height / contentH)),
-          1.5
-        );
-        const centerX = (minX + maxX) / 2;
-        const centerY = (minY + maxY) / 2;
-        setPan({ x: rect.width / 2 - centerX * newZoom, y: rect.height / 2 - centerY * newZoom });
-        setZoom(newZoom);
+        const bounds = getTablesCanvasBounds(tables);
+        if (!bounds) return;
+        zoomToBounds(bounds, 60, 1.5);
       };
     }
-  }, [tables, canvasRef, zoomToFitRef]);
+  }, [tables, zoomToBounds, zoomToFitRef]);
 
   // Drag tooltip
   const dragTooltip = dragState && (() => {
@@ -990,28 +935,13 @@ export function Canvas({
   return (
     <div
       ref={canvasRef}
-      className={`relative size-full overflow-hidden ${darkMode ? 'bg-[#11111b]' : 'bg-gray-50'}`}
+      data-canvas-theme={darkMode ? 'dark' : 'light'}
+      className="canvas-surface relative size-full overflow-hidden"
       onMouseDown={handleCanvasMouseDown}
       onContextMenu={handleContextMenu}
-      style={{ cursor: dragState ? 'crosshair' : selectionRect ? 'crosshair' : undefined }}
+      style={{ cursor: isCanvasPanning ? 'grabbing' : dragState ? 'crosshair' : isBoxSelecting ? 'crosshair' : undefined }}
     >
-      {/* Background grid */}
-      {(() => {
-        const baseStep = 20;
-        let step = baseStep;
-        if (zoom < 0.25) step = baseStep * 4;
-        else if (zoom < 0.5) step = baseStep * 2;
-        const screenStep = step * zoom;
-        const dotR = zoom < 0.35 ? 0.5 : 1;
-        const dotColor = darkMode ? '#313244' : '#d1d5db';
-        return (
-          <div className="absolute inset-0" style={{
-            backgroundImage: `radial-gradient(circle, ${dotColor} ${dotR}px, transparent ${dotR}px)`,
-            backgroundSize: `${screenStep}px ${screenStep}px`,
-            backgroundPosition: `${pan.x}px ${pan.y}px`,
-          }} />
-        );
-      })()}
+      <CanvasGridBackground pan={pan} zoom={zoom} darkMode={darkMode} />
 
       {/* Transformed layer */}
       <div className="absolute inset-0 origin-top-left" style={{
@@ -1135,15 +1065,9 @@ export function Canvas({
         </div>
       )}
 
-      {/* Zoom indicator */}
-      <div className={`absolute bottom-12 right-3 backdrop-blur-sm border rounded-lg px-3 py-1.5 text-xs shadow-sm select-none ${
-        darkMode ? 'bg-[#1e1e2e]/90 border-[#45475a] text-[#a6adc8]' : 'bg-white/90 border-gray-200 text-gray-600'
-      }`}>{zoomPercent}% {tables.length > 0 && visibleTables.length < tables.length && <span className="ml-1 opacity-60">({visibleTables.length}/{tables.length})</span>}</div>
-      <div className={`absolute bottom-12 left-3 backdrop-blur-sm border rounded-lg px-3 py-1.5 text-xs shadow-sm select-none ${
-        darkMode ? 'bg-[#1e1e2e]/90 border-[#45475a] text-[#585b70]' : 'bg-white/90 border-gray-200 text-gray-400'
-      }`}>
-        Scroll: pan · Shift+scroll: pan X · Ctrl+wheel: zoom
-      </div>
+      <CanvasZoomIndicator darkMode={darkMode}>
+        {zoomPercent}% {tables.length > 0 && visibleTables.length < tables.length && <span className="ml-1 opacity-60">({visibleTables.length}/{tables.length})</span>}
+      </CanvasZoomIndicator>
     </div>
   );
 }

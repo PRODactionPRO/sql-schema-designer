@@ -1,18 +1,40 @@
 import { useEffect, useRef, useState } from 'react';
 import { INITIAL_WINDOWS, createTab } from './catalog';
 import { getNextActiveTabId, relocateTab } from './tab-utils';
-import type { TabType, WorkspaceWindowId } from './types';
+import type { TabType, WorkspaceWindow, WorkspaceWindowId } from './types';
+import { cloneWorkspaceWindows } from './workspace-layout-preferences';
 
-export function useWorkspaceTabs() {
-  const [windows, setWindows] = useState(INITIAL_WINDOWS);
+export function useWorkspaceTabs(initialWindows?: Record<WorkspaceWindowId, WorkspaceWindow> | null) {
+  const [windows, setWindows] = useState(() => cloneWorkspaceWindows(initialWindows ?? INITIAL_WINDOWS));
   const windowsRef = useRef(windows);
+  const appliedInitialWindowsRef = useRef<Record<WorkspaceWindowId, WorkspaceWindow> | null>(initialWindows ?? null);
 
   useEffect(() => {
     windowsRef.current = windows;
   }, [windows]);
 
+  useEffect(() => {
+    if (!initialWindows || appliedInitialWindowsRef.current === initialWindows) return;
+
+    const nextWindows = cloneWorkspaceWindows(initialWindows);
+    appliedInitialWindowsRef.current = initialWindows;
+    windowsRef.current = nextWindows;
+    setWindows(nextWindows);
+  }, [initialWindows]);
+
+  const commitWindows = (
+    updater: Record<WorkspaceWindowId, WorkspaceWindow>
+      | ((current: Record<WorkspaceWindowId, WorkspaceWindow>) => Record<WorkspaceWindowId, WorkspaceWindow>),
+  ) => {
+    setWindows((current) => {
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      windowsRef.current = next;
+      return next;
+    });
+  };
+
   const activateTab = (windowId: WorkspaceWindowId, tabId: string) => {
-    setWindows((current) => ({
+    commitWindows((current) => ({
       ...current,
       [windowId]: {
         ...current[windowId],
@@ -22,7 +44,7 @@ export function useWorkspaceTabs() {
   };
 
   const closeTab = (windowId: WorkspaceWindowId, tabId: string) => {
-    setWindows((current) => {
+    commitWindows((current) => {
       const source = current[windowId];
       const removedIndex = source.tabs.findIndex((tab) => tab.id === tabId);
       if (removedIndex < 0) return current;
@@ -42,7 +64,7 @@ export function useWorkspaceTabs() {
   };
 
   const addTab = (windowId: WorkspaceWindowId, type: TabType) => {
-    setWindows((current) => {
+    commitWindows((current) => {
       const nextTab = createTab(type);
       const target = current[windowId];
 
@@ -57,17 +79,17 @@ export function useWorkspaceTabs() {
     });
   };
 
+  const replaceWindows = (nextWindows: Record<WorkspaceWindowId, WorkspaceWindow>) => {
+    commitWindows(cloneWorkspaceWindows(nextWindows));
+  };
+
   const moveTab = (
     fromWindowId: WorkspaceWindowId,
     tabId: string,
     toWindowId: WorkspaceWindowId,
     targetIndex: number,
   ) => {
-    setWindows((current) => {
-      const next = relocateTab(current, fromWindowId, tabId, toWindowId, targetIndex);
-      windowsRef.current = next;
-      return next;
-    });
+    commitWindows((current) => relocateTab(current, fromWindowId, tabId, toWindowId, targetIndex));
   };
 
   return {
@@ -77,5 +99,6 @@ export function useWorkspaceTabs() {
     closeTab,
     addTab,
     moveTab,
+    replaceWindows,
   };
 }

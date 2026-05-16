@@ -5,7 +5,9 @@ import {
   PanelLeftClose,
   PanelRight,
   PanelRightClose,
+  Redo2,
   Sparkles,
+  Undo2,
 } from 'lucide-react';
 import { PanelResizeHandle } from 'react-resizable-panels';
 import { IconButton } from '@/shared/ui/icon-button';
@@ -18,6 +20,10 @@ export function TopApplicationBar({
   onToggleBottom,
   onToggleLeft,
   onToggleRight,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
 }: {
   bottomVisible: boolean;
   leftVisible: boolean;
@@ -25,6 +31,10 @@ export function TopApplicationBar({
   onToggleBottom: () => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }) {
   return (
     <header className="flex h-10 shrink-0 items-center justify-between px-3 text-sm">
@@ -45,6 +55,22 @@ export function TopApplicationBar({
         </nav>
       </div>
       <div className="flex items-center gap-2">
+        <IconButton
+          label="Undo"
+          inactiveClassName="text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          onClick={onUndo}
+          disabled={!canUndo}
+        >
+          <Undo2 className="size-4" />
+        </IconButton>
+        <IconButton
+          label="Redo"
+          inactiveClassName="text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          onClick={onRedo}
+          disabled={!canRedo}
+        >
+          <Redo2 className="size-4" />
+        </IconButton>
         <IconButton
           label="Left panel"
           active={!leftVisible}
@@ -83,16 +109,23 @@ export function TopApplicationBar({
 export function ResizeHandle({
   orientation,
   onDragging,
+  disabled = false,
+  hidden = false,
 }: {
   orientation: 'horizontal' | 'vertical';
   onDragging?: (isDragging: boolean) => void;
+  disabled?: boolean;
+  hidden?: boolean;
 }) {
   return (
     <PanelResizeHandle
+      disabled={disabled}
       onDragging={onDragging}
       className={cn(
         'group relative shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-400',
-        orientation === 'horizontal' ? 'w-2.5 cursor-col-resize px-[4px]' : 'h-2.5 cursor-row-resize py-[4px]',
+        orientation === 'horizontal'
+          ? (hidden ? 'w-0 cursor-default px-0 opacity-0' : 'w-2.5 cursor-col-resize px-[4px]')
+          : (hidden ? 'h-0 cursor-default py-0 opacity-0' : 'h-2.5 cursor-row-resize py-[4px]'),
       )}
     >
       <span

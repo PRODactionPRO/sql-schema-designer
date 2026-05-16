@@ -20,6 +20,7 @@ interface UseDomainsPanelViewModelParams {
   onAssignDomain: (domainId: string, tableIds: string[]) => void;
   onUpdateDomain: (id: string, updates: Partial<Omit<Domain, 'id'>>) => void;
   onDeleteDomain: (id: string) => void;
+  onReorderDomains: (orderedIds: string[]) => void;
   handleAddDomain: () => void;
 }
 
@@ -43,6 +44,7 @@ export interface DomainsPanelViewModel {
   onAssignDomain: (domainId: string, tableIds: string[]) => void;
   onUpdateDomain: (id: string, updates: Partial<Omit<Domain, 'id'>>) => void;
   onDeleteDomain: (id: string) => void;
+  onReorderDomains: (orderedIds: string[]) => void;
 }
 
 export function useDomainsPanelViewModel({
@@ -63,6 +65,7 @@ export function useDomainsPanelViewModel({
   onAssignDomain,
   onUpdateDomain,
   onDeleteDomain,
+  onReorderDomains,
   handleAddDomain,
 }: UseDomainsPanelViewModelParams): DomainsPanelViewModel {
   const onStartAddDomain = useCallback(() => setIsAddingDomain(true), [setIsAddingDomain]);
@@ -95,6 +98,7 @@ export function useDomainsPanelViewModel({
     onAssignDomain,
     onUpdateDomain,
     onDeleteDomain,
+    onReorderDomains,
   }), [
     domains,
     editingDomainId,
@@ -106,6 +110,7 @@ export function useDomainsPanelViewModel({
     onCancelAddDomain,
     onChangeNewDomainName,
     onDeleteDomain,
+    onReorderDomains,
     onSetEditingDomainId,
     onSetRenamingDomainId,
     onSetRenamingDomainName,

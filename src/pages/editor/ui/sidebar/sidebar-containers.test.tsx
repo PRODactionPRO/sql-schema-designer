@@ -83,6 +83,7 @@ function DomainsPanelHarness({ onUpdateDomain }: { onUpdateDomain: DomainsPanelV
     onAssignDomain: vi.fn(),
     onUpdateDomain,
     onDeleteDomain: vi.fn(),
+    onReorderDomains: vi.fn(),
   };
 
   return <DomainsPanel viewModel={viewModel} />;

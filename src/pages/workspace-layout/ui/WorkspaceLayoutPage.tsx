@@ -1,22 +1,24 @@
 import { createPortal } from 'react-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
 import { Panel, PanelGroup } from 'react-resizable-panels';
-import { getProjectById } from '@/shared/api/projects';
 import { useAuthStore } from '@/shared/auth/store';
 import { cn } from '@/shared/ui/utils';
+import { useWorkspaceGlobalHistoryShortcuts } from '../model/useWorkspaceGlobalHistoryShortcuts';
 import { useWorkspaceLayout } from '../model/useWorkspaceLayout';
+import { useWorkspaceLayoutPersistence, useWorkspaceLayoutPreference } from '../model/useWorkspaceLayoutPreference';
+import { useWorkspaceProjectData } from '../model/useWorkspaceProjectData';
 import { ResizeHandle, TopApplicationBar } from './WorkspaceChrome';
 import { AddTabMenu, SearchFilterMenu } from './WorkspaceMenus';
 import { WorkspacePane } from './WorkspacePane';
-import type { WorkspaceWindowId } from '../model/types';
+import type { WorkspaceSelection, WorkspaceWindowId } from '../model/types';
 
 export function WorkspaceLayoutPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isProjectWorkspace = Boolean(projectId);
+  const [selection, setSelection] = useState<WorkspaceSelection | null>(null);
 
   useEffect(() => {
     if (isProjectWorkspace && !isAuthenticated) {
@@ -24,14 +26,35 @@ export function WorkspaceLayoutPage() {
     }
   }, [isAuthenticated, isProjectWorkspace, navigate]);
 
-  const projectQuery = useQuery({
-    queryKey: ['project', projectId],
-    queryFn: () => getProjectById(projectId!),
+  const {
+    activeProject,
+    projectLoading,
+    projectError,
+    handleProjectChange,
+    canUndoProject,
+    canRedoProject,
+    undoProject,
+    redoProject,
+  } = useWorkspaceProjectData({
+    projectId,
     enabled: isProjectWorkspace && isAuthenticated,
+  });
+  const { initialWorkspaceLayout, preferenceLoaded } = useWorkspaceLayoutPreference({
+    projectId,
+    enabled: isProjectWorkspace && isAuthenticated,
+  });
+
+  useWorkspaceGlobalHistoryShortcuts({
+    onUndo: undoProject,
+    onRedo: redoProject,
   });
 
   const {
     windows,
+    tabHeaderWindows,
+    workspaceLayoutState,
+    canvasViewports,
+    hydrationRevision,
     addMenu,
     draggingTabId,
     heldTabId,
@@ -41,15 +64,20 @@ export function WorkspaceLayoutPage() {
     layoutAnimating,
     addMenuRef,
     searchFilterMenuRef,
+    rootGroupRef,
+    leftGroupRef,
     centerGroupRef,
     leftPanelRef,
     rightPanelRef,
     behaviorPanelRef,
+    panelLayouts,
     catalogGroups,
     activateTab,
     closeTab,
     addTab,
+    updateCanvasViewport,
     openAddMenu,
+    commitPanelLayout,
     syncPanelVisibility,
     handleResizeDragging,
     toggleLeftColumn,
@@ -61,7 +89,13 @@ export function WorkspaceLayoutPage() {
     toggleSearchFilterMenu,
     startBottomHeaderResize,
     startTabPointerDrag,
-  } = useWorkspaceLayout();
+  } = useWorkspaceLayout(initialWorkspaceLayout);
+
+  useWorkspaceLayoutPersistence({
+    projectId,
+    enabled: isProjectWorkspace && isAuthenticated && preferenceLoaded,
+    layoutState: workspaceLayoutState,
+  });
 
   if (isProjectWorkspace && !isAuthenticated) {
     return null;
@@ -71,9 +105,13 @@ export function WorkspaceLayoutPage() {
     <WorkspacePane
       key={windowId}
       windowState={windows[windowId]}
-      project={projectQuery.data}
-      projectLoading={projectQuery.isLoading}
-      projectError={projectQuery.error instanceof Error ? projectQuery.error.message : null}
+      headerWindowState={tabHeaderWindows[windowId]}
+      project={activeProject}
+      projectLoading={projectLoading}
+      projectError={projectError}
+      selection={selection}
+      canvasViewports={canvasViewports}
+      viewportRestoreKey={hydrationRevision}
       className={className}
       draggingTabId={draggingTabId}
       heldTabId={heldTabId}
@@ -89,6 +127,9 @@ export function WorkspaceLayoutPage() {
       onResizeHeaderPointerDown={windowId === 'behavior' ? startBottomHeaderResize : undefined}
       onToggleSearchFilterMenu={toggleSearchFilterMenu}
       onStartTabDrag={startTabPointerDrag}
+      onProjectChange={handleProjectChange}
+      onSelectionChange={setSelection}
+      onCanvasViewportChange={updateCanvasViewport}
     />
   );
 
@@ -106,57 +147,79 @@ export function WorkspaceLayoutPage() {
         onToggleBottom={toggleBottomPanel}
         onToggleLeft={toggleLeftColumn}
         onToggleRight={toggleRightColumn}
+        canUndo={canUndoProject}
+        canRedo={canRedoProject}
+        onUndo={undoProject}
+        onRedo={redoProject}
       />
       <main className="min-h-0 flex-1 px-2 pb-2">
-        <PanelGroup direction="horizontal" className="h-full gap-0">
+        <PanelGroup
+          ref={rootGroupRef}
+          direction="horizontal"
+          className="h-full gap-0"
+          onLayout={(layout) => commitPanelLayout('root', layout)}
+        >
           <Panel
             ref={leftPanelRef}
             id="left-column"
             order={1}
-            defaultSize={18.7}
-            minSize={layoutVisibility.left ? 13 : 0}
-            maxSize={32}
+            defaultSize={panelLayouts.root[0]}
+            minSize={layoutVisibility.left ? 10 : 0}
             collapsible
             collapsedSize={0}
             onCollapse={() => syncPanelVisibility('left', false)}
             onExpand={() => syncPanelVisibility('left', true)}
           >
-            <PanelGroup direction="vertical" className="h-full">
-              <Panel id="project-pane" order={1} defaultSize={47} minSize={24}>
+            <PanelGroup
+              ref={leftGroupRef}
+              direction="vertical"
+              className="h-full"
+              onLayout={(layout) => commitPanelLayout('left', layout)}
+            >
+              <Panel id="project-pane" order={1} defaultSize={panelLayouts.left[0]} minSize={24}>
                 {renderWindow('project', 'h-full')}
               </Panel>
               <ResizeHandle orientation="vertical" />
-              <Panel id="library-pane" order={2} minSize={28}>
+              <Panel id="library-pane" order={2} defaultSize={panelLayouts.left[1]} minSize={28}>
                 {renderWindow('library', 'h-full')}
               </Panel>
             </PanelGroup>
           </Panel>
-          {layoutVisibility.left || layoutAnimating ? (
-            <ResizeHandle
-              orientation="horizontal"
-              onDragging={(isDragging) => handleResizeDragging('left', isDragging)}
-            />
-          ) : null}
-          <Panel id="center-column" order={2} defaultSize={55.5} minSize={34}>
+          <ResizeHandle
+            orientation="horizontal"
+            disabled={!layoutVisibility.left && !layoutAnimating}
+            hidden={!layoutVisibility.left && !layoutAnimating}
+            onDragging={(isDragging) => handleResizeDragging('left', isDragging)}
+          />
+          <Panel
+            id="center-column"
+            order={2}
+            defaultSize={panelLayouts.root[1]}
+            minSize={12}
+            collapsible
+            collapsedSize={0}
+          >
             <PanelGroup
               ref={centerGroupRef}
               id="workspace-layout-center-group"
               direction="vertical"
               className="h-full"
+              onLayout={(layout) => commitPanelLayout('center', layout)}
             >
-              <Panel id="canvas-pane" order={1} defaultSize={69.8} minSize={38}>
+              <Panel id="canvas-pane" order={1} defaultSize={panelLayouts.center[0]} minSize={38}>
                 {renderWindow('canvas', 'h-full')}
               </Panel>
-              {layoutVisibility.bottom || layoutAnimating ? (
-                <ResizeHandle
-                  orientation="vertical"
-                  onDragging={(isDragging) => handleResizeDragging('bottom', isDragging)}
-                />
-              ) : null}
+              <ResizeHandle
+                orientation="vertical"
+                disabled={!layoutVisibility.bottom && !layoutAnimating}
+                hidden={!layoutVisibility.bottom && !layoutAnimating}
+                onDragging={(isDragging) => handleResizeDragging('bottom', isDragging)}
+              />
               <Panel
                 ref={behaviorPanelRef}
                 id="behavior-pane"
                 order={2}
+                defaultSize={panelLayouts.center[1]}
                 minSize={layoutVisibility.bottom ? 19 : 0}
                 collapsible
                 collapsedSize={0}
@@ -167,19 +230,18 @@ export function WorkspaceLayoutPage() {
               </Panel>
             </PanelGroup>
           </Panel>
-          {layoutVisibility.right || layoutAnimating ? (
-            <ResizeHandle
-              orientation="horizontal"
-              onDragging={(isDragging) => handleResizeDragging('right', isDragging)}
-            />
-          ) : null}
+          <ResizeHandle
+            orientation="horizontal"
+            disabled={!layoutVisibility.right && !layoutAnimating}
+            hidden={!layoutVisibility.right && !layoutAnimating}
+            onDragging={(isDragging) => handleResizeDragging('right', isDragging)}
+          />
           <Panel
             ref={rightPanelRef}
             id="right-column"
             order={3}
-            defaultSize={25.8}
-            minSize={layoutVisibility.right ? 18 : 0}
-            maxSize={42}
+            defaultSize={panelLayouts.root[2]}
+            minSize={layoutVisibility.right ? 10 : 0}
             collapsible
             collapsedSize={0}
             onCollapse={() => syncPanelVisibility('right', false)}

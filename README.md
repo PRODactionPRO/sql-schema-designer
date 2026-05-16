@@ -14,6 +14,8 @@ This is a code bundle for Визуальный редактор модели д�
 - `npm run api:migrate` — apply Prisma migrations
 - `npm run api:dev` — start API (`http://localhost:3000/api`)
 - `npm run contracts:generate` — generate OpenAPI schema and typed client package
+- Swagger UI: `http://localhost:3000/api/docs`
+- Scalar API Reference: `http://localhost:3000/api/reference`
 
 Auth endpoints:
 - `POST /api/auth/register`
@@ -36,3 +38,7 @@ CI runs these checks automatically on `develop` and PRs to `develop/main`.
 - project/schema JSON is normalized via runtime guards before use
 
 Details: `guidelines/ArchitectureGuardrails.md`.
+
+## Architecture docs
+
+- [Archon semantic core, views and storage model](docs/architecture/archon-semantic-core-storage-model.md)

@@ -83,6 +83,23 @@ export interface ClassDiagramModel {
   domains: Domain[];
 }
 
+export interface ProjectSemanticObjectBinding {
+  objectId: string;
+  viewNodeId?: string;
+  metadata?: unknown;
+}
+
+export interface ProjectSemanticViewBinding {
+  viewId: string;
+  objectsByLegacyId: Record<string, ProjectSemanticObjectBinding>;
+}
+
+export interface ProjectSemanticBindings {
+  erd?: ProjectSemanticViewBinding;
+  classDiagram?: ProjectSemanticViewBinding;
+  objectsByLegacyId?: Record<string, ProjectSemanticObjectBinding>;
+}
+
 interface ProjectDocumentBase {
   id: string;
   name: string;
@@ -129,6 +146,7 @@ export interface ProjectData {
   schema: ProjectSchemaModel;
   documents: ProjectDocument[];
   settings: ProjectSettings;
+  semantic?: ProjectSemanticBindings;
 }
 
 /** Lightweight metadata shown on the project card (derived, not stored separately) */

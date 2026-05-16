@@ -4,9 +4,9 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 export function createOpenApiDocument(app: INestApplication) {
   const config = new DocumentBuilder()
     .setOpenAPIVersion('3.1.0')
-    .setTitle('SQL Schema Designer API')
+    .setTitle('Archon API')
     .setDescription(
-      'Backend API for projects, revisions, SQL views and migrations',
+      'Backend API for semantic projects, revisions, views, documents and migrations',
     )
     .setVersion('1.0.0')
     .addBearerAuth()

@@ -2,6 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
+import { apiReference } from '@scalar/nestjs-api-reference';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { createOpenApiDocument } from './openapi/swagger';
@@ -22,8 +23,8 @@ async function bootstrap() {
   const swaggerPath =
     configService.get<string>('app.swaggerPath') ??
     configService.get<string>('SWAGGER_PATH', 'docs');
-  const bodySizeLimit =
-    configService.get<string>('BODY_SIZE_LIMIT') ?? '2mb';
+  const scalarPath = configService.get<string>('SCALAR_PATH', 'reference');
+  const bodySizeLimit = configService.get<string>('BODY_SIZE_LIMIT') ?? '2mb';
   const origins =
     configService.get<string[]>('cors.origins') ??
     configService
@@ -51,6 +52,16 @@ async function bootstrap() {
   if (enableSwagger) {
     const openApiDocument = createOpenApiDocument(app);
     SwaggerModule.setup(`${globalPrefix}/${swaggerPath}`, app, openApiDocument);
+    app.use(
+      `/${globalPrefix}/${scalarPath}`,
+      apiReference({
+        content: openApiDocument,
+        layout: 'modern',
+        pageTitle: 'Archon API Reference',
+        showDeveloperTools: 'localhost',
+        theme: 'default',
+      }),
+    );
   }
 
   await app.listen(port);
