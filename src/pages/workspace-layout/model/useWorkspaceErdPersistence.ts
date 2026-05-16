@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { RefObject } from 'react';
-import { updateSemanticObjectMetadata, updateSemanticViewNodePosition } from '@/shared/api/semantic-model';
+import { moveViewNodeCommand, updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
 import type { ProjectSemanticViewBinding } from '@/shared/types/project';
 import type { Table } from '@/shared/types/schema';
 import type { ErdCanvasSnapshot } from './workspace-erd-canvas-utils';
@@ -43,12 +43,11 @@ export function useWorkspaceErdPersistence({
       ?? tablesRef.current.find((table) => table.id === tableId)?.position;
     if (!position) return;
 
-    void updateSemanticViewNodePosition(
-      projectId,
-      semanticBinding.viewId,
-      objectBinding.viewNodeId,
-      position,
-    ).catch((error) => {
+    void moveViewNodeCommand(projectId, {
+      viewId: semanticBinding.viewId,
+      nodeId: objectBinding.viewNodeId,
+      ...position,
+    }).catch((error) => {
       console.error('[workspace] Failed to save table position', error);
     });
   }, [projectId, semanticBinding, tablePositionsRef, tablesRef]);

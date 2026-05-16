@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
-import { createSemanticModelObject, deleteSemanticModelObject } from '@/shared/api/semantic-model';
+import { createObjectInViewCommand, createSemanticModelObject, deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type { ClassEntity, ClassEntityKind, ProjectData } from '@/shared/types/project';
 import type { Domain } from '@/shared/types/schema';
 import type { WorkspaceSelection } from '../model/types';
@@ -144,12 +144,24 @@ export function WorkspaceEntitiesPane({
     });
     onProjectChange(nextProject);
 
-    void createSemanticModelObject(project.id, {
-      type: kind === 'class' ? 'entity' : kind,
-      name: entity.name,
-      metadata: { ...entity },
-    }).then((object) => {
-      onProjectChange(updateProjectBinding(nextProject, entity.id, object.id, entity));
+    const classViewId = project.semantic?.classDiagram?.viewId;
+    const entityType = 'entity';
+    const createEntityObject = classViewId
+      ? createObjectInViewCommand(project.id, {
+          viewId: classViewId,
+          type: entityType,
+          name: entity.name,
+          metadata: { ...entity },
+          position: entity.position,
+        }).then(({ object, node }) => ({ object, viewNodeId: node.id }))
+      : createSemanticModelObject(project.id, {
+          type: entityType,
+          name: entity.name,
+          metadata: { ...entity },
+        }).then((object) => ({ object, viewNodeId: undefined }));
+
+    void createEntityObject.then(({ object, viewNodeId }) => {
+      onProjectChange(updateProjectBinding(nextProject, entity.id, object.id, entity, viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create entity object', error);
     });
@@ -166,7 +178,10 @@ export function WorkspaceEntitiesPane({
 
     const binding = getObjectBinding(project, entityId);
     if (binding) {
-      void deleteSemanticModelObject(project.id, binding.objectId).catch((error) => {
+      void deleteObjectFromViewCommand(project.id, {
+        objectId: binding.objectId,
+        viewId: project.semantic?.classDiagram?.viewId,
+      }).catch((error) => {
         console.error('[workspace] Failed to delete entity object', error);
       });
     }

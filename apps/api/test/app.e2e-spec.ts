@@ -21,6 +21,46 @@ interface AuthResponse {
   };
 }
 
+interface SemanticViewResponse {
+  id: string;
+  type: string;
+  name: string;
+}
+
+interface CreateObjectInViewResponse {
+  object: {
+    id: string;
+    name: string;
+    type: string;
+    metadata: unknown;
+    deletedAt?: string | null;
+  };
+  node: {
+    id: string;
+    viewId: string;
+    objectId: string;
+    x: number;
+    y: number;
+    visible: boolean;
+  };
+}
+
+interface CreateRelationInViewResponse {
+  relation: {
+    id: string;
+    sourceObjectId: string;
+    targetObjectId: string;
+    type: string;
+  };
+  edge: {
+    id: string;
+    relationId: string;
+    sourceViewNodeId: string;
+    targetViewNodeId: string;
+    visible: boolean;
+  };
+}
+
 describe('API critical flow (e2e)', () => {
   let app: INestApplication;
   let container: StartedPostgreSqlContainer;
@@ -103,6 +143,144 @@ describe('API critical flow (e2e)', () => {
 
     expect(createProjectResponse.status).toBe(201);
     const projectId = (createProjectResponse.body as { id: string }).id;
+
+    const createSemanticViewResponse = await request(app.getHttpServer())
+      .post(`/api/projects/${projectId}/semantic/commands/create-view`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        type: 'erd',
+        name: 'Primary ERD',
+        settings: { grid: true },
+      });
+
+    expect(createSemanticViewResponse.status).toBe(201);
+    const semanticView =
+      createSemanticViewResponse.body as SemanticViewResponse;
+    expect(semanticView.type).toBe('erd');
+
+    const createUsersObjectResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'table',
+        name: 'users',
+        metadata: {
+          id: 'table-users',
+          fields: [{ id: 'users-id', name: 'id', type: 'uuid' }],
+        },
+        position: { x: 100, y: 120 },
+      });
+
+    expect(createUsersObjectResponse.status).toBe(201);
+    const usersSemantic =
+      createUsersObjectResponse.body as CreateObjectInViewResponse;
+    expect(usersSemantic.object.type).toBe('table');
+    expect(usersSemantic.node.x).toBe(100);
+
+    const createPostsObjectResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'table',
+        name: 'posts',
+        metadata: {
+          id: 'table-posts',
+          fields: [{ id: 'posts-id', name: 'id', type: 'uuid' }],
+        },
+        position: { x: 420, y: 120 },
+      });
+
+    expect(createPostsObjectResponse.status).toBe(201);
+    const postsSemantic =
+      createPostsObjectResponse.body as CreateObjectInViewResponse;
+
+    const createSemanticRelationResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        sourceViewNodeId: postsSemantic.node.id,
+        targetViewNodeId: usersSemantic.node.id,
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:N',
+        },
+      });
+
+    expect(createSemanticRelationResponse.status).toBe(201);
+    const semanticRelation =
+      createSemanticRelationResponse.body as CreateRelationInViewResponse;
+    expect(semanticRelation.relation.sourceObjectId).toBe(
+      postsSemantic.object.id,
+    );
+    expect(semanticRelation.edge.sourceViewNodeId).toBe(postsSemantic.node.id);
+
+    const moveNodeResponse = await request(app.getHttpServer())
+      .post(`/api/projects/${projectId}/semantic/commands/move-view-node`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        nodeId: usersSemantic.node.id,
+        x: 160,
+        y: 180,
+      });
+
+    expect(moveNodeResponse.status).toBe(201);
+    expect((moveNodeResponse.body as { x: number; y: number }).x).toBe(160);
+
+    const updateObjectResponse = await request(app.getHttpServer())
+      .post(`/api/projects/${projectId}/semantic/commands/update-object`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        objectId: usersSemantic.object.id,
+        name: 'app_users',
+        metadata: {
+          id: 'table-users',
+          name: 'app_users',
+          fields: [{ id: 'users-id', name: 'id', type: 'uuid' }],
+        },
+      });
+
+    expect(updateObjectResponse.status).toBe(201);
+    expect((updateObjectResponse.body as { name: string }).name).toBe(
+      'app_users',
+    );
+
+    const primaryErdResponse = await request(app.getHttpServer())
+      .get(`/api/projects/${projectId}/semantic/views/primary-erd`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(primaryErdResponse.status).toBe(200);
+    expect(primaryErdResponse.body.view.nodes).toHaveLength(2);
+    expect(primaryErdResponse.body.view.edges).toHaveLength(1);
+
+    const deleteObjectResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/delete-object-from-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        objectId: postsSemantic.object.id,
+        viewId: semanticView.id,
+      });
+
+    expect(deleteObjectResponse.status).toBe(201);
+    expect(deleteObjectResponse.body.hiddenNodeIds).toContain(
+      postsSemantic.node.id,
+    );
 
     const createRevisionResponse = await request(app.getHttpServer())
       .post(`/api/projects/${projectId}/revisions`)

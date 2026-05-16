@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { updateSemanticObjectMetadata, updateSemanticViewNodePosition } from '@/shared/api/semantic-model';
+import { moveViewNodeCommand, updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
 import { deepClone } from '@/shared/lib/json';
 import type { ClassDiagramModel, ClassEntity, ClassEntityKind, ProjectSemanticViewBinding } from '@/shared/types/project';
 import { useCanvasNavigation } from '@/shared/ui/useCanvasNavigation';
@@ -153,12 +153,11 @@ export function useWorkspaceClassDiagramCanvas(
       ?? diagramRef.current.classes.find((entity) => entity.id === classId)?.position;
     if (!position) return;
 
-    void updateSemanticViewNodePosition(
-      projectId,
-      semanticBinding.viewId,
-      objectBinding.viewNodeId,
-      position,
-    ).catch((error) => {
+    void moveViewNodeCommand(projectId, {
+      viewId: semanticBinding.viewId,
+      nodeId: objectBinding.viewNodeId,
+      ...position,
+    }).catch((error) => {
       console.error('[workspace] Failed to save class position', error);
     });
   }, [projectId, semanticBinding]);

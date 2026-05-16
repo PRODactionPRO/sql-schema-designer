@@ -3,6 +3,14 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { RequestUser } from '../common/interfaces/request-user.interface';
 import { CreateModelObjectDto } from './dto/create-model-object.dto';
+import {
+  CreateObjectInViewCommandDto,
+  CreateRelationInViewCommandDto,
+  CreateSemanticViewCommandDto,
+  DeleteObjectFromViewCommandDto,
+  MoveViewNodeCommandDto,
+  UpdateObjectCommandDto,
+} from './dto/semantic-command.dto';
 import { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
 import { SemanticModelService } from './semantic-model.service';
@@ -86,6 +94,84 @@ export class SemanticModelController {
       projectId,
       user.userId,
       objectId,
+    );
+  }
+
+  @Post('commands/create-view')
+  createViewCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateSemanticViewCommandDto,
+  ) {
+    return this.semanticModelService.createViewCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/create-object-in-view')
+  createObjectInViewCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateObjectInViewCommandDto,
+  ) {
+    return this.semanticModelService.createObjectInViewCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/update-object')
+  updateObjectCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: UpdateObjectCommandDto,
+  ) {
+    return this.semanticModelService.updateObjectCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/move-view-node')
+  moveViewNodeCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: MoveViewNodeCommandDto,
+  ) {
+    return this.semanticModelService.moveViewNodeCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/delete-object-from-view')
+  deleteObjectFromViewCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: DeleteObjectFromViewCommandDto,
+  ) {
+    return this.semanticModelService.deleteObjectFromViewCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/create-relation-in-view')
+  createRelationInViewCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateRelationInViewCommandDto,
+  ) {
+    return this.semanticModelService.createRelationInViewCommand(
+      projectId,
+      user.userId,
+      dto,
     );
   }
 }
