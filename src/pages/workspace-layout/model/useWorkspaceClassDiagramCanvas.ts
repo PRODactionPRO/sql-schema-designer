@@ -5,7 +5,7 @@ import {
   createSemanticModelObject,
   deleteObjectFromViewCommand,
   moveViewNodeCommand,
-  updateSemanticObjectMetadata,
+  updateObjectCommand,
 } from '@/shared/api/semantic-model';
 import { deepClone } from '@/shared/lib/json';
 import type {
@@ -192,12 +192,19 @@ export function useWorkspaceClassDiagramCanvas(
     if (!projectId || !objectBinding) return;
 
     const baseMetadata = isRecord(objectBinding.metadata) ? objectBinding.metadata : {};
-    void updateSemanticObjectMetadata(projectId, objectBinding.objectId, {
+    const metadata = {
       ...baseMetadata,
       ...entity,
       position: entity.position,
       attributes: entity.attributes,
       methods: entity.methods,
+    };
+    void updateObjectCommand(projectId, {
+      objectId: objectBinding.objectId,
+      name: entity.name,
+      description: entity.description,
+      domainId: entity.domainId,
+      metadata,
     }).catch((error) => {
       console.error('[workspace] Failed to save class metadata', error);
     });

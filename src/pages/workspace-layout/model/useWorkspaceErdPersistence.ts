@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import type { RefObject } from 'react';
-import { moveViewNodeCommand, updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
+import { moveViewNodeCommand, updateObjectCommand } from '@/shared/api/semantic-model';
 import type { ProjectSemanticViewBinding } from '@/shared/types/project';
 import type { Table } from '@/shared/types/schema';
 import type { ErdCanvasSnapshot } from './workspace-erd-canvas-utils';
@@ -25,11 +25,18 @@ export function useWorkspaceErdPersistence({
     if (!objectBinding) return;
 
     const baseMetadata = isRecord(objectBinding.metadata) ? objectBinding.metadata : {};
-    void updateSemanticObjectMetadata(projectId, objectBinding.objectId, {
+    const metadata = {
       ...baseMetadata,
       ...table,
       position: table.position,
       fields: table.fields,
+    };
+    void updateObjectCommand(projectId, {
+      objectId: objectBinding.objectId,
+      name: table.name,
+      description: table.description,
+      domainId: table.domainId,
+      metadata,
     }).catch((error) => {
       console.error('[workspace] Failed to save table metadata', error);
     });

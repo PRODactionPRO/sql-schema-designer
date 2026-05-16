@@ -1,4 +1,4 @@
-import { updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
+import { updateObjectCommand } from '@/shared/api/semantic-model';
 import type {
   ClassDiagramProjectDocument,
   ClassEntity,
@@ -50,10 +50,17 @@ export function saveObjectMetadata(project: ProjectData, legacyId: string, metad
   const nextMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
     : {};
-
-  void updateSemanticObjectMetadata(project.id, binding.objectId, {
+  const mergedMetadata = {
     ...baseMetadata,
     ...nextMetadata,
+  };
+
+  void updateObjectCommand(project.id, {
+    objectId: binding.objectId,
+    name: typeof mergedMetadata.name === 'string' ? mergedMetadata.name : undefined,
+    description: typeof mergedMetadata.description === 'string' ? mergedMetadata.description : undefined,
+    domainId: typeof mergedMetadata.domainId === 'string' ? mergedMetadata.domainId : undefined,
+    metadata: mergedMetadata,
   }).catch((error) => {
     console.error('[workspace] Failed to save object metadata', error);
   });

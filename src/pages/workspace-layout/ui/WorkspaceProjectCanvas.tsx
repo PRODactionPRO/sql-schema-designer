@@ -7,7 +7,7 @@ import {
   moveViewNodeCommand,
 } from '@/shared/api/semantic-model';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
-import type { Field, JsonSchemaDocument, JsonSchemaFieldType, Relation } from '@/shared/types/schema';
+import type { Field, JsonSchemaDocument, JsonSchemaFieldType, Relation, Table } from '@/shared/types/schema';
 import type { ProjectData } from '@/shared/types/project';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceErdCanvas } from '../model/useWorkspaceErdCanvas';
@@ -216,6 +216,37 @@ export function ProjectErDiagramCanvas({
 
   const deleteProjectedObject = useCallback((legacyId: string) => {
     const binding = getObjectBinding(project, legacyId);
+    if (!binding) return;
+
+    void deleteObjectFromViewCommand(project.id, {
+      objectId: binding.objectId,
+      viewId: project.semantic?.erd?.viewId,
+    }).catch((error) => {
+      console.error('[workspace] Failed to delete semantic table object', error);
+    });
+  }, [project]);
+
+  const createRegularTableInView = useCallback((table: Table, nextProject: ProjectData) => {
+    const viewId = project.semantic?.erd?.viewId;
+    if (!viewId) return;
+
+    void createObjectInViewCommand(project.id, {
+      viewId,
+      type: 'table',
+      name: table.name,
+      description: table.description,
+      domainId: table.domainId,
+      metadata: { ...table },
+      position: table.position,
+    }).then(({ object, node }) => {
+      onProjectChange?.(updateProjectBinding(nextProject, table.id, object.id, object.metadata, node.id));
+    }).catch((error) => {
+      console.error('[workspace] Failed to create semantic table object', error);
+    });
+  }, [onProjectChange, project.id, project.semantic?.erd?.viewId]);
+
+  const deleteRegularTableObject = useCallback((tableId: string) => {
+    const binding = getObjectBinding(project, tableId);
     if (!binding) return;
 
     void deleteObjectFromViewCommand(project.id, {
@@ -437,6 +468,7 @@ export function ProjectErDiagramCanvas({
 
     if (regularTableIds.length > 0) {
       canvas.deleteTables(regularTableIds);
+      regularTableIds.forEach(deleteRegularTableObject);
     }
     enumIds.forEach(deleteProjectedObject);
     jsonSchemaIds.forEach(deleteProjectedObject);
@@ -449,7 +481,7 @@ export function ProjectErDiagramCanvas({
         ? jsonSchemas.filter((doc) => !jsonSchemaIds.includes(doc.id))
         : jsonSchemas,
     });
-  }, [canvas, commitSchemaWithCanvasSnapshot, deleteProjectedObject, jsonSchemas, project.schema.enums]);
+  }, [canvas, commitSchemaWithCanvasSnapshot, deleteProjectedObject, deleteRegularTableObject, jsonSchemas, project.schema.enums]);
 
   const handleAssignDomain = useCallback((domainId: string, tableIds: string[]) => {
     const enumIds = tableIds.filter(isEnumTableId).map(getEnumIdFromTableId);
@@ -890,8 +922,16 @@ export function ProjectErDiagramCanvas({
         onDeleteField={handleDeleteField}
         onCreateRelation={handleCreateRelation}
         onAddTable={(position) => {
-          canvas.addTable(position);
-          commitCanvasSnapshot();
+          const tableId = canvas.addTable(position);
+          const snapshot = canvas.getSnapshot();
+          const table = snapshot.tables.find((item) => item.id === tableId);
+          const nextProject = withSchema(project, {
+            ...project.schema,
+            tables: snapshot.tables,
+            relations: snapshot.relations,
+          });
+          onProjectChange?.(nextProject);
+          if (table) createRegularTableInView(table, nextProject);
         }}
         isEnumTableId={isEnumTableId}
         isJsonSchemaTableId={isJsonSchemaTableId}

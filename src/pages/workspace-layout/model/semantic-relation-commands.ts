@@ -1,6 +1,7 @@
 import {
   createRelationInViewCommand,
   deleteRelationFromViewCommand,
+  updateRelationCommand,
 } from '@/shared/api/semantic-model';
 import type {
   ClassRelation,
@@ -223,4 +224,51 @@ export function deleteRelationFromSemanticView(
   }
 
   deleteBinding(null);
+}
+
+export function updateErdRelationInView(
+  projectId: string,
+  semanticBinding: ProjectSemanticViewBinding | undefined,
+  relation: Relation,
+) {
+  if (!semanticBinding?.viewId) return;
+
+  const key = relationKey(projectId, semanticBinding.viewId, relation.id);
+  const binding = getRelationBinding(projectId, semanticBinding, relation.id);
+
+  const updateBinding = (resolvedBinding: ProjectSemanticRelationBinding | null | undefined) => {
+    void updateRelationCommand(projectId, {
+      relationId: resolvedBinding?.relationId,
+      legacyRelationId: relation.id,
+      type: 'references',
+      cardinalitySource: relation.type === '1:1' ? 'one' : 'many',
+      cardinalityTarget: 'one',
+      required: false,
+      metadata: { ...relation },
+    })
+      .then((modelRelation) => {
+        const nextBinding: ProjectSemanticRelationBinding = {
+          relationId: modelRelation.id,
+          viewEdgeId: resolvedBinding?.viewEdgeId,
+          metadata: modelRelation.metadata,
+        };
+        relationBindingCache.set(key, nextBinding);
+      })
+      .catch((error) => {
+        console.error('[workspace] Failed to update ERD relation', error);
+      });
+  };
+
+  if (binding) {
+    updateBinding(binding);
+    return;
+  }
+
+  const pendingCreate = pendingRelationCreates.get(key);
+  if (pendingCreate) {
+    void pendingCreate.then(updateBinding);
+    return;
+  }
+
+  updateBinding(null);
 }

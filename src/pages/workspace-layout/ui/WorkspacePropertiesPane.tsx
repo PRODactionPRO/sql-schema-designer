@@ -30,6 +30,7 @@ import {
 import {
   createErdRelationInView,
   deleteRelationFromSemanticView,
+  updateErdRelationInView,
 } from '../model/semantic-relation-commands';
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
@@ -119,12 +120,19 @@ export function PropertiesPane({
   const updateRelations = (relations: Relation[]) => {
     const nextRelationIds = new Set(relations.map((relation) => relation.id));
     const currentRelationIds = new Set(project.schema.relations.map((relation) => relation.id));
+    const currentRelationsById = new Map(project.schema.relations.map((relation) => [relation.id, relation]));
     project.schema.relations
       .filter((relation) => !nextRelationIds.has(relation.id))
       .forEach((relation) => deleteRelation(relation.id, 'erd'));
     relations
       .filter((relation) => !currentRelationIds.has(relation.id))
       .forEach(createErdRelation);
+    relations
+      .filter((relation) => {
+        const currentRelation = currentRelationsById.get(relation.id);
+        return Boolean(currentRelation) && JSON.stringify(currentRelation) !== JSON.stringify(relation);
+      })
+      .forEach((relation) => updateErdRelationInView(project.id, project.semantic?.erd, relation));
 
     applySchema({ ...project.schema, relations });
   };
