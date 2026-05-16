@@ -89,9 +89,16 @@ export interface ProjectSemanticObjectBinding {
   metadata?: unknown;
 }
 
+export interface ProjectSemanticRelationBinding {
+  relationId: string;
+  viewEdgeId?: string;
+  metadata?: unknown;
+}
+
 export interface ProjectSemanticViewBinding {
   viewId: string;
   objectsByLegacyId: Record<string, ProjectSemanticObjectBinding>;
+  relationsByLegacyId?: Record<string, ProjectSemanticRelationBinding>;
 }
 
 export interface ProjectSemanticBindings {

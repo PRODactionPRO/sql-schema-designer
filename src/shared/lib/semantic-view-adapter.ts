@@ -46,6 +46,14 @@ function getLegacyObjectId(object: SemanticModelObject): string {
   return asString(metadata.id, object.id);
 }
 
+function getLegacyRelationId(edge: SemanticViewEdge): string | undefined {
+  const relation = edge.relation;
+  if (!relation) return undefined;
+
+  const metadata = isRecord(relation.metadata) ? relation.metadata : {};
+  return asString(metadata.id, relation.id);
+}
+
 function buildViewBinding(
   payload: SemanticViewPayload,
   objectType: string,
@@ -53,6 +61,7 @@ function buildViewBinding(
   if (!payload.view) return undefined;
 
   const objectsByLegacyId: ProjectSemanticViewBinding['objectsByLegacyId'] = {};
+  const relationsByLegacyId: NonNullable<ProjectSemanticViewBinding['relationsByLegacyId']> = {};
   for (const node of payload.view.nodes) {
     if (node.object.type !== objectType) continue;
 
@@ -63,9 +72,21 @@ function buildViewBinding(
     };
   }
 
+  for (const edge of payload.view.edges) {
+    const relationId = getLegacyRelationId(edge);
+    if (!relationId || !edge.relation) continue;
+
+    relationsByLegacyId[relationId] = {
+      relationId: edge.relation.id,
+      viewEdgeId: edge.id,
+      metadata: edge.relation.metadata,
+    };
+  }
+
   return {
     viewId: payload.view.id,
     objectsByLegacyId,
+    ...(Object.keys(relationsByLegacyId).length > 0 ? { relationsByLegacyId } : {}),
   };
 }
 

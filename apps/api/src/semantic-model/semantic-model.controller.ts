@@ -8,8 +8,10 @@ import {
   CreateRelationInViewCommandDto,
   CreateSemanticViewCommandDto,
   DeleteObjectFromViewCommandDto,
+  DeleteRelationFromViewCommandDto,
   MoveViewNodeCommandDto,
   UpdateObjectCommandDto,
+  UpdateRelationCommandDto,
 } from './dto/semantic-command.dto';
 import { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
@@ -169,6 +171,32 @@ export class SemanticModelController {
     @Body() dto: CreateRelationInViewCommandDto,
   ) {
     return this.semanticModelService.createRelationInViewCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/update-relation')
+  updateRelationCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: UpdateRelationCommandDto,
+  ) {
+    return this.semanticModelService.updateRelationCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/delete-relation-from-view')
+  deleteRelationFromViewCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: DeleteRelationFromViewCommandDto,
+  ) {
+    return this.semanticModelService.deleteRelationFromViewCommand(
       projectId,
       user.userId,
       dto,

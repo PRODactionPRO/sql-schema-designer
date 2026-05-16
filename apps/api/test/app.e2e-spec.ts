@@ -51,6 +51,7 @@ interface CreateRelationInViewResponse {
     sourceObjectId: string;
     targetObjectId: string;
     type: string;
+    metadata?: unknown;
   };
   edge: {
     id: string;
@@ -228,6 +229,25 @@ describe('API critical flow (e2e)', () => {
     );
     expect(semanticRelation.edge.sourceViewNodeId).toBe(postsSemantic.node.id);
 
+    const updateSemanticRelationResponse = await request(app.getHttpServer())
+      .post(`/api/projects/${projectId}/semantic/commands/update-relation`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        relationId: semanticRelation.relation.id,
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:1',
+        },
+      });
+
+    expect(updateSemanticRelationResponse.status).toBe(201);
+    expect(updateSemanticRelationResponse.body.metadata.type).toBe('1:1');
+
     const moveNodeResponse = await request(app.getHttpServer())
       .post(`/api/projects/${projectId}/semantic/commands/move-view-node`)
       .set('Authorization', `Bearer ${token}`)
@@ -266,6 +286,35 @@ describe('API critical flow (e2e)', () => {
     expect(primaryErdResponse.status).toBe(200);
     expect(primaryErdResponse.body.view.nodes).toHaveLength(2);
     expect(primaryErdResponse.body.view.edges).toHaveLength(1);
+
+    const deleteRelationResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/delete-relation-from-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        relationId: semanticRelation.relation.id,
+        viewId: semanticView.id,
+      });
+
+    expect(deleteRelationResponse.status).toBe(201);
+    expect(deleteRelationResponse.body.hiddenEdgeIds).toContain(
+      semanticRelation.edge.id,
+    );
+
+    const primaryErdAfterRelationDeleteResponse = await request(
+      app.getHttpServer(),
+    )
+      .get(`/api/projects/${projectId}/semantic/views/primary-erd`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(primaryErdAfterRelationDeleteResponse.status).toBe(200);
+    expect(primaryErdAfterRelationDeleteResponse.body.view.nodes).toHaveLength(
+      2,
+    );
+    expect(primaryErdAfterRelationDeleteResponse.body.view.edges).toHaveLength(
+      0,
+    );
 
     const deleteObjectResponse = await request(app.getHttpServer())
       .post(

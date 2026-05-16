@@ -1,4 +1,9 @@
-import { deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
+import {
+  createRelationInViewCommand,
+  deleteObjectFromViewCommand,
+  deleteRelationFromViewCommand,
+  updateRelationCommand,
+} from '@/shared/api/semantic-model';
 import type {
   ClassEntity,
   ClassRelation,
@@ -18,6 +23,7 @@ import {
   getClassDiagram,
   getObjectBinding,
   getProjectDomains,
+  getRelationBinding,
   saveObjectMetadata,
   updateClassInProject,
   withClassDiagram,
@@ -97,7 +103,51 @@ export function PropertiesPane({
     if (updatedTable) saveObjectMetadata(project, tableId, updatedTable);
   };
 
+  const createErdRelation = (relation: Relation) => {
+    const sourceBinding = project.semantic?.erd?.objectsByLegacyId[relation.fromTableId];
+    const targetBinding = project.semantic?.erd?.objectsByLegacyId[relation.toTableId];
+    if (!project.semantic?.erd?.viewId || !sourceBinding?.viewNodeId || !targetBinding?.viewNodeId) return;
+
+    void createRelationInViewCommand(project.id, {
+      viewId: project.semantic.erd.viewId,
+      sourceViewNodeId: sourceBinding.viewNodeId,
+      targetViewNodeId: targetBinding.viewNodeId,
+      type: 'references',
+      direction: 'directed',
+      cardinalitySource: relation.type === '1:1' ? 'one' : 'many',
+      cardinalityTarget: 'one',
+      required: false,
+      metadata: { ...relation },
+    }).catch((error) => {
+      console.error('[workspace] Failed to create ERD relation', error);
+    });
+  };
+
+  const deleteRelation = (relationId: string, sourceView: 'erd' | 'classDiagram') => {
+    const binding = getRelationBinding(project, relationId, sourceView);
+    const viewId = sourceView === 'erd'
+      ? project.semantic?.erd?.viewId
+      : project.semantic?.classDiagram?.viewId;
+    if (!binding) return;
+
+    void deleteRelationFromViewCommand(project.id, {
+      relationId: binding.relationId,
+      viewId,
+    }).catch((error) => {
+      console.error('[workspace] Failed to delete relation', error);
+    });
+  };
+
   const updateRelations = (relations: Relation[]) => {
+    const nextRelationIds = new Set(relations.map((relation) => relation.id));
+    const currentRelationIds = new Set(project.schema.relations.map((relation) => relation.id));
+    project.schema.relations
+      .filter((relation) => !nextRelationIds.has(relation.id))
+      .forEach((relation) => deleteRelation(relation.id, 'erd'));
+    relations
+      .filter((relation) => !currentRelationIds.has(relation.id))
+      .forEach(createErdRelation);
+
     applySchema({ ...project.schema, relations });
   };
 
@@ -158,12 +208,24 @@ export function PropertiesPane({
 
   const updateClassRelation = (relationId: string, updates: Partial<ClassRelation>) => {
     if (!classDiagram) return;
+    const relations = classDiagram.relations.map((relation) => (
+      relation.id === relationId ? { ...relation, ...updates } : relation
+    ));
+    const updatedRelation = relations.find((relation) => relation.id === relationId);
     onProjectChange(withClassDiagram(project, {
       ...classDiagram,
-      relations: classDiagram.relations.map((relation) => (
-        relation.id === relationId ? { ...relation, ...updates } : relation
-      )),
+      relations,
     }));
+    const binding = getRelationBinding(project, relationId, 'classDiagram');
+    if (binding && updatedRelation) {
+      void updateRelationCommand(project.id, {
+        relationId: binding.relationId,
+        type: updatedRelation.type,
+        metadata: { ...updatedRelation },
+      }).catch((error) => {
+        console.error('[workspace] Failed to update class relation', error);
+      });
+    }
   };
 
   const deleteClassRelation = (relationId: string) => {
@@ -173,6 +235,7 @@ export function PropertiesPane({
       relations: classDiagram.relations.filter((relation) => relation.id !== relationId),
     }));
     onSelectionChange?.(null);
+    deleteRelation(relationId, 'classDiagram');
   };
 
   const updateDomain = (domainId: string, updates: Partial<Omit<Domain, 'id'>>) => {

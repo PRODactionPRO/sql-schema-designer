@@ -371,5 +371,9 @@ describe('semantic view adapter', () => {
       objectId: 'model:project-1:class:class-order',
       viewNodeId: 'node-model:project-1:class:class-order',
     });
+    expect(adapted?.semantic?.classDiagram?.relationsByLegacyId?.['class-relation-order-customer']).toMatchObject({
+      relationId: 'relation-class',
+      viewEdgeId: 'edge-class',
+    });
   });
 });

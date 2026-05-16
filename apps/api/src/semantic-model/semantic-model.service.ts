@@ -8,8 +8,10 @@ import type {
   CreateRelationInViewCommandDto,
   CreateSemanticViewCommandDto,
   DeleteObjectFromViewCommandDto,
+  DeleteRelationFromViewCommandDto,
   MoveViewNodeCommandDto,
   UpdateObjectCommandDto,
+  UpdateRelationCommandDto,
 } from './dto/semantic-command.dto';
 import type { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import type { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
@@ -401,6 +403,106 @@ export class SemanticModelService {
     });
   }
 
+  async updateRelationCommand(
+    projectId: string,
+    ownerId: string,
+    dto: UpdateRelationCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectRelationOrThrow(projectId, dto.relationId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const relation = await tx.modelRelation.update({
+        where: { id: dto.relationId },
+        data: {
+          type: dto.type,
+          direction: dto.direction,
+          cardinalitySource: dto.cardinalitySource,
+          cardinalityTarget: dto.cardinalityTarget,
+          required: dto.required,
+          metadata: dto.metadata
+            ? (dto.metadata as Prisma.InputJsonValue)
+            : undefined,
+        },
+      });
+
+      const edges = await tx.viewEdge.findMany({
+        where: {
+          relationId: dto.relationId,
+          view: {
+            is: {
+              projectId,
+              deletedAt: null,
+            },
+          },
+        },
+        select: { viewId: true },
+      });
+
+      await Promise.all(
+        [...new Set(edges.map((edge) => edge.viewId))].map((viewId) =>
+          this.touchView(tx, viewId),
+        ),
+      );
+
+      return relation;
+    });
+  }
+
+  async deleteRelationFromViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: DeleteRelationFromViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectRelationOrThrow(projectId, dto.relationId);
+    if (dto.viewId) await this.findProjectViewOrThrow(projectId, dto.viewId);
+
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const edges = await tx.viewEdge.findMany({
+        where: {
+          relationId: dto.relationId,
+          ...(dto.viewId ? { viewId: dto.viewId } : {}),
+          view: {
+            is: {
+              projectId,
+              deletedAt: null,
+            },
+          },
+        },
+        select: { id: true, viewId: true },
+      });
+      const edgeIds = edges.map((edge) => edge.id);
+
+      if (edgeIds.length > 0) {
+        await tx.viewEdge.updateMany({
+          where: { id: { in: edgeIds } },
+          data: { visible: false },
+        });
+      }
+
+      let relation = null;
+      if (dto.deleteRelation ?? true) {
+        relation = await tx.modelRelation.update({
+          where: { id: dto.relationId },
+          data: { deletedAt: now },
+        });
+      }
+
+      await Promise.all(
+        [...new Set(edges.map((edge) => edge.viewId))].map((viewId) =>
+          this.touchView(tx, viewId),
+        ),
+      );
+
+      return {
+        relation,
+        hiddenEdgeIds: edgeIds,
+      };
+    });
+  }
+
   private async getPrimaryView(
     projectId: string,
     ownerId: string,
@@ -486,6 +588,22 @@ export class SemanticModelService {
     }
 
     return object;
+  }
+
+  private async findProjectRelationOrThrow(projectId: string, relationId: string) {
+    const relation = await this.prisma.modelRelation.findFirst({
+      where: {
+        id: relationId,
+        projectId,
+        deletedAt: null,
+      },
+    });
+
+    if (!relation) {
+      throw new NotFoundException('Model relation not found');
+    }
+
+    return relation;
   }
 
   private async findProjectViewNodeOrThrow(

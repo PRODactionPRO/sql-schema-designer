@@ -4,6 +4,7 @@ import type {
   ClassEntity,
   ProjectData,
   ProjectSemanticObjectBinding,
+  ProjectSemanticRelationBinding,
 } from '@/shared/types/project';
 import type { Domain, EnumType, FieldType, JsonSchemaDocument, Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from './types';
@@ -25,6 +26,18 @@ export function getObjectBinding(project: ProjectData, legacyId: string): Projec
   return project.semantic?.objectsByLegacyId?.[legacyId]
     ?? project.semantic?.erd?.objectsByLegacyId[legacyId]
     ?? project.semantic?.classDiagram?.objectsByLegacyId[legacyId];
+}
+
+export function getRelationBinding(
+  project: ProjectData,
+  legacyId: string,
+  sourceView?: 'erd' | 'classDiagram',
+): ProjectSemanticRelationBinding | undefined {
+  if (sourceView === 'erd') return project.semantic?.erd?.relationsByLegacyId?.[legacyId];
+  if (sourceView === 'classDiagram') return project.semantic?.classDiagram?.relationsByLegacyId?.[legacyId];
+
+  return project.semantic?.erd?.relationsByLegacyId?.[legacyId]
+    ?? project.semantic?.classDiagram?.relationsByLegacyId?.[legacyId];
 }
 
 export function saveObjectMetadata(project: ProjectData, legacyId: string, metadata: unknown): void {

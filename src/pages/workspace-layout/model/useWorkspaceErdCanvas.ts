@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createRelationInViewCommand } from '@/shared/api/semantic-model';
 import type { ProjectData } from '@/shared/types/project';
 import type { Field, FieldType, Relation, Table } from '@/shared/types/schema';
 import { ALL_FIELD_TYPES, DOMAIN_COLORS, DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '@/shared/types/schema';
@@ -80,6 +81,26 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     tablesRef,
     tablePositionsRef,
   });
+  const saveRelation = useCallback((relation: Relation) => {
+    const sourceBinding = semanticBinding?.objectsByLegacyId[relation.fromTableId];
+    const targetBinding = semanticBinding?.objectsByLegacyId[relation.toTableId];
+    if (!project.id || !semanticBinding?.viewId || !sourceBinding?.viewNodeId || !targetBinding?.viewNodeId) return;
+
+    void createRelationInViewCommand(project.id, {
+      viewId: semanticBinding.viewId,
+      sourceViewNodeId: sourceBinding.viewNodeId,
+      targetViewNodeId: targetBinding.viewNodeId,
+      type: 'references',
+      direction: 'directed',
+      cardinalitySource: relation.type === '1:1' ? 'one' : 'many',
+      cardinalityTarget: 'one',
+      required: false,
+      metadata: { ...relation },
+    }).catch((error) => {
+      console.error('[workspace] Failed to create relation', error);
+    });
+  }, [project.id, semanticBinding]);
+
   const applySnapshot = useCallback((snapshot: ReturnType<typeof getSnapshot>) => {
     const nextSnapshot = cloneErdSnapshot(snapshot);
     tablesRef.current = nextSnapshot.tables;
@@ -287,6 +308,14 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       pushHistory();
 
       if (sourceField.isPrimaryKey) {
+        const newRelation: Relation = {
+          id: nextWorkspaceId('relation'),
+          fromTableId: toTableId,
+          fromFieldId: toFieldId,
+          toTableId: fromTableId,
+          toFieldId: fromFieldId,
+          type: '1:N',
+        };
         const nextTables = tablesRef.current.map((table) => (
           table.id === toTableId
             ? {
@@ -301,19 +330,21 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
         ));
         const nextRelations = [
           ...relationsRef.current,
-          {
-            id: nextWorkspaceId('relation'),
-            fromTableId: toTableId,
-            fromFieldId: toFieldId,
-            toTableId: fromTableId,
-            toFieldId: fromFieldId,
-            type: '1:N' as const,
-          },
+          newRelation,
         ];
         applyErdState(nextTables, nextRelations);
+        saveRelation(newRelation);
         return true;
       }
 
+      const newRelation: Relation = {
+        id: nextWorkspaceId('relation'),
+        fromTableId,
+        fromFieldId,
+        toTableId,
+        toFieldId,
+        type: '1:N',
+      };
       const nextTables = tablesRef.current.map((table) => (
         table.id === fromTableId
           ? {
@@ -328,16 +359,10 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       ));
       const nextRelations = [
         ...relationsRef.current,
-        {
-          id: nextWorkspaceId('relation'),
-          fromTableId,
-          fromFieldId,
-          toTableId,
-          toFieldId,
-          type: '1:N' as const,
-        },
+        newRelation,
       ];
       applyErdState(nextTables, nextRelations);
+      saveRelation(newRelation);
       return true;
     }
 
@@ -345,6 +370,14 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
 
     const newFieldId = nextWorkspaceId('field');
     const newFieldName = `${fromTable.name}_${sourceField.name}`;
+    const newRelation: Relation = {
+      id: nextWorkspaceId('relation'),
+      fromTableId: toTableId,
+      fromFieldId: newFieldId,
+      toTableId: fromTableId,
+      toFieldId: fromFieldId,
+      type: '1:N',
+    };
     const nextTables = tablesRef.current.map((table) => (
       table.id === toTableId
         ? {
@@ -369,18 +402,12 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     ));
     const nextRelations = [
       ...relationsRef.current,
-      {
-        id: nextWorkspaceId('relation'),
-        fromTableId: toTableId,
-        fromFieldId: newFieldId,
-        toTableId: fromTableId,
-        toFieldId: fromFieldId,
-        type: '1:N' as const,
-      },
+      newRelation,
     ];
     applyErdState(nextTables, nextRelations);
+    saveRelation(newRelation);
     return true;
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, pushHistory, saveRelation]);
 
   const toggleTableSelection = useCallback((id: string, additive: boolean) => {
     setSelectedRelation(null);

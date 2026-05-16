@@ -83,6 +83,22 @@ export interface CreateRelationInViewCommandPayload {
   };
 }
 
+export interface UpdateRelationCommandPayload {
+  relationId: string;
+  type?: string;
+  direction?: string;
+  cardinalitySource?: string;
+  cardinalityTarget?: string;
+  required?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DeleteRelationFromViewCommandPayload {
+  relationId: string;
+  viewId?: string;
+  deleteRelation?: boolean;
+}
+
 export function getPrimaryErdSemanticView(projectId: string): Promise<SemanticErdViewPayload> {
   return apiRequest<SemanticErdViewPayload>(`/projects/${projectId}/semantic/views/primary-erd`);
 }
@@ -216,6 +232,32 @@ export function createRelationInViewCommand(
 ): Promise<{ relation: SemanticModelRelation; edge: SemanticViewEdge }> {
   return apiRequest<{ relation: SemanticModelRelation; edge: SemanticViewEdge }>(
     `/projects/${projectId}/semantic/commands/create-relation-in-view`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function updateRelationCommand(
+  projectId: string,
+  payload: UpdateRelationCommandPayload,
+): Promise<SemanticModelRelation> {
+  return apiRequest<SemanticModelRelation>(
+    `/projects/${projectId}/semantic/commands/update-relation`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function deleteRelationFromViewCommand(
+  projectId: string,
+  payload: DeleteRelationFromViewCommandPayload,
+): Promise<{ relation: SemanticModelRelation | null; hiddenEdgeIds: string[] }> {
+  return apiRequest<{ relation: SemanticModelRelation | null; hiddenEdgeIds: string[] }>(
+    `/projects/${projectId}/semantic/commands/delete-relation-from-view`,
     {
       method: 'POST',
       body: JSON.stringify(payload),
