@@ -3,6 +3,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 import type { CreateModelObjectDto } from './dto/create-model-object.dto';
+import type {
+  CreateObjectInViewCommandDto,
+  CreateRelationInViewCommandDto,
+  CreateSemanticViewCommandDto,
+  DeleteObjectFromViewCommandDto,
+  MoveViewNodeCommandDto,
+  UpdateObjectCommandDto,
+} from './dto/semantic-command.dto';
 import type { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import type { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
 
@@ -154,6 +162,245 @@ export class SemanticModelService {
     });
   }
 
+  async createViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: CreateSemanticViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+
+    return this.prisma.modelView.create({
+      data: {
+        projectId,
+        type: dto.type,
+        name: dto.name,
+        description: dto.description,
+        scope: (dto.scope ?? {}) as Prisma.InputJsonValue,
+        filters: (dto.filters ?? {}) as Prisma.InputJsonValue,
+        settings: (dto.settings ?? {}) as Prisma.InputJsonValue,
+      },
+      include: {
+        nodes: {
+          include: { object: true },
+        },
+        edges: {
+          include: {
+            relation: true,
+            sourceViewNode: { include: { object: true } },
+            targetViewNode: { include: { object: true } },
+          },
+        },
+      },
+    });
+  }
+
+  async createObjectInViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: CreateObjectInViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectViewOrThrow(projectId, dto.viewId);
+
+    return this.prisma.$transaction(async (tx) => {
+      const object = await tx.modelObject.create({
+        data: {
+          projectId,
+          type: dto.type,
+          name: dto.name,
+          slug: dto.slug,
+          description: dto.description,
+          domainId: dto.domainId,
+          parentId: dto.parentId,
+          status: dto.status ?? 'active',
+          metadata: (dto.metadata ?? {}) as Prisma.InputJsonValue,
+        },
+      });
+
+      const node = await tx.viewNode.create({
+        data: {
+          viewId: dto.viewId,
+          objectId: object.id,
+          x: dto.position.x,
+          y: dto.position.y,
+          width: dto.node?.width,
+          height: dto.node?.height,
+          collapsed: dto.node?.collapsed ?? false,
+          visible: dto.node?.visible ?? true,
+          style: (dto.node?.style ?? {}) as Prisma.InputJsonValue,
+          settings: (dto.node?.settings ?? {}) as Prisma.InputJsonValue,
+        },
+        include: { object: true },
+      });
+
+      await this.touchView(tx, dto.viewId);
+
+      return { object, node };
+    });
+  }
+
+  async updateObjectCommand(
+    projectId: string,
+    ownerId: string,
+    dto: UpdateObjectCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectObjectOrThrow(projectId, dto.objectId);
+
+    return this.prisma.modelObject.update({
+      where: { id: dto.objectId },
+      data: {
+        name: dto.name,
+        slug: dto.slug,
+        description: dto.description,
+        domainId: dto.domainId,
+        parentId: dto.parentId,
+        status: dto.status,
+        metadata: dto.metadata
+          ? (dto.metadata as Prisma.InputJsonValue)
+          : undefined,
+      },
+    });
+  }
+
+  async moveViewNodeCommand(
+    projectId: string,
+    ownerId: string,
+    dto: MoveViewNodeCommandDto,
+  ) {
+    return this.updateViewNodePosition(projectId, ownerId, dto.viewId, dto.nodeId, {
+      x: dto.x,
+      y: dto.y,
+    });
+  }
+
+  async deleteObjectFromViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: DeleteObjectFromViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectObjectOrThrow(projectId, dto.objectId);
+    if (dto.viewId) await this.findProjectViewOrThrow(projectId, dto.viewId);
+
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const nodeWhere = {
+        objectId: dto.objectId,
+        ...(dto.viewId ? { viewId: dto.viewId } : {}),
+        view: {
+          is: {
+            projectId,
+            deletedAt: null,
+          },
+        },
+      };
+      const nodes = await tx.viewNode.findMany({
+        where: nodeWhere,
+        select: { id: true, viewId: true },
+      });
+      const nodeIds = nodes.map((node) => node.id);
+
+      if (nodeIds.length > 0) {
+        await tx.viewEdge.updateMany({
+          where: {
+            OR: [
+              { sourceViewNodeId: { in: nodeIds } },
+              { targetViewNodeId: { in: nodeIds } },
+            ],
+          },
+          data: { visible: false },
+        });
+        await tx.viewNode.updateMany({
+          where: { id: { in: nodeIds } },
+          data: { visible: false },
+        });
+      }
+
+      let object = null;
+      if (dto.deleteObject ?? true) {
+        await tx.modelRelation.updateMany({
+          where: {
+            projectId,
+            deletedAt: null,
+            OR: [
+              { sourceObjectId: dto.objectId },
+              { targetObjectId: dto.objectId },
+            ],
+          },
+          data: { deletedAt: now },
+        });
+        object = await tx.modelObject.update({
+          where: { id: dto.objectId },
+          data: { deletedAt: now },
+        });
+      }
+
+      await Promise.all(
+        [...new Set(nodes.map((node) => node.viewId))].map((viewId) =>
+          this.touchView(tx, viewId),
+        ),
+      );
+
+      return {
+        object,
+        hiddenNodeIds: nodeIds,
+      };
+    });
+  }
+
+  async createRelationInViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: CreateRelationInViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await this.findProjectViewOrThrow(projectId, dto.viewId);
+
+    const [sourceNode, targetNode] = await Promise.all([
+      this.findProjectViewNodeOrThrow(projectId, dto.viewId, dto.sourceViewNodeId),
+      this.findProjectViewNodeOrThrow(projectId, dto.viewId, dto.targetViewNodeId),
+    ]);
+
+    return this.prisma.$transaction(async (tx) => {
+      const relation = await tx.modelRelation.create({
+        data: {
+          projectId,
+          sourceObjectId: sourceNode.objectId,
+          targetObjectId: targetNode.objectId,
+          type: dto.type,
+          direction: dto.direction ?? 'directed',
+          cardinalitySource: dto.cardinalitySource,
+          cardinalityTarget: dto.cardinalityTarget,
+          required: dto.required ?? false,
+          metadata: (dto.metadata ?? {}) as Prisma.InputJsonValue,
+        },
+      });
+
+      const edge = await tx.viewEdge.create({
+        data: {
+          viewId: dto.viewId,
+          relationId: relation.id,
+          sourceViewNodeId: dto.sourceViewNodeId,
+          targetViewNodeId: dto.targetViewNodeId,
+          isModelRelation: true,
+          visible: dto.edge?.visible ?? true,
+          routing: dto.edge?.routing as Prisma.InputJsonValue | undefined,
+          style: (dto.edge?.style ?? {}) as Prisma.InputJsonValue,
+        },
+        include: {
+          relation: true,
+          sourceViewNode: { include: { object: true } },
+          targetViewNode: { include: { object: true } },
+        },
+      });
+
+      await this.touchView(tx, dto.viewId);
+
+      return { relation, edge };
+    });
+  }
+
   private async getPrimaryView(
     projectId: string,
     ownerId: string,
@@ -207,5 +454,74 @@ export class SemanticModelService {
         objects: contextObjects,
       },
     };
+  }
+
+  private async findProjectViewOrThrow(projectId: string, viewId: string) {
+    const view = await this.prisma.modelView.findFirst({
+      where: {
+        id: viewId,
+        projectId,
+        deletedAt: null,
+      },
+    });
+
+    if (!view) {
+      throw new NotFoundException('Semantic view not found');
+    }
+
+    return view;
+  }
+
+  private async findProjectObjectOrThrow(projectId: string, objectId: string) {
+    const object = await this.prisma.modelObject.findFirst({
+      where: {
+        id: objectId,
+        projectId,
+        deletedAt: null,
+      },
+    });
+
+    if (!object) {
+      throw new NotFoundException('Model object not found');
+    }
+
+    return object;
+  }
+
+  private async findProjectViewNodeOrThrow(
+    projectId: string,
+    viewId: string,
+    nodeId: string,
+  ) {
+    const node = await this.prisma.viewNode.findFirst({
+      where: {
+        id: nodeId,
+        viewId,
+        view: {
+          is: {
+            projectId,
+            deletedAt: null,
+          },
+        },
+        object: {
+          is: {
+            deletedAt: null,
+          },
+        },
+      },
+    });
+
+    if (!node) {
+      throw new NotFoundException('View node not found');
+    }
+
+    return node;
+  }
+
+  private touchView(tx: Prisma.TransactionClient, viewId: string) {
+    return tx.modelView.update({
+      where: { id: viewId },
+      data: { updatedAt: new Date() },
+    });
   }
 }

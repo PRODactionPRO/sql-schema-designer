@@ -1,4 +1,4 @@
-import { deleteSemanticModelObject } from '@/shared/api/semantic-model';
+import { deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type {
   ClassEntity,
   ClassRelation,
@@ -147,7 +147,10 @@ export function PropertiesPane({
 
     const binding = getObjectBinding(project, classId);
     if (binding) {
-      void deleteSemanticModelObject(project.id, binding.objectId).catch((error) => {
+      void deleteObjectFromViewCommand(project.id, {
+        objectId: binding.objectId,
+        viewId: project.semantic?.classDiagram?.viewId,
+      }).catch((error) => {
         console.error('[workspace] Failed to delete class object', error);
       });
     }

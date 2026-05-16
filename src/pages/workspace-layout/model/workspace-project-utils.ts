@@ -75,6 +75,7 @@ export function updateProjectBinding(
   legacyId: string,
   objectId: string,
   metadata: unknown,
+  viewNodeId?: string,
 ): ProjectData {
   return {
     ...project,
@@ -82,7 +83,7 @@ export function updateProjectBinding(
       ...project.semantic,
       objectsByLegacyId: {
         ...project.semantic?.objectsByLegacyId,
-        [legacyId]: { objectId, metadata },
+        [legacyId]: { objectId, metadata, viewNodeId },
       },
     },
   };
