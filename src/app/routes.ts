@@ -15,6 +15,10 @@ export const router = createBrowserRouter([
   },
   {
     path: '/project/:projectId',
+    Component: WorkspaceLayoutPage,
+  },
+  {
+    path: '/project/:projectId/home',
     Component: ProjectHomePage,
   },
   {
