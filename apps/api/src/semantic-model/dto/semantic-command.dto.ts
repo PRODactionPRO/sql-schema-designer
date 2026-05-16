@@ -219,8 +219,13 @@ export class CreateRelationInViewCommandDto {
 }
 
 export class UpdateRelationCommandDto {
+  @IsOptional()
   @IsString()
-  relationId!: string;
+  relationId?: string;
+
+  @IsOptional()
+  @IsString()
+  legacyRelationId?: string;
 
   @IsOptional()
   @IsString()
@@ -248,8 +253,13 @@ export class UpdateRelationCommandDto {
 }
 
 export class DeleteRelationFromViewCommandDto {
+  @IsOptional()
   @IsString()
-  relationId!: string;
+  relationId?: string;
+
+  @IsOptional()
+  @IsString()
+  legacyRelationId?: string;
 
   @IsOptional()
   @IsString()

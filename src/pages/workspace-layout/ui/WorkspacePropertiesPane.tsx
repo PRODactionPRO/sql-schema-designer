@@ -1,7 +1,5 @@
 import {
-  createRelationInViewCommand,
   deleteObjectFromViewCommand,
-  deleteRelationFromViewCommand,
   updateRelationCommand,
 } from '@/shared/api/semantic-model';
 import type {
@@ -29,6 +27,10 @@ import {
   withClassDiagram,
   withSchema,
 } from '../model/workspace-project-utils';
+import {
+  createErdRelationInView,
+  deleteRelationFromSemanticView,
+} from '../model/semantic-relation-commands';
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
 import { EnumProperties } from './WorkspaceEnumPropertiesPane';
@@ -104,38 +106,14 @@ export function PropertiesPane({
   };
 
   const createErdRelation = (relation: Relation) => {
-    const sourceBinding = project.semantic?.erd?.objectsByLegacyId[relation.fromTableId];
-    const targetBinding = project.semantic?.erd?.objectsByLegacyId[relation.toTableId];
-    if (!project.semantic?.erd?.viewId || !sourceBinding?.viewNodeId || !targetBinding?.viewNodeId) return;
-
-    void createRelationInViewCommand(project.id, {
-      viewId: project.semantic.erd.viewId,
-      sourceViewNodeId: sourceBinding.viewNodeId,
-      targetViewNodeId: targetBinding.viewNodeId,
-      type: 'references',
-      direction: 'directed',
-      cardinalitySource: relation.type === '1:1' ? 'one' : 'many',
-      cardinalityTarget: 'one',
-      required: false,
-      metadata: { ...relation },
-    }).catch((error) => {
-      console.error('[workspace] Failed to create ERD relation', error);
-    });
+    createErdRelationInView(project.id, project.semantic?.erd, relation);
   };
 
   const deleteRelation = (relationId: string, sourceView: 'erd' | 'classDiagram') => {
-    const binding = getRelationBinding(project, relationId, sourceView);
-    const viewId = sourceView === 'erd'
-      ? project.semantic?.erd?.viewId
-      : project.semantic?.classDiagram?.viewId;
-    if (!binding) return;
-
-    void deleteRelationFromViewCommand(project.id, {
-      relationId: binding.relationId,
-      viewId,
-    }).catch((error) => {
-      console.error('[workspace] Failed to delete relation', error);
-    });
+    const binding = sourceView === 'erd'
+      ? project.semantic?.erd
+      : project.semantic?.classDiagram;
+    deleteRelationFromSemanticView(project.id, binding, relationId);
   };
 
   const updateRelations = (relations: Relation[]) => {
@@ -220,6 +198,15 @@ export function PropertiesPane({
     if (binding && updatedRelation) {
       void updateRelationCommand(project.id, {
         relationId: binding.relationId,
+        legacyRelationId: updatedRelation.id,
+        type: updatedRelation.type,
+        metadata: { ...updatedRelation },
+      }).catch((error) => {
+        console.error('[workspace] Failed to update class relation', error);
+      });
+    } else if (updatedRelation) {
+      void updateRelationCommand(project.id, {
+        legacyRelationId: updatedRelation.id,
         type: updatedRelation.type,
         metadata: { ...updatedRelation },
       }).catch((error) => {

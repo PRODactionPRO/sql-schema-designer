@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import {
-  deleteRelationFromViewCommand,
-  moveViewNodeCommand,
-  updateSemanticObjectMetadata,
-} from '@/shared/api/semantic-model';
+import { moveViewNodeCommand, updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
 import { deepClone } from '@/shared/lib/json';
 import type { ClassDiagramModel, ClassEntity, ClassEntityKind, ProjectSemanticViewBinding } from '@/shared/types/project';
 import { useCanvasNavigation } from '@/shared/ui/useCanvasNavigation';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CLASS_CARD_WIDTH, estimateClassCardHeight } from './class-diagram-view-utils';
+import { deleteRelationFromSemanticView } from './semantic-relation-commands';
 import { reorderClassMembers } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
 
@@ -440,15 +437,8 @@ export function useWorkspaceClassDiagramCanvas(
       ...diagramRef.current,
       relations: diagramRef.current.relations.filter((relation) => relation.id !== relationId),
     });
-    const relationBinding = semanticBinding?.relationsByLegacyId?.[relationId];
-    if (!projectId || !semanticBinding?.viewId || !relationBinding) return;
-
-    void deleteRelationFromViewCommand(projectId, {
-      relationId: relationBinding.relationId,
-      viewId: semanticBinding.viewId,
-    }).catch((error) => {
-      console.error('[workspace] Failed to delete class relation', error);
-    });
+    if (!projectId) return;
+    deleteRelationFromSemanticView(projectId, semanticBinding, relationId);
   }, [applyDiagram, projectId, pushHistory, semanticBinding]);
 
   const autoLayout = useCallback(() => {

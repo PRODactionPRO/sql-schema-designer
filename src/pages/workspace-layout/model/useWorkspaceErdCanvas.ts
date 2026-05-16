@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createRelationInViewCommand } from '@/shared/api/semantic-model';
 import type { ProjectData } from '@/shared/types/project';
 import type { Field, FieldType, Relation, Table } from '@/shared/types/schema';
 import { ALL_FIELD_TYPES, DOMAIN_COLORS, DEFAULT_PROJECT_SETTINGS, getTypeCompatibility } from '@/shared/types/schema';
@@ -16,6 +15,10 @@ import {
 } from './workspace-erd-canvas-utils';
 import { reorderTableFields } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
+import {
+  createErdRelationInView,
+  deleteRelationFromSemanticView,
+} from './semantic-relation-commands';
 
 const WORKSPACE_ERD_CLIPBOARD_TYPE = 'archon/workspace-erd-selection';
 const WORKSPACE_ERD_CLIPBOARD_VERSION = 1;
@@ -82,23 +85,10 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     tablePositionsRef,
   });
   const saveRelation = useCallback((relation: Relation) => {
-    const sourceBinding = semanticBinding?.objectsByLegacyId[relation.fromTableId];
-    const targetBinding = semanticBinding?.objectsByLegacyId[relation.toTableId];
-    if (!project.id || !semanticBinding?.viewId || !sourceBinding?.viewNodeId || !targetBinding?.viewNodeId) return;
-
-    void createRelationInViewCommand(project.id, {
-      viewId: semanticBinding.viewId,
-      sourceViewNodeId: sourceBinding.viewNodeId,
-      targetViewNodeId: targetBinding.viewNodeId,
-      type: 'references',
-      direction: 'directed',
-      cardinalitySource: relation.type === '1:1' ? 'one' : 'many',
-      cardinalityTarget: 'one',
-      required: false,
-      metadata: { ...relation },
-    }).catch((error) => {
-      console.error('[workspace] Failed to create relation', error);
-    });
+    createErdRelationInView(project.id, semanticBinding, relation);
+  }, [project.id, semanticBinding]);
+  const deleteRelation = useCallback((relationId: string) => {
+    deleteRelationFromSemanticView(project.id, semanticBinding, relationId);
   }, [project.id, semanticBinding]);
 
   const applySnapshot = useCallback((snapshot: ReturnType<typeof getSnapshot>) => {
@@ -194,7 +184,9 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     pushHistory();
     const idsSet = new Set(ids);
     const nextTables = tablesRef.current.filter((table) => !idsSet.has(table.id));
+    const removedRelations = relationsRef.current.filter((relation) => idsSet.has(relation.fromTableId) || idsSet.has(relation.toTableId));
     const nextRelations = relationsRef.current.filter((relation) => !idsSet.has(relation.fromTableId) && !idsSet.has(relation.toTableId));
+    removedRelations.forEach((relation) => deleteRelation(relation.id));
     applyErdState(nextTables, nextRelations);
     setSelectedTableId((current) => current && idsSet.has(current) ? null : current);
     setSelectedTableIds((current) => {
@@ -202,7 +194,7 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       ids.forEach((id) => next.delete(id));
       return next;
     });
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, deleteRelation, pushHistory]);
 
   const updateField = useCallback((tableId: string, fieldId: string, updates: Partial<Field>) => {
     pushHistory();
@@ -248,9 +240,11 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
         ? { ...table, fields: table.fields.filter((field) => field.id !== fieldId) }
         : table
     ));
+    const removedRelations = relationsRef.current.filter((relation) => relation.fromFieldId === fieldId || relation.toFieldId === fieldId);
     const nextRelations = relationsRef.current.filter((relation) => relation.fromFieldId !== fieldId && relation.toFieldId !== fieldId);
+    removedRelations.forEach((relation) => deleteRelation(relation.id));
     applyErdState(nextTables, nextRelations);
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, deleteRelation, pushHistory]);
 
   const addTable = useCallback((position = { x: 160, y: 140 }) => {
     pushHistory();

@@ -84,7 +84,8 @@ export interface CreateRelationInViewCommandPayload {
 }
 
 export interface UpdateRelationCommandPayload {
-  relationId: string;
+  relationId?: string;
+  legacyRelationId?: string;
   type?: string;
   direction?: string;
   cardinalitySource?: string;
@@ -94,7 +95,8 @@ export interface UpdateRelationCommandPayload {
 }
 
 export interface DeleteRelationFromViewCommandPayload {
-  relationId: string;
+  relationId?: string;
+  legacyRelationId?: string;
   viewId?: string;
   deleteRelation?: boolean;
 }
