@@ -40,6 +40,7 @@ export function WorkspacePane({
   onCloseSearch,
   onSearchQueryChange,
   onCloseTab,
+  onDuplicateTab,
   onCollapseLeft,
   onMaximizeCanvas,
   onOpenSearch,
@@ -72,6 +73,7 @@ export function WorkspacePane({
   onCloseSearch: () => void;
   onSearchQueryChange: (query: string) => void;
   onCloseTab: (windowId: WorkspaceWindowId, tabId: string) => void;
+  onDuplicateTab: (windowId: WorkspaceWindowId, tabId: string) => void;
   onCollapseLeft: () => void;
   onMaximizeCanvas: () => void;
   onOpenSearch?: () => void;
@@ -144,6 +146,7 @@ export function WorkspacePane({
                       held={heldTabId === tab.id}
                       onActivate={onActivate}
                       onClose={onCloseTab}
+                      onDuplicate={onDuplicateTab}
                       onStartDrag={onStartTabDrag}
                     />
                   );

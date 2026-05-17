@@ -79,6 +79,31 @@ export function useWorkspaceTabs(initialWindows?: Record<WorkspaceWindowId, Work
     });
   };
 
+  const duplicateTab = (windowId: WorkspaceWindowId, tabId: string) => {
+    commitWindows((current) => {
+      const target = current[windowId];
+      const sourceIndex = target.tabs.findIndex((tab) => tab.id === tabId);
+      if (sourceIndex < 0) return current;
+
+      const sourceTab = target.tabs[sourceIndex];
+      const nextTab = createTab(sourceTab.type, undefined, {
+        documentId: sourceTab.documentId,
+        title: sourceTab.title,
+      });
+      const nextTabs = [...target.tabs];
+      nextTabs.splice(sourceIndex + 1, 0, nextTab);
+
+      return {
+        ...current,
+        [windowId]: {
+          ...target,
+          tabs: nextTabs,
+          activeTabId: nextTab.id,
+        },
+      };
+    });
+  };
+
   const openDocumentTab = (windowId: WorkspaceWindowId, type: TabType, documentId: string, title: string) => {
     commitWindows((current) => {
       const target = current[windowId];
@@ -149,6 +174,7 @@ export function useWorkspaceTabs(initialWindows?: Record<WorkspaceWindowId, Work
     activateTab,
     closeTab,
     addTab,
+    duplicateTab,
     openDocumentTab,
     closeDocumentTabs,
     moveTab,
