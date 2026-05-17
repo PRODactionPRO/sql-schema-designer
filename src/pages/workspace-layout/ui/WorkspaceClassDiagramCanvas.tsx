@@ -352,7 +352,9 @@ function ProjectClassDiagramCanvas({
             onEntityContextMenu={openEntityContextMenu}
             onAttributeContextMenu={(event, classId, attributeId) => openMemberContextMenu(event, classId, attributeId, 'classAttribute')}
             onMethodContextMenu={(event, classId, methodId) => openMemberContextMenu(event, classId, methodId, 'classMethod')}
+            onAttributeNameChange={canvas.updateAttributeName}
             onAttributeTypeChange={canvas.updateAttributeType}
+            onMethodNameChange={canvas.updateMethodName}
             onMethodReturnTypeChange={canvas.updateMethodReturnType}
             onReorderAttributes={canvas.reorderAttributes}
             onReorderMethods={canvas.reorderMethods}

@@ -510,6 +510,30 @@ export function useWorkspaceClassDiagramCanvas(
     });
   }, [applyDiagram, pushHistory]);
 
+  const updateAttributeName = useCallback((classId: string, attributeId: string, name: string) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+
+    const entity = diagramRef.current.classes.find((item) => item.id === classId);
+    const attribute = entity?.attributes.find((item) => item.id === attributeId);
+    if (!attribute || attribute.name === nextName) return;
+
+    pushHistory();
+    applyDiagram({
+      ...diagramRef.current,
+      classes: diagramRef.current.classes.map((item) => (
+        item.id === classId
+          ? {
+              ...item,
+              attributes: item.attributes.map((currentAttribute) => (
+                currentAttribute.id === attributeId ? { ...currentAttribute, name: nextName } : currentAttribute
+              )),
+            }
+          : item
+      )),
+    });
+  }, [applyDiagram, pushHistory]);
+
   const updateMethodReturnType = useCallback((classId: string, methodId: string, returnType: string) => {
     pushHistory();
     applyDiagram({
@@ -523,6 +547,30 @@ export function useWorkspaceClassDiagramCanvas(
               )),
             }
           : entity
+      )),
+    });
+  }, [applyDiagram, pushHistory]);
+
+  const updateMethodName = useCallback((classId: string, methodId: string, name: string) => {
+    const nextName = name.trim();
+    if (!nextName) return;
+
+    const entity = diagramRef.current.classes.find((item) => item.id === classId);
+    const method = entity?.methods.find((item) => item.id === methodId);
+    if (!method || method.name === nextName) return;
+
+    pushHistory();
+    applyDiagram({
+      ...diagramRef.current,
+      classes: diagramRef.current.classes.map((item) => (
+        item.id === classId
+          ? {
+              ...item,
+              methods: item.methods.map((currentMethod) => (
+                currentMethod.id === methodId ? { ...currentMethod, name: nextName } : currentMethod
+              )),
+            }
+          : item
       )),
     });
   }, [applyDiagram, pushHistory]);
@@ -649,7 +697,9 @@ export function useWorkspaceClassDiagramCanvas(
     duplicateClassEntity,
     addAttribute,
     addMethod,
+    updateAttributeName,
     updateAttributeType,
+    updateMethodName,
     updateMethodReturnType,
     clearClassSelection,
     addClassRelation,
