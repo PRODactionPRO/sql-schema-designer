@@ -1,9 +1,11 @@
 import type {
   ClassEntity,
   ClassRelation,
+  Idef0ProjectDocument,
   ProjectData,
   ProjectDocument,
 } from '@/shared/types/project';
+import type { Idef0Arrow, Idef0Concept, Idef0Function } from '@/shared/types/idef0';
 import type {
   Domain,
   EnumType,
@@ -20,6 +22,7 @@ import {
   saveObjectMetadata,
   updateClassInProject,
   withClassDiagram,
+  withIdef0Diagram,
   withSchema,
 } from '../model/workspace-project-utils';
 import {
@@ -32,6 +35,7 @@ import { deleteSemanticObjectProjection } from '../model/semantic-object-command
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
 import { EnumProperties } from './WorkspaceEnumPropertiesPane';
+import { Idef0ArrowPropertiesPane, Idef0ConceptPropertiesPane, Idef0FunctionPropertiesPane } from './WorkspaceIdef0PropertiesPane';
 import { JsonSchemaProperties } from './WorkspaceJsonSchemaPropertiesPane';
 import { ObjectSummaryPane } from './WorkspaceObjectSummaryPane';
 import { TableProperties } from './WorkspaceTablePropertiesPane';
@@ -75,6 +79,18 @@ export function PropertiesPane({
     : null;
   const selectedClassRelation = selection?.kind === 'relation' && selection.sourceView === 'classDiagram' && classDiagram
     ? classDiagram.relations.find((relation) => relation.id === selection.id) ?? null
+    : null;
+  const selectedIdef0Document = selection?.sourceView === 'idef0' && selection.parentId
+    ? project.documents.find((document): document is Idef0ProjectDocument => document.id === selection.parentId && document.type === 'idef0') ?? null
+    : null;
+  const selectedIdef0Function = selectedIdef0Document && selection?.kind === 'idef0Function'
+    ? selectedIdef0Document.idef0.functions.find((fn) => fn.id === selection.id) ?? null
+    : null;
+  const selectedIdef0Concept = selectedIdef0Document && selection?.kind === 'idef0Concept'
+    ? selectedIdef0Document.idef0.concepts.find((concept) => concept.id === selection.id) ?? null
+    : null;
+  const selectedIdef0Arrow = selectedIdef0Document && selection?.kind === 'relation' && selection.sourceView === 'idef0'
+    ? selectedIdef0Document.idef0.arrows.find((arrow) => arrow.id === selection.id) ?? null
     : null;
   const selectedDomain = selection?.kind === 'domain'
     ? domains.find((domain) => domain.id === selection.id) ?? null
@@ -213,6 +229,59 @@ export function PropertiesPane({
     deleteRelation(relationId, 'classDiagram');
   };
 
+  const updateIdef0Function = (document: Idef0ProjectDocument, functionId: string, updates: Partial<Idef0Function>) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      functions: document.idef0.functions.map((fn) => fn.id === functionId ? { ...fn, ...updates } : fn),
+    }));
+  };
+
+  const deleteIdef0Function = (document: Idef0ProjectDocument, functionId: string) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      functions: document.idef0.functions.filter((fn) => fn.id !== functionId),
+      arrows: document.idef0.arrows.filter((arrow) => (
+        !(arrow.source.kind === 'function' && arrow.source.id === functionId)
+        && !(arrow.target.kind === 'function' && arrow.target.id === functionId)
+      )),
+    }));
+    onSelectionChange?.(null);
+  };
+
+  const updateIdef0Concept = (document: Idef0ProjectDocument, conceptId: string, updates: Partial<Idef0Concept>) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      concepts: document.idef0.concepts.map((concept) => concept.id === conceptId ? { ...concept, ...updates } : concept),
+    }));
+  };
+
+  const deleteIdef0Concept = (document: Idef0ProjectDocument, conceptId: string) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      concepts: document.idef0.concepts.filter((concept) => concept.id !== conceptId),
+      arrows: document.idef0.arrows.filter((arrow) => (
+        !(arrow.source.kind === 'concept' && arrow.source.id === conceptId)
+        && !(arrow.target.kind === 'concept' && arrow.target.id === conceptId)
+      )),
+    }));
+    onSelectionChange?.(null);
+  };
+
+  const updateIdef0Arrow = (document: Idef0ProjectDocument, arrowId: string, updates: Partial<Idef0Arrow>) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      arrows: document.idef0.arrows.map((arrow) => arrow.id === arrowId ? { ...arrow, ...updates } : arrow),
+    }));
+  };
+
+  const deleteIdef0Arrow = (document: Idef0ProjectDocument, arrowId: string) => {
+    onProjectChange(withIdef0Diagram(project, document.id, {
+      ...document.idef0,
+      arrows: document.idef0.arrows.filter((arrow) => arrow.id !== arrowId),
+    }));
+    onSelectionChange?.(null);
+  };
+
   const updateDomain = (domainId: string, updates: Partial<Omit<Domain, 'id'>>) => {
     const nextDomains = domains.map((domain) => domain.id === domainId ? { ...domain, ...updates } : domain);
     const schema = { ...project.schema, domains: nextDomains };
@@ -286,6 +355,36 @@ export function PropertiesPane({
         classes={classDiagram.classes}
         onUpdate={(updates) => updateClassRelation(selectedClassRelation.id, updates)}
         onDelete={() => deleteClassRelation(selectedClassRelation.id)}
+      />
+    );
+  }
+
+  if (selectedIdef0Function && selectedIdef0Document) {
+    return (
+      <Idef0FunctionPropertiesPane
+        fn={selectedIdef0Function}
+        onUpdate={(updates) => updateIdef0Function(selectedIdef0Document, selectedIdef0Function.id, updates)}
+        onDelete={() => deleteIdef0Function(selectedIdef0Document, selectedIdef0Function.id)}
+      />
+    );
+  }
+
+  if (selectedIdef0Concept && selectedIdef0Document) {
+    return (
+      <Idef0ConceptPropertiesPane
+        concept={selectedIdef0Concept}
+        onUpdate={(updates) => updateIdef0Concept(selectedIdef0Document, selectedIdef0Concept.id, updates)}
+        onDelete={() => deleteIdef0Concept(selectedIdef0Document, selectedIdef0Concept.id)}
+      />
+    );
+  }
+
+  if (selectedIdef0Arrow && selectedIdef0Document) {
+    return (
+      <Idef0ArrowPropertiesPane
+        arrow={selectedIdef0Arrow}
+        onUpdate={(updates) => updateIdef0Arrow(selectedIdef0Document, selectedIdef0Arrow.id, updates)}
+        onDelete={() => deleteIdef0Arrow(selectedIdef0Document, selectedIdef0Arrow.id)}
       />
     );
   }

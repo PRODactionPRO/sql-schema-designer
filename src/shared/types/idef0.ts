@@ -12,6 +12,9 @@ export type Idef0ConceptStatus = typeof IDEF0_CONCEPT_STATUSES[number];
 export const IDEF0_ARROW_STATUSES = ['required', 'optional', 'conditional'] as const;
 export type Idef0ArrowStatus = typeof IDEF0_ARROW_STATUSES[number];
 
+export const IDEF0_ATTRIBUTE_VALUE_TYPES = ['text', 'number', 'boolean', 'date', 'reference', 'json'] as const;
+export type Idef0AttributeValueType = typeof IDEF0_ATTRIBUTE_VALUE_TYPES[number];
+
 export const IDEF0_CONCEPT_KINDS = [
   'dataset',
   'artifact',
@@ -53,6 +56,14 @@ export const IDEF0_CONCEPT_SUBTYPES = [
 
 export type Idef0ConceptSubtype = typeof IDEF0_CONCEPT_SUBTYPES[number];
 
+export interface Idef0Attribute {
+  id: string;
+  name: string;
+  value?: string;
+  valueType?: Idef0AttributeValueType;
+  description?: string;
+}
+
 export interface Idef0Function {
   id: string;
   name: string;
@@ -65,6 +76,7 @@ export interface Idef0Function {
   decompositionDiagramId?: string;
   ownerId?: string;
   sidebarOrder?: number;
+  attributes?: Idef0Attribute[];
 }
 
 export interface Idef0Concept {
@@ -79,6 +91,7 @@ export interface Idef0Concept {
   domainId?: string;
   ownerId?: string;
   linkedObjectId?: string;
+  attributes?: Idef0Attribute[];
   metadata?: Record<string, unknown>;
 }
 

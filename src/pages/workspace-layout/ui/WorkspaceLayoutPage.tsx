@@ -95,6 +95,31 @@ export function WorkspaceLayoutPage() {
     startTabPointerDrag,
   } = useWorkspaceLayout(initialWorkspaceLayout);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'INPUT'
+        || target?.tagName === 'TEXTAREA'
+        || target?.isContentEditable
+        || Boolean(target?.closest('.cm-editor'));
+      if (isTyping) return;
+
+      const isMod = event.metaKey || event.ctrlKey;
+      const isPlainFullscreen = event.code === 'KeyF' && !isMod && !event.altKey && !event.shiftKey;
+      const isModBackslash = isMod
+        && !event.altKey
+        && !event.shiftKey
+        && (event.code === 'Backslash' || event.code === 'IntlBackslash' || event.key === '\\');
+      if (!isPlainFullscreen && !isModBackslash) return;
+
+      event.preventDefault();
+      toggleCanvasMaximized();
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [toggleCanvasMaximized]);
+
   useWorkspaceLayoutPersistence({
     projectId,
     enabled: isProjectWorkspace && isAuthenticated && preferenceLoaded,
