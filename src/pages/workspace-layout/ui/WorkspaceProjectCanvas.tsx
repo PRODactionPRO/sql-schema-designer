@@ -942,6 +942,7 @@ export function ProjectErDiagramCanvas({
         onPushHistory={canvas.pushHistory}
         initialViewport={initialViewport}
         viewportRestoreKey={viewportRestoreKey}
+        resizeAnchor="document"
         onViewportChange={onViewportChange}
         onReorderField={(tableId, fromIndex, toIndex) => {
           if (isEnumTableId(tableId)) {

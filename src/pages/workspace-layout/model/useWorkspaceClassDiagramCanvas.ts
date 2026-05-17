@@ -10,7 +10,7 @@ import type {
   ProjectSemanticViewBinding,
 } from '@/shared/types/project';
 import { useCanvasNavigation } from '@/shared/ui/useCanvasNavigation';
-import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
+import type { CanvasResizeAnchor, CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CLASS_CARD_WIDTH, estimateClassCardHeight } from './class-diagram-view-utils';
 import {
   createClassRelationInView,
@@ -34,6 +34,7 @@ interface UseWorkspaceClassDiagramCanvasOptions {
   onCommit?: (diagram: ClassDiagramModel) => void;
   initialViewport?: CanvasViewport;
   viewportRestoreKey?: string | number;
+  resizeAnchor?: CanvasResizeAnchor;
   onViewportChange?: (viewport: CanvasViewport) => void;
 }
 
@@ -96,6 +97,7 @@ export function useWorkspaceClassDiagramCanvas(
     initialPan: options.initialViewport?.pan,
     initialZoom: options.initialViewport?.zoom,
     restoreKey: options.viewportRestoreKey,
+    resizeAnchor: options.resizeAnchor,
     onViewportChange: options.onViewportChange,
   });
   const diagramRef = useRef(diagram);

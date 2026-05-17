@@ -92,6 +92,7 @@ function ProjectClassDiagramCanvas({
     semanticBinding: classSemanticBinding,
     initialViewport,
     viewportRestoreKey,
+    resizeAnchor: 'document',
     onViewportChange,
     onCommit: (diagram) => onProjectChange?.(withClassDiagram(project, diagram)),
   });

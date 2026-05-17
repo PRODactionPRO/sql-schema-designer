@@ -6,7 +6,7 @@ import type { DragFieldInfo } from './TableNode';
 import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
 import { actionMenuClasses } from '@/shared/ui/action-menu-styles';
-import { useCanvasNavigation, type CanvasBounds, type CanvasViewport } from '@/shared/ui/useCanvasNavigation';
+import { useCanvasNavigation, type CanvasBounds, type CanvasResizeAnchor, type CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
 import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 
@@ -50,6 +50,7 @@ interface CanvasProps {
   onTablesDragStop?: (tableIds: string[]) => void;
   initialViewport?: CanvasViewport;
   viewportRestoreKey?: string | number;
+  resizeAnchor?: CanvasResizeAnchor;
   onViewportChange?: (viewport: CanvasViewport) => void;
   isEnumTableId?: (id: string) => boolean;
   isJsonSchemaTableId?: (id: string) => boolean;
@@ -139,6 +140,7 @@ export function Canvas({
   onTablesDragStop,
   initialViewport,
   viewportRestoreKey,
+  resizeAnchor,
   onViewportChange,
   isEnumTableId,
   isJsonSchemaTableId,
@@ -167,6 +169,7 @@ export function Canvas({
     initialPan: initialViewport?.pan,
     initialZoom: initialViewport?.zoom,
     restoreKey: viewportRestoreKey,
+    resizeAnchor,
     onViewportChange,
   });
   const [dragState, setDragState] = useState<DragState | null>(null);
