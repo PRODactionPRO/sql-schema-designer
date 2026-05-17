@@ -32,6 +32,12 @@ import {
   updateErdRelationInView,
 } from '../model/semantic-relation-commands';
 import { deleteSemanticObjectProjection } from '../model/semantic-object-commands';
+import {
+  getIdef0ConceptSize,
+  getIdef0ConceptWidthForName,
+  getIdef0FunctionSize,
+  getIdef0FunctionWidthForName,
+} from '../model/idef0-view-utils';
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
 import { EnumProperties } from './WorkspaceEnumPropertiesPane';
@@ -232,7 +238,21 @@ export function PropertiesPane({
   const updateIdef0Function = (document: Idef0ProjectDocument, functionId: string, updates: Partial<Idef0Function>) => {
     onProjectChange(withIdef0Diagram(project, document.id, {
       ...document.idef0,
-      functions: document.idef0.functions.map((fn) => fn.id === functionId ? { ...fn, ...updates } : fn),
+      functions: document.idef0.functions.map((fn) => {
+        if (fn.id !== functionId) return fn;
+        const nextFunction = { ...fn, ...updates };
+        if (typeof updates.name !== 'string') return nextFunction;
+
+        const size = getIdef0FunctionSize(fn);
+        return {
+          ...nextFunction,
+          size: {
+            ...size,
+            ...updates.size,
+            width: getIdef0FunctionWidthForName(updates.name, updates.size?.width ?? size.width),
+          },
+        };
+      }),
     }));
   };
 
@@ -251,7 +271,21 @@ export function PropertiesPane({
   const updateIdef0Concept = (document: Idef0ProjectDocument, conceptId: string, updates: Partial<Idef0Concept>) => {
     onProjectChange(withIdef0Diagram(project, document.id, {
       ...document.idef0,
-      concepts: document.idef0.concepts.map((concept) => concept.id === conceptId ? { ...concept, ...updates } : concept),
+      concepts: document.idef0.concepts.map((concept) => {
+        if (concept.id !== conceptId) return concept;
+        const nextConcept = { ...concept, ...updates };
+        if (typeof updates.name !== 'string') return nextConcept;
+
+        const size = getIdef0ConceptSize(concept);
+        return {
+          ...nextConcept,
+          size: {
+            ...size,
+            ...updates.size,
+            width: getIdef0ConceptWidthForName(updates.name, updates.size?.width ?? size.width),
+          },
+        };
+      }),
     }));
   };
 

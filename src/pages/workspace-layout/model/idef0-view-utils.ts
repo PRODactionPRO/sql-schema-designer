@@ -13,6 +13,9 @@ export const IDEF0_FUNCTION_WIDTH = 240;
 export const IDEF0_FUNCTION_HEIGHT = 128;
 export const IDEF0_CONCEPT_WIDTH = 190;
 export const IDEF0_CONCEPT_HEIGHT = 58;
+const IDEF0_INLINE_NAME_MIN_INPUT_WIDTH = 96;
+const IDEF0_INLINE_NAME_MAX_NODE_WIDTH = 640;
+const IDEF0_INLINE_NAME_CHAR_WIDTH = 7.4;
 
 export type Idef0NodeKind = 'function' | 'concept';
 export type Idef0NodeSide = 'left' | 'top' | 'right' | 'bottom' | 'center';
@@ -56,6 +59,35 @@ export function getIdef0ConceptSize(concept: Idef0Concept) {
     width: concept.size?.width ?? IDEF0_CONCEPT_WIDTH,
     height: concept.size?.height ?? IDEF0_CONCEPT_HEIGHT,
   };
+}
+
+function getInlineNameInputWidth(name: string) {
+  const normalizedName = name.trim() || 'Function';
+  return Math.max(
+    IDEF0_INLINE_NAME_MIN_INPUT_WIDTH,
+    Math.ceil(normalizedName.length * IDEF0_INLINE_NAME_CHAR_WIDTH + 24),
+  );
+}
+
+export function getIdef0FunctionWidthForName(name: string, baseWidth = IDEF0_FUNCTION_WIDTH) {
+  const headerPadding = 24;
+  const iconWidth = 14;
+  const gap = 8;
+  return Math.min(
+    IDEF0_INLINE_NAME_MAX_NODE_WIDTH,
+    Math.max(baseWidth, headerPadding + iconWidth + gap + getInlineNameInputWidth(name)),
+  );
+}
+
+export function getIdef0ConceptWidthForName(name: string, baseWidth = IDEF0_CONCEPT_WIDTH) {
+  const bodyPadding = 24;
+  const iconWidth = 24;
+  const gap = 8;
+  const handleClearance = 10;
+  return Math.min(
+    IDEF0_INLINE_NAME_MAX_NODE_WIDTH,
+    Math.max(baseWidth, bodyPadding + iconWidth + gap + handleClearance + getInlineNameInputWidth(name)),
+  );
 }
 
 export function getIdef0NodeBoxes(diagram: Idef0DiagramModel): Idef0NodeBox[] {
