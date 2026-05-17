@@ -50,6 +50,10 @@ export function useWorkspaceLayout(initialLayoutSnapshot?: WorkspaceLayoutSnapsh
     menus.closeAddMenu();
   };
 
+  const duplicateTab = (windowId: WorkspaceWindowId, tabId: string) => {
+    tabs.duplicateTab(windowId, tabId);
+  };
+
   const openDocumentTab = (
     windowId: WorkspaceWindowId,
     type: TabType,
@@ -89,6 +93,7 @@ export function useWorkspaceLayout(initialLayoutSnapshot?: WorkspaceLayoutSnapsh
     closeTab: tabs.closeTab,
     closeDocumentTabs: tabs.closeDocumentTabs,
     addTab,
+    duplicateTab,
     openDocumentTab,
     updateCanvasViewport,
     startTabPointerDrag: tabDrag.startTabPointerDrag,

@@ -78,6 +78,7 @@ export function WorkspaceLayoutPage() {
     closeTab,
     closeDocumentTabs,
     addTab,
+    duplicateTab,
     openDocumentTab,
     updateCanvasViewport,
     openAddMenu,
@@ -153,6 +154,7 @@ export function WorkspaceLayoutPage() {
       onCloseSearch={closeProjectSearch}
       onSearchQueryChange={setProjectSearchQuery}
       onCloseTab={closeTab}
+      onDuplicateTab={duplicateTab}
       onCollapseLeft={toggleLeftColumn}
       onOpenSearch={windowId === 'project' ? openProjectSearch : undefined}
       onMaximizeCanvas={toggleCanvasMaximized}

@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import {
+  Copy,
   PanelLeftClose,
   Search,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
+import { ContextMenu } from '@/shared/ui/ContextMenu';
 import { IconButton } from '@/shared/ui/icon-button';
+import { useContextMenu } from '@/shared/ui/useContextMenu';
 import { cn } from '@/shared/ui/utils';
 import { CATALOG_DISPLAY_BY_TYPE } from '../model/catalog-icons';
 import type { WorkspaceTab, WorkspaceWindowId } from '../model/types';
@@ -98,6 +101,7 @@ export function DraggableTab({
   showIcon = false,
   onActivate,
   onClose,
+  onDuplicate,
   onStartDrag,
 }: {
   tab: WorkspaceTab;
@@ -108,9 +112,11 @@ export function DraggableTab({
   showIcon?: boolean;
   onActivate: (windowId: WorkspaceWindowId, tabId: string) => void;
   onClose: (windowId: WorkspaceWindowId, tabId: string) => void;
+  onDuplicate: (windowId: WorkspaceWindowId, tabId: string) => void;
   onStartDrag: (windowId: WorkspaceWindowId, tabId: string, event: ReactPointerEvent<HTMLElement>) => void;
 }) {
   const catalogItem = showIcon ? CATALOG_DISPLAY_BY_TYPE.get(tab.type) : null;
+  const contextMenu = useContextMenu();
   const [closeVisible, setCloseVisible] = useState(false);
   const closeTimerRef = useRef<number | null>(null);
   const highlighted = active || dragging || held;
@@ -139,57 +145,81 @@ export function DraggableTab({
     }
   };
 
+  const openTabContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    contextMenu.openContextMenu(event, [
+      {
+        id: 'duplicate-tab',
+        label: 'Duplicate',
+        icon: <Copy className="size-4" />,
+        onSelect: () => onDuplicate(windowId, tab.id),
+      },
+      {
+        id: 'close-tab',
+        label: 'Close',
+        icon: <X className="size-4" />,
+        onSelect: () => onClose(windowId, tab.id),
+      },
+    ], { minWidth: 180 });
+  };
+
   return (
-    <div
-      data-testid={`workspace-tab-${tab.id}`}
-      data-tab-id={tab.id}
-      data-window-id={windowId}
-      data-tab-type={tab.type}
-      className="relative shrink-0 select-none touch-none"
-      onPointerEnter={() => {
-        if (dragging || held) return;
-        clearCloseTimer();
-        closeTimerRef.current = window.setTimeout(() => {
-          setCloseVisible(true);
-          closeTimerRef.current = null;
-        }, 3000);
-      }}
-      onPointerLeave={() => {
-        clearCloseTimer();
-        setCloseVisible(false);
-      }}
-      onPointerDown={(event) => onStartDrag(windowId, tab.id, event)}
-    >
+    <>
       <div
-        className={cn(
-          'group flex h-7 max-w-[170px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium leading-4 transition-colors',
-          highlighted ? 'bg-[#eeeff0] text-[#111827]' : 'text-[#8a919c] hover:bg-[#eeeff0]/70 hover:text-[#111827]',
-        )}
+        data-testid={`workspace-tab-${tab.id}`}
+        data-tab-id={tab.id}
+        data-window-id={windowId}
+        data-tab-type={tab.type}
+        className="relative shrink-0 select-none touch-none"
+        onContextMenu={openTabContextMenu}
+        onPointerEnter={() => {
+          if (dragging || held) return;
+          clearCloseTimer();
+          closeTimerRef.current = window.setTimeout(() => {
+            setCloseVisible(true);
+            closeTimerRef.current = null;
+          }, 3000);
+        }}
+        onPointerLeave={() => {
+          clearCloseTimer();
+          setCloseVisible(false);
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          onStartDrag(windowId, tab.id, event);
+        }}
       >
-        <button
-          type="button"
-          className={cn('flex min-w-0 flex-1 items-center gap-1.5 text-left', tabTextClassName)}
-          onClick={() => onActivate(windowId, tab.id)}
-        >
-          {catalogItem ? <span className="shrink-0 text-slate-400">{catalogItem.icon}</span> : null}
-          <span className="truncate">{tab.title}</span>
-        </button>
-        <button
-          type="button"
-          aria-label={`Close ${tab.title}`}
+        <div
           className={cn(
-            'ml-0.5 size-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700',
-            closeVisible && !dragging && !held ? 'flex' : 'hidden',
+            'group flex h-7 max-w-[170px] items-center gap-1.5 rounded-lg px-3 text-xs font-medium leading-4 transition-colors',
+            highlighted ? 'bg-[#eeeff0] text-[#111827]' : 'text-[#8a919c] hover:bg-[#eeeff0]/70 hover:text-[#111827]',
           )}
-          onClick={(event) => {
-            event.stopPropagation();
-            onClose(windowId, tab.id);
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
         >
-          <X className="size-3" />
-        </button>
+          <button
+            type="button"
+            className={cn('flex min-w-0 flex-1 items-center gap-1.5 text-left', tabTextClassName)}
+            onClick={() => onActivate(windowId, tab.id)}
+          >
+            {catalogItem ? <span className="shrink-0 text-slate-400">{catalogItem.icon}</span> : null}
+            <span className="truncate">{tab.title}</span>
+          </button>
+          <button
+            type="button"
+            aria-label={`Close ${tab.title}`}
+            className={cn(
+              'ml-0.5 size-4 items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700',
+              closeVisible && !dragging && !held ? 'flex' : 'hidden',
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose(windowId, tab.id);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <X className="size-3" />
+          </button>
+        </div>
       </div>
-    </div>
+      <ContextMenu menu={contextMenu.menu} onClose={contextMenu.closeContextMenu} />
+    </>
   );
 }
