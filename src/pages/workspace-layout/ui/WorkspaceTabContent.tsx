@@ -1,4 +1,5 @@
 import { Code2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { CODE_MODE_SNIPPET } from '../model/workspace-mock-data';
 import type {
   WorkspaceCanvasViewport,
@@ -13,6 +14,7 @@ import { ClassDiagramCanvas, DiagramCanvas } from './WorkspaceDiagramCanvases';
 import { EventsPane, GenericPane, SemanticList } from './WorkspaceInspectorPanes';
 import { WorkspaceDomainsPane } from './WorkspaceDomainsPane';
 import { WorkspaceEntitiesPane } from './WorkspaceEntitiesPane';
+import { Idef0Canvas } from './WorkspaceIdef0Canvas';
 import { ProjectTreePane } from './WorkspaceProjectTreePane';
 import { PropertiesPane } from './WorkspacePropertiesPane';
 import { ProjectErDiagramCanvas } from './WorkspaceProjectCanvas';
@@ -80,7 +82,18 @@ export function TabContent({
     const document = project?.documents.find((item): item is Extract<ProjectData['documents'][number], { type: 'idef0' }> => (
       item.id === tab.documentId && item.type === 'idef0'
     ));
-    return <Idef0Pane document={document} />;
+    return project && document ? (
+      <Idef0Canvas
+        project={project}
+        document={document}
+        selection={selection}
+        initialViewport={canvasViewports.idef0}
+        viewportRestoreKey={`idef0-${viewportRestoreKey}-${document.id}`}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onViewportChange={(viewport) => onCanvasViewportChange('idef0', viewport)}
+      />
+    ) : <PaneMessage>Select or create an IDEF0 model from the project tree.</PaneMessage>;
   }
   if (tab.type === 'aiAssistant') return <AiAssistantPane />;
   if (tab.type === 'codeMode') return <CodeModePane />;
@@ -94,42 +107,7 @@ export function TabContent({
   return <GenericPane tab={tab} windowId={windowId} />;
 }
 
-function Idef0Pane({ document }: { document?: Extract<ProjectData['documents'][number], { type: 'idef0' }> }) {
-  if (!document) return <PaneMessage>Select or create an IDEF0 model from the project tree.</PaneMessage>;
-
-  return (
-    <div className="flex h-full flex-col bg-[#f8fafc]">
-      <div className="border-b border-slate-200 bg-white px-5 py-4">
-        <div className="text-sm font-semibold text-slate-900">{document.name}</div>
-        <div className="mt-1 text-xs text-slate-500">IDEF0 functional model</div>
-      </div>
-      <div className="grid flex-1 place-items-center p-6">
-        <div className="w-full max-w-xl rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
-          <div className="font-medium text-slate-800">Canvas placeholder</div>
-          <div className="mt-2 text-xs leading-5">
-            The model contract is ready: functions, concepts, and ICOM arrows. The visual editor can now be built against this tab.
-          </div>
-          <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
-            <div className="rounded border border-slate-200 px-3 py-2">
-              <div className="text-slate-400">Functions</div>
-              <div className="mt-1 font-semibold text-slate-800">{document.idef0.functions.length}</div>
-            </div>
-            <div className="rounded border border-slate-200 px-3 py-2">
-              <div className="text-slate-400">Concepts</div>
-              <div className="mt-1 font-semibold text-slate-800">{document.idef0.concepts.length}</div>
-            </div>
-            <div className="rounded border border-slate-200 px-3 py-2">
-              <div className="text-slate-400">Arrows</div>
-              <div className="mt-1 font-semibold text-slate-800">{document.idef0.arrows.length}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PaneMessage({ children }: { children: React.ReactNode }) {
+function PaneMessage({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center px-6 text-center text-xs font-medium text-slate-400">
       {children}

@@ -926,6 +926,7 @@ function normalizeIdef0Function(value: unknown, index: number): Idef0Function {
 
 function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
   const record = isRecord(value) ? value : {};
+  const size = isRecord(record.size) ? record.size : {};
   return {
     id: asString(record.id, `idef0_concept_${index}`),
     name: asString(record.name, `Concept ${index + 1}`),
@@ -933,6 +934,11 @@ function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
     subtype: normalizeIdef0ConceptSubtype(record.subtype),
     description: asString(record.description) || undefined,
     status: normalizeIdef0ConceptStatus(record.status),
+    position: asPosition(record.position, { x: 120 + index * 48, y: 120 + index * 36 }),
+    size: {
+      width: asNumber(size.width, 180),
+      height: asNumber(size.height, 56),
+    },
     domainId: asString(record.domainId) || undefined,
     ownerId: asString(record.ownerId) || undefined,
     linkedObjectId: asString(record.linkedObjectId) || undefined,

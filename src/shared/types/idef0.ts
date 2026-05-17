@@ -74,6 +74,8 @@ export interface Idef0Concept {
   subtype?: Idef0ConceptSubtype;
   description?: string;
   status: Idef0ConceptStatus;
+  position: { x: number; y: number };
+  size?: { width: number; height: number };
   domainId?: string;
   ownerId?: string;
   linkedObjectId?: string;

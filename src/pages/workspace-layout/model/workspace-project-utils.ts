@@ -1,6 +1,7 @@
 import type {
   ClassDiagramProjectDocument,
   ClassEntity,
+  Idef0ProjectDocument,
   ProjectData,
   ProjectSemanticObjectBinding,
   ProjectSemanticRelationBinding,
@@ -80,6 +81,19 @@ export function withClassDiagram(project: ProjectData, diagram: ClassDiagramProj
     documents: project.documents.map((document) => (
       document.type === 'class-diagram'
         ? { ...document, classDiagram: diagram, updatedAt: new Date().toISOString() }
+        : document
+    )),
+  };
+}
+
+export function withIdef0Diagram(project: ProjectData, documentId: string, diagram: Idef0ProjectDocument['idef0']): ProjectData {
+  const now = new Date().toISOString();
+  return {
+    ...project,
+    updatedAt: now,
+    documents: project.documents.map((document) => (
+      document.id === documentId && document.type === 'idef0'
+        ? { ...document, idef0: diagram, updatedAt: now }
         : document
     )),
   };

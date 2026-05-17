@@ -67,6 +67,8 @@ export type WorkspaceSelectionKind =
   | 'jsonSchema'
   | 'diagram'
   | 'document'
+  | 'idef0Function'
+  | 'idef0Concept'
   | 'class'
   | 'classAttribute'
   | 'classMethod';
@@ -74,7 +76,7 @@ export type WorkspaceSelectionKind =
 export interface WorkspaceSelection {
   kind: WorkspaceSelectionKind;
   id: string;
-  sourceView: 'model' | 'erd' | 'classDiagram' | 'diagrams' | 'documents';
+  sourceView: 'model' | 'erd' | 'classDiagram' | 'idef0' | 'diagrams' | 'documents';
   parentId?: string;
 }
 
