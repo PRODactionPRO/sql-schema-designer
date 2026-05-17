@@ -60,6 +60,7 @@ interface CanvasProps {
   onAddJsonSchemaTable?: (position?: { x: number; y: number }) => void;
   onReorderEnumValue?: (enumTableId: string, fromIndex: number, toIndex: number) => void;
   onReorderField?: (tableId: string, fromIndex: number, toIndex: number) => void;
+  onToggleTableCollapse?: (tableId: string) => void;
   onConvertTableToEnum?: (tableId: string) => void;
   onAddFieldToTable?: (tableId: string) => void;
   onValidateTable?: (tableId: string) => void;
@@ -71,6 +72,14 @@ const FIELD_HEIGHT = 36;
 const CULLING_MARGIN = 800; // world-space padding around viewport before a table is culled
 const CULLING_MIN_TABLES = 180; // avoid culling on medium schemas to prevent visible pop-in
 const WORLD_EXTENT = 50000; // generous workspace extent to avoid clipping at far pan positions
+
+function getRenderedFieldCount(table: Table): number {
+  return table.collapsed ? 0 : table.fields.length;
+}
+
+function getTableHeight(table: Table): number {
+  return HEADER_HEIGHT + getRenderedFieldCount(table) * FIELD_HEIGHT;
+}
 
 interface DragState {
   source: DragFieldInfo;
@@ -101,7 +110,7 @@ function getTablesCanvasBounds(tables: Table[]): CanvasBounds | null {
     minX = Math.min(minX, table.position.x);
     minY = Math.min(minY, table.position.y);
     maxX = Math.max(maxX, table.position.x + TABLE_WIDTH);
-    maxY = Math.max(maxY, table.position.y + HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT);
+    maxY = Math.max(maxY, table.position.y + getTableHeight(table));
   }
 
   return {
@@ -140,6 +149,7 @@ export function Canvas({
   onAddJsonSchemaTable,
   onReorderEnumValue,
   onReorderField,
+  onToggleTableCollapse,
   onConvertTableToEnum,
   onAddFieldToTable,
   onValidateTable,
@@ -375,7 +385,7 @@ export function Canvas({
     const override = dragOverrideRef.current;
     const tPos = (override && override.tableId === tableId) ? override.pos : table.position;
     const oPos = (override && override.tableId === otherTableId) ? override.pos : otherTable.position;
-    const cy = isHeaderAnchor
+    const cy = isHeaderAnchor || table.collapsed
       ? tPos.y + HEADER_HEIGHT / 2
       : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
     const tcx = tPos.x + TABLE_WIDTH / 2;
@@ -542,7 +552,7 @@ export function Canvas({
         const isHeaderAnchor = fId === '__enum_header__' || fId === '__json_schema_header__';
         const fi = t.fields.findIndex(f => f.id === fId);
         if (!isHeaderAnchor && fi === -1) return null;
-        const cy = isHeaderAnchor
+        const cy = isHeaderAnchor || t.collapsed
           ? tPos.y + HEADER_HEIGHT / 2
           : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
         const tcx = tPos.x + TABLE_WIDTH / 2;
@@ -605,7 +615,7 @@ export function Canvas({
     return tables.filter(t => {
       // Always keep selected/focused tables rendered
       if (selectedTableId === t.id || selectedTableIds.has(t.id)) return true;
-      const tableH = HEADER_HEIGHT + t.fields.length * FIELD_HEIGHT;
+      const tableH = getTableHeight(t);
       const tx2 = t.position.x + TABLE_WIDTH;
       const ty2 = t.position.y + tableH;
       return tx2 >= x1 && t.position.x <= x2 && ty2 >= y1 && t.position.y <= y2;
@@ -635,7 +645,7 @@ export function Canvas({
       centerOnTableRef.current = (tableId: string) => {
         const table = tables.find(t => t.id === tableId);
         if (table) {
-          const tableHeight = HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT;
+          const tableHeight = getTableHeight(table);
           centerOnBounds({
             minX: table.position.x,
             minY: table.position.y,
@@ -991,6 +1001,7 @@ export function Canvas({
                 onJsonSchemaFieldTypeChange={(fieldId, schemaType) => onJsonSchemaFieldTypeChange?.(table.id, fieldId, schemaType)}
                 onReorderEnumValue={onReorderEnumValue ? ((fromIndex, toIndex) => onReorderEnumValue(table.id, fromIndex, toIndex)) : undefined}
                 onReorderField={onReorderField ? ((fromIndex, toIndex) => onReorderField(table.id, fromIndex, toIndex)) : undefined}
+                onToggleCollapse={onToggleTableCollapse ? (() => onToggleTableCollapse(table.id)) : undefined}
                 onOpenContextMenu={(tableId, anchor) => {
                   setShowDomainSubmenu(false);
                   const isInCurrentSelection = selectedTableId === tableId || selectedTableIds.has(tableId);

@@ -149,6 +149,7 @@ export interface EnumType {
   position?: { x: number; y: number };
   domainId?: string;
   sidebarOrder?: number;
+  collapsed?: boolean; // UI-only canvas state
 }
 
 export type EnumStorageStrategy = 'postgres_enum' | 'check_constraint' | 'lookup_table';
@@ -250,6 +251,7 @@ export interface JsonSchemaDocument {
   position?: { x: number; y: number };
   domainId?: string;
   sidebarOrder?: number;
+  collapsed?: boolean; // UI-only canvas state
 }
 
 export interface Table {
@@ -265,6 +267,7 @@ export interface Table {
   schema?: string; // e.g. 'public'
   domainId?: string;
   sidebarOrder?: number;
+  collapsed?: boolean; // UI-only canvas state
 }
 
 export type RelationType = '1:1' | '1:N' | 'N:1' | 'N:M';

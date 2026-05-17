@@ -19,6 +19,8 @@ export function ProjectTreePane({
   selection: WorkspaceSelection | null;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
 }) {
+  const [collapsedTableIds, setCollapsedTableIds] = useState<Set<string>>(() => new Set());
+
   if (!project) {
     return (
       <div className="h-full overflow-auto p-3">
@@ -63,15 +65,23 @@ export function ProjectTreePane({
         </TreeSection>
         <TreeSection title="Tables" icon={<Table2 className="size-3.5" />} depth={1} activeGuide={tablesActive}>
           {project.schema.tables.map((table) => (
-            <div key={table.id}>
-              <TreeRow
-                depth={2}
-                icon={<Table2 className="size-3.5" />}
-                label={table.name}
-                meta={table.fields.length}
-                active={selectionMatches(selection, { kind: 'table', id: table.id, sourceView: 'model' })}
-                onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
-              />
+            <TreeBranch
+              key={table.id}
+              depth={2}
+              icon={<Table2 className="size-3.5" />}
+              label={table.name}
+              meta={table.fields.length}
+              active={selectionMatches(selection, { kind: 'table', id: table.id, sourceView: 'model' })}
+              activeGuide={selection?.kind === 'field' && selection.parentId === table.id}
+              collapsed={collapsedTableIds.has(table.id)}
+              onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
+              onToggle={() => setCollapsedTableIds((current) => {
+                const next = new Set(current);
+                if (next.has(table.id)) next.delete(table.id);
+                else next.add(table.id);
+                return next;
+              })}
+            >
               {table.fields.map((field) => (
                 <TreeRow
                   key={field.id}
@@ -82,7 +92,7 @@ export function ProjectTreePane({
                   onClick={() => onSelectionChange({ kind: 'field', id: field.id, parentId: table.id, sourceView: 'model' })}
                 />
               ))}
-            </div>
+            </TreeBranch>
           ))}
         </TreeSection>
         {classDiagram ? (
@@ -161,6 +171,77 @@ export function ProjectTreePane({
           ))}
         </TreeSection>
       </TreeSection>
+    </div>
+  );
+}
+
+function TreeBranch({
+  depth,
+  icon,
+  label,
+  meta,
+  active,
+  activeGuide = false,
+  collapsed,
+  onClick,
+  onToggle,
+  children,
+}: {
+  depth: number;
+  icon?: ReactNode;
+  label: string;
+  meta?: string | number;
+  active?: boolean;
+  activeGuide?: boolean;
+  collapsed: boolean;
+  onClick: () => void;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const fontSize = getTreeFontSize(depth);
+  const guideLeft = 33 + depth * 14;
+
+  return (
+    <div className="relative">
+      {!collapsed ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'pointer-events-none absolute top-[27px] bottom-1 z-20 w-px rounded-full',
+            activeGuide ? 'bg-blue-400/80' : 'bg-slate-300/70',
+          )}
+          style={{ left: guideLeft }}
+        />
+      ) : null}
+      <div
+        className={cn(
+          'relative z-10 flex h-7 w-full items-center rounded-md pr-2 text-left font-medium transition-colors',
+          active ? 'bg-[#eeeff0] text-slate-950' : 'text-slate-500 hover:bg-white hover:text-slate-800',
+        )}
+        style={{ paddingLeft: 12 + depth * 14, fontSize, lineHeight: '18px' }}
+      >
+        <button
+          type="button"
+          className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          <ChevronDown className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')} />
+        </button>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={onClick}
+        >
+          <span className="flex size-3.5 shrink-0 items-center justify-center text-slate-400">{icon}</span>
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {meta !== undefined ? <span className="shrink-0 text-[10px] text-slate-400">{meta}</span> : null}
+        </button>
+      </div>
+      {collapsed ? null : children}
     </div>
   );
 }

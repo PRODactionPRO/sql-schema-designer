@@ -401,7 +401,7 @@ export function ProjectErDiagramCanvas({
     const selectedIds = canvasTables
       .filter((table) => {
         const right = table.position.x + 280;
-        const bottom = table.position.y + 40 + table.fields.length * 36;
+        const bottom = table.position.y + 40 + (table.collapsed ? 0 : table.fields.length * 36);
         return table.position.x <= rect.x + rect.w
           && right >= rect.x
           && table.position.y <= rect.y + rect.h
@@ -547,6 +547,41 @@ export function ProjectErDiagramCanvas({
     });
     if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
   }, [commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
+
+  const handleToggleTableCollapse = useCallback((tableId: string) => {
+    if (isEnumTableId(tableId)) {
+      const enumId = getEnumIdFromTableId(tableId);
+      let updatedEnum = project.schema.enums.find((enumType) => enumType.id === enumId);
+      commitSchema({
+        ...project.schema,
+        enums: project.schema.enums.map((enumType) => {
+          if (enumType.id !== enumId) return enumType;
+          updatedEnum = { ...enumType, collapsed: !enumType.collapsed };
+          return updatedEnum;
+        }),
+      });
+      if (updatedEnum) saveProjectedObject(enumId, updatedEnum);
+      return;
+    }
+
+    if (isJsonSchemaTableId(tableId)) {
+      const jsonSchemaId = getJsonSchemaIdFromTableId(tableId);
+      let updatedDocument = jsonSchemas.find((doc) => doc.id === jsonSchemaId);
+      commitSchema({
+        ...project.schema,
+        jsonSchemas: jsonSchemas.map((doc) => {
+          if (doc.id !== jsonSchemaId) return doc;
+          updatedDocument = { ...doc, collapsed: !doc.collapsed };
+          return updatedDocument;
+        }),
+      });
+      if (updatedDocument) saveProjectedObject(jsonSchemaId, updatedDocument);
+      return;
+    }
+
+    canvas.toggleTableCollapsed(tableId);
+    commitCanvasSnapshot();
+  }, [canvas, commitCanvasSnapshot, commitSchema, jsonSchemas, project.schema, saveProjectedObject]);
 
   const handleJsonSchemaFieldTypeChange = useCallback((tableId: string, fieldId: string, schemaType: string) => {
     if (!isJsonSchemaTableId(tableId)) return;
@@ -917,6 +952,7 @@ export function ProjectErDiagramCanvas({
           canvas.reorderField(tableId, fromIndex, toIndex);
           commitCanvasSnapshot();
         }}
+        onToggleTableCollapse={handleToggleTableCollapse}
         onFieldTypeChange={handleFieldTypeChange}
         onUpdateField={handleFieldUpdate}
         onDeleteField={handleDeleteField}

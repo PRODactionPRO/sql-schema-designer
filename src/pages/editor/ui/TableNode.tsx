@@ -56,6 +56,7 @@ interface TableNodeProps {
   onJsonSchemaFieldTypeChange?: (fieldId: string, schemaType: string) => void;
   onReorderEnumValue?: (fromIndex: number, toIndex: number) => void;
   onReorderField?: (fromIndex: number, toIndex: number) => void;
+  onToggleCollapse?: () => void;
   onOpenContextMenu?: (tableId: string, anchor: { x: number; y: number }) => void;
   onDeleteField?: (fieldId: string) => void;
 }
@@ -81,6 +82,7 @@ export const TableNode = memo(function TableNode({
   onJsonSchemaFieldTypeChange,
   onReorderEnumValue,
   onReorderField,
+  onToggleCollapse,
   onOpenContextMenu,
   onDeleteField,
 }: TableNodeProps) {
@@ -89,6 +91,7 @@ export const TableNode = memo(function TableNode({
   const didDrag = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const headerHandledClick = useRef(false);
+  const suppressNextClick = useRef(false);
   const positionRef = useRef(table.position);
   positionRef.current = table.position;
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
@@ -97,6 +100,8 @@ export const TableNode = memo(function TableNode({
   const borderColor = tableColor;
   const availableTypes = enabledFieldTypes || ALL_FIELD_TYPES;
   const jsonSchemaTypes = ['string', 'number', 'integer', 'boolean', 'object', 'array', 'null', 'json'] as const;
+  const isCollapsed = !!table.collapsed;
+  const fieldCount = table.fields.length;
 
   useEffect(() => {
     const handleMouseUp = () => setIsFieldReorderPointerDown(false);
@@ -143,7 +148,9 @@ export const TableNode = memo(function TableNode({
     let rafId: number | null = null;
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
-      if ((e.target as HTMLElement).closest('.table-header')) {
+      const target = e.target as HTMLElement;
+      const isBlockedTarget = Boolean(target.closest('button, input, textarea, select, [role="button"], [data-no-table-drag], [data-field-reorder-handle], [data-relation-handle]'));
+      if (!isBlockedTarget && target.closest('[data-table-drag-surface]')) {
         if (isMultiSelected && onGroupDragStart) {
           onGroupDragStart(table.id, e as any);
           e.preventDefault();
@@ -165,6 +172,7 @@ export const TableNode = memo(function TableNode({
       const newX = e.clientX / zoom - dragStart.current.x;
       const newY = e.clientY / zoom - dragStart.current.y;
       lastDragPos = { x: newX, y: newY };
+      onDragMove?.(table.id, lastDragPos);
       // Update position via React state — arrows will follow via re-render
       if (rafId === null) {
         rafId = requestAnimationFrame(() => {
@@ -182,6 +190,10 @@ export const TableNode = memo(function TableNode({
           rafId = null;
         }
         if (didDrag.current && lastDragPos) {
+          suppressNextClick.current = true;
+          window.setTimeout(() => {
+            suppressNextClick.current = false;
+          }, 100);
           onPositionChange(table.id, lastDragPos);
           onDragStop?.(table.id);
         }
@@ -270,8 +282,7 @@ export const TableNode = memo(function TableNode({
 
   // --- Minimal LOD: colored rectangle with table name only ---
   if (lodLevel === 'minimal') {
-    const fieldCount = table.fields.length;
-    const totalH = 40 + fieldCount * 36;
+    const totalH = 40;
     return (
       <div
         ref={nodeRef}
@@ -284,7 +295,14 @@ export const TableNode = memo(function TableNode({
           opacity: textOpacity,
         }}
         data-table-id={table.id}
-        onClick={(e) => onSelect(table.id, e)}
+        data-table-drag-surface
+        onClick={(e) => {
+          if (suppressNextClick.current) {
+            suppressNextClick.current = false;
+            return;
+          }
+          onSelect(table.id, e);
+        }}
       >
         <div
           className="table-header px-3 py-1.5 flex items-center cursor-move"
@@ -315,8 +333,15 @@ export const TableNode = memo(function TableNode({
             : '0 4px 6px -1px rgba(0,0,0,0.1)',
           ...unfocusStyle,
         }}
-        onClick={(e) => onSelect(table.id, e)}
+        onClick={(e) => {
+          if (suppressNextClick.current) {
+            suppressNextClick.current = false;
+            return;
+          }
+          onSelect(table.id, e);
+        }}
         data-table-id={table.id}
+        data-table-drag-surface
       >
         <div
           className="table-header px-4 py-2 flex items-center justify-between cursor-move rounded-t-lg"
@@ -324,8 +349,22 @@ export const TableNode = memo(function TableNode({
           data-table-header={table.id}
         >
           <span className="text-white truncate" style={{ fontWeight: 600, opacity: textOpacity }}>{table.name}</span>
+          {onToggleCollapse ? (
+            <button
+              type="button"
+              className="ml-2 flex size-6 shrink-0 items-center justify-center rounded text-white/80 hover:bg-white/20 hover:text-white"
+              data-no-table-drag
+              aria-label={isCollapsed ? `Expand ${table.name} fields` : `Collapse ${table.name} fields`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse();
+              }}
+            >
+              {isCollapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            </button>
+          ) : null}
         </div>
-        <div className="divide-y divide-gray-200 rounded-b-lg overflow-hidden">
+        {!isCollapsed ? <div className="divide-y divide-gray-200 rounded-b-lg overflow-hidden">
           {table.fields.map(field => (
             <div
               key={field.id}
@@ -341,13 +380,15 @@ export const TableNode = memo(function TableNode({
                 <span className="text-xs text-gray-400 flex-shrink-0">{getFieldTypeLabel(field)}</span>
             </div>
           ))}
-        </div>
+        </div> : null}
       </div>
     );
   }
 
   // --- Full LOD: original detailed rendering ---
-  const renderedFields = (!isEnumTable && fieldDnD.renderedIds)
+  const renderedFields = isCollapsed
+    ? []
+    : (!isEnumTable && fieldDnD.renderedIds)
     ? fieldDnD.renderedIds
       .map((id) => table.fields.find((field) => field.id === id))
       .filter((field): field is Field => !!field)
@@ -375,6 +416,11 @@ export const TableNode = memo(function TableNode({
         ...unfocusStyle,
       }}
       onClick={(e) => {
+        if (suppressNextClick.current) {
+          suppressNextClick.current = false;
+          headerHandledClick.current = false;
+          return;
+        }
         if (headerHandledClick.current) {
           headerHandledClick.current = false;
           return;
@@ -382,6 +428,7 @@ export const TableNode = memo(function TableNode({
         onSelect(table.id, e);
       }}
       data-table-id={table.id}
+      data-table-drag-surface
       onDoubleClick={onDoubleClick}
     >
       <div
@@ -402,6 +449,22 @@ export const TableNode = memo(function TableNode({
             )}
           </div>
         </div>
+        {onToggleCollapse ? (
+          <ProTooltip label={isCollapsed ? 'Expand fields' : 'Collapse fields'}>
+            <button
+              type="button"
+              className="mr-1 flex size-7 shrink-0 items-center justify-center rounded text-white/80 hover:bg-white/20 hover:text-white"
+              data-no-table-drag
+              aria-label={isCollapsed ? `Expand ${table.name} fields` : `Collapse ${table.name} fields`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse();
+              }}
+            >
+              {isCollapsed ? <ChevronRight className="size-4" /> : <ChevronDown className="size-4" />}
+            </button>
+          </ProTooltip>
+        ) : null}
         <ProTooltip label="Table actions">
           <button
             className="text-white hover:bg-white/20 rounded p-1 flex-shrink-0 opacity-0 pointer-events-none group-hover/table:opacity-100 group-hover/table:pointer-events-auto transition-opacity"
@@ -416,7 +479,7 @@ export const TableNode = memo(function TableNode({
         </ProTooltip>
       </div>
 
-      <div className="divide-y divide-gray-200 rounded-b-lg overflow-visible">
+      {!isCollapsed ? <div className="divide-y divide-gray-200 rounded-b-lg overflow-visible">
         {renderedFields.map((field, fieldIndex) => {
           const isFieldDropTarget = dropTargetFieldId === field.id;
           const isSource = isDragSourceTable && dragSourceFieldId === field.id;
@@ -466,15 +529,19 @@ export const TableNode = memo(function TableNode({
                 !isFieldDropTarget && !isSource && !fieldDnD.isDragging ? 'hover:bg-gray-50' : ''
               } ${fieldBg} ${isEnumTable ? 'group/enum-row' : 'group/field-row'} ${isEnumTable && enumDnD.dragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''} ${!isEnumTable && fieldDnD.dragOverIndex === fieldIndex ? 'ring-2 ring-inset ring-blue-300' : ''} ${isReorderSource ? 'bg-gray-100 ring-2 ring-inset ring-blue-300' : ''}`}
               style={fieldStyle}
-              onClick={(e) => { e.stopPropagation(); onFieldClick(field); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (suppressNextClick.current) {
+                  suppressNextClick.current = false;
+                  return;
+                }
+                onFieldClick(field);
+              }}
               data-field-id={field.id}
               data-table-id={table.id}
               title={dragState?.reason}
               onMouseEnter={() => setHoveredFieldId(field.id)}
               onMouseLeave={() => setHoveredFieldId(null)}
-              draggable={isEnumTable || !!onReorderField}
-              onDragStart={isEnumTable ? (e) => enumDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
-              onDragStartCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
               onDragOver={isEnumTable ? (e) => enumDnD.handleDragOver({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
               onDragOverCapture={!isEnumTable && onReorderField ? (e) => fieldDnD.handleDragOver({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
               onDragLeave={isEnumTable ? enumDnD.handleDragLeave : undefined}
@@ -486,10 +553,14 @@ export const TableNode = memo(function TableNode({
               <ProTooltip label={isEnumTable ? 'Drag to reorder' : isJsonSchemaTable ? 'Drag handle' : 'Drag to reorder field'}>
                 <div
                   className="flex-shrink-0 cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 mr-1 -ml-1"
+                  data-field-reorder-handle
+                  draggable={isEnumTable || !!onReorderField}
                   onMouseDown={(e) => {
                     e.stopPropagation();
                     if (!isEnumTable && !isJsonSchemaTable) setIsFieldReorderPointerDown(true);
                   }}
+                  onDragStart={isEnumTable ? (e) => enumDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : (!isEnumTable && onReorderField ? (e) => fieldDnD.handleDragStart({ index: fieldIndex, itemId: field.id, event: e }) : undefined)}
+                  onDragEnd={isEnumTable ? enumDnD.handleDragEnd : (!isEnumTable && onReorderField ? handleFieldRowDragEnd : undefined)}
                 >
                   <GripVertical className="size-3.5" />
                 </div>
@@ -499,6 +570,7 @@ export const TableNode = memo(function TableNode({
                   <button
                     type="button"
                     className="absolute -left-1.5 top-1/2 -translate-y-1/2 size-3 rounded-full border-2 border-blue-500 bg-white opacity-0 group-hover/field-row:opacity-100 hover:bg-blue-500 transition-colors z-30"
+                    data-relation-handle
                     onMouseDown={(e) => handleFieldDragStart(e, field)}
                   />
                 </ProTooltip>
@@ -613,7 +685,7 @@ export const TableNode = memo(function TableNode({
             </div>
           );
         })}
-      </div>
+      </div> : null}
     </div>
   );
 });

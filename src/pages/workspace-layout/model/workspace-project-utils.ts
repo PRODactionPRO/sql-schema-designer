@@ -158,6 +158,7 @@ export function enumToTable(enumType: EnumType, domains: Domain[], index = 0): T
       : '#0f766e',
     domainId: enumType.domainId,
     sidebarOrder: enumType.sidebarOrder,
+    collapsed: enumType.collapsed,
   };
 }
 
@@ -233,6 +234,7 @@ export function jsonSchemaToTable(doc: JsonSchemaDocument, index = 0): Table {
     color: '#7c3aed',
     domainId: doc.domainId,
     sidebarOrder: doc.sidebarOrder,
+    collapsed: doc.collapsed,
   };
 }
 

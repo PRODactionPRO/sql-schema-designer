@@ -27,7 +27,7 @@ export function cloneErdSnapshot(snapshot: ErdCanvasSnapshot): ErdCanvasSnapshot
 }
 
 export function estimateErdTableHeight(table: Table): number {
-  return ERD_HEADER_HEIGHT + table.fields.length * ERD_FIELD_HEIGHT;
+  return ERD_HEADER_HEIGHT + (table.collapsed ? 0 : table.fields.length * ERD_FIELD_HEIGHT);
 }
 
 export function getProjectDomains(project: ProjectData) {

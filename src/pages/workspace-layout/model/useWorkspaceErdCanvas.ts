@@ -180,6 +180,18 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     if (updatedTable) saveTableMetadata(updatedTable);
   }, [applyErdState, pushHistory, saveTableMetadata]);
 
+  const toggleTableCollapsed = useCallback((tableId: string) => {
+    pushHistory();
+    let updatedTable: Table | undefined;
+    const nextTables = tablesRef.current.map((table) => {
+      if (table.id !== tableId) return table;
+      updatedTable = { ...table, collapsed: !table.collapsed };
+      return updatedTable;
+    });
+    applyErdState(nextTables);
+    if (updatedTable) saveTableMetadata(updatedTable);
+  }, [applyErdState, pushHistory, saveTableMetadata]);
+
   const deleteTables = useCallback((ids: string[]) => {
     pushHistory();
     const idsSet = new Set(ids);
@@ -611,6 +623,7 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     saveTablePosition,
     saveTablePositions,
     reorderField,
+    toggleTableCollapsed,
     deleteTables,
     updateField,
     updateFieldType,
