@@ -16,8 +16,21 @@ import type { WorkspaceSelection, WorkspaceTab } from '../model/types';
 import {
   getClassDiagramDocument,
   getProjectDomains,
+  nextWorkspaceId,
   selectionMatches,
+  withSchema,
 } from '../model/workspace-project-utils';
+
+function getUniqueName(existingNames: string[], baseName: string): string {
+  const used = new Set(existingNames.map((name) => name.toLowerCase()));
+  if (!used.has(baseName.toLowerCase())) return baseName;
+
+  let index = 2;
+  while (used.has(`${baseName}${index}`.toLowerCase())) {
+    index += 1;
+  }
+  return `${baseName}${index}`;
+}
 
 export function ProjectTreePane({
   project,
@@ -86,6 +99,10 @@ export function ProjectTreePane({
     });
   };
 
+  const commitProjectSchema = (schema: ProjectData['schema']) => {
+    onProjectChange(withSchema(project, schema));
+  };
+
   const createProcessModel = () => {
     const count = processModels.length;
     const name = count === 0 ? 'New process model' : `New process model ${count + 1}`;
@@ -102,6 +119,23 @@ export function ProjectTreePane({
     commitProjectDocuments([...project.documents, processDocument]);
     onSelectionChange({ kind: 'diagram', id: processDocument.id, sourceView: 'diagrams' });
     onOpenDocument(processDocument.id, { type: 'idef0', title: processDocument.name });
+  };
+
+  const createEnum = () => {
+    const name = getUniqueName(project.schema.enums.map((item) => item.name), 'NewEnum');
+    const enumType = {
+      id: nextWorkspaceId('enum'),
+      name,
+      values: ['value_1', 'value_2'],
+      storageStrategy: 'postgres_enum' as const,
+      position: { x: 260 + project.schema.enums.length * 40, y: 140 + project.schema.enums.length * 40 },
+    };
+
+    commitProjectSchema({
+      ...project.schema,
+      enums: [...project.schema.enums, enumType],
+    });
+    onSelectionChange({ kind: 'enum', id: enumType.id, sourceView: 'model' });
   };
 
   const createDiagram = (type: 'erd' | 'class-diagram' | 'idef0') => {
@@ -288,6 +322,11 @@ export function ProjectTreePane({
           depth={1}
           collapsed={collapsedSectionIds.has('enums')}
           onToggle={() => onToggleSectionCollapse('enums')}
+          actions={(
+            <TreeSectionActionButton label="Create enum" onClick={createEnum}>
+              <Plus className="size-3.5" />
+            </TreeSectionActionButton>
+          )}
         >
           {project.schema.enums.map((enumType) => (
             <TreeRow

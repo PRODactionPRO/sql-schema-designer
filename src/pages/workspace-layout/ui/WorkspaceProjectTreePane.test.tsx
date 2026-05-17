@@ -87,4 +87,43 @@ describe('ProjectTreePane', () => {
       { type: 'erDiagram', title: nextProject.documents[0].name },
     );
   });
+
+  it('creates an enum from the Enums header action', () => {
+    const project = createEmptyProject('Product Analytics Demo');
+    const onProjectChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onCloseDocument = vi.fn();
+    const onOpenDocument = vi.fn();
+
+    render(
+      <ProjectTreePane
+        project={project}
+        selection={null}
+        collapsedSectionIds={new Set()}
+        collapsedTableIds={new Set()}
+        onToggleSectionCollapse={vi.fn()}
+        onToggleTableCollapse={vi.fn()}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onCloseDocument={onCloseDocument}
+        onOpenDocument={onOpenDocument}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create enum' }).at(-1)!);
+
+    expect(onProjectChange).toHaveBeenCalledTimes(1);
+    const nextProject = onProjectChange.mock.calls[0][0];
+    expect(nextProject.schema.enums).toHaveLength(1);
+    expect(nextProject.schema.enums[0]).toMatchObject({
+      name: 'NewEnum',
+      values: ['value_1', 'value_2'],
+      storageStrategy: 'postgres_enum',
+    });
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      kind: 'enum',
+      id: nextProject.schema.enums[0].id,
+      sourceView: 'model',
+    });
+  });
 });
