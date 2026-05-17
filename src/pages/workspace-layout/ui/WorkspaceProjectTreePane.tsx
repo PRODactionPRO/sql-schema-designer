@@ -33,12 +33,6 @@ export function ProjectTreePane({
 
   const classDiagram = getClassDiagramDocument(project)?.classDiagram;
   const domains = getProjectDomains(project);
-  const domainsActive = selection?.kind === 'domain';
-  const tablesActive = selection?.kind === 'table' || selection?.kind === 'field' || selection?.kind === 'relation';
-  const entitiesActive = selection?.kind === 'class' || selection?.kind === 'classAttribute' || selection?.kind === 'classMethod';
-  const enumsActive = selection?.kind === 'enum';
-  const jsonSchemasActive = selection?.kind === 'jsonSchema';
-  const diagramsActive = selection?.kind === 'diagram';
   const diagrams = project.documents.filter((document) => (
     document.type === 'erd'
     || document.type === 'class-diagram'
@@ -50,7 +44,7 @@ export function ProjectTreePane({
   return (
     <div className="h-full overflow-auto p-2">
       <TreeSection title={project.name} icon={<Layers3 className="size-3.5" />}>
-        <TreeSection title="Domains" icon={<Box className="size-3.5" />} depth={1} activeGuide={domainsActive}>
+        <TreeSection title="Domains" icon={<Box className="size-3.5" />} depth={1}>
           {domains.map((domain) => (
             <TreeRow
               key={domain.id}
@@ -63,13 +57,10 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="Tables" icon={<Table2 className="size-3.5" />} depth={1} activeGuide={tablesActive}>
+        <TreeSection title="Tables" icon={<Table2 className="size-3.5" />} depth={1}>
           {project.schema.tables.map((table) => {
             const tableActive = selection?.kind === 'table'
               && selection.id === table.id
-              && (selection.sourceView === 'model' || selection.sourceView === 'erd');
-            const tableFieldActive = selection?.kind === 'field'
-              && selection.parentId === table.id
               && (selection.sourceView === 'model' || selection.sourceView === 'erd');
 
             return (
@@ -80,7 +71,7 @@ export function ProjectTreePane({
                 label={table.name}
                 meta={table.fields.length}
                 active={tableActive}
-                activeGuide={tableActive || tableFieldActive}
+                activeGuide={tableActive}
                 collapsed={collapsedTableIds.has(table.id)}
                 onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
                 onToggle={() => setCollapsedTableIds((current) => {
@@ -110,7 +101,7 @@ export function ProjectTreePane({
           })}
         </TreeSection>
         {classDiagram ? (
-          <TreeSection title="Entities" icon={<Box className="size-3.5" />} depth={1} activeGuide={entitiesActive}>
+          <TreeSection title="Entities" icon={<Box className="size-3.5" />} depth={1}>
             {classDiagram.classes.map((entity) => (
               <div key={entity.id}>
                 <TreeRow
@@ -145,7 +136,7 @@ export function ProjectTreePane({
             ))}
           </TreeSection>
         ) : null}
-        <TreeSection title="Enums" icon={<FileJson className="size-3.5" />} depth={1} activeGuide={enumsActive}>
+        <TreeSection title="Enums" icon={<FileJson className="size-3.5" />} depth={1}>
           {project.schema.enums.map((enumType) => (
             <TreeRow
               key={enumType.id}
@@ -158,7 +149,7 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="JSON Schemas" icon={<FileText className="size-3.5" />} depth={1} activeGuide={jsonSchemasActive}>
+        <TreeSection title="JSON Schemas" icon={<FileText className="size-3.5" />} depth={1}>
           {(project.schema.jsonSchemas ?? []).map((schema) => (
             <TreeRow
               key={schema.id}
@@ -171,7 +162,7 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="Diagrams" icon={<GitBranch className="size-3.5" />} depth={1} activeGuide={diagramsActive}>
+        <TreeSection title="Diagrams" icon={<GitBranch className="size-3.5" />} depth={1}>
           {diagrams.map((document) => (
             <TreeRow
               key={document.id}
