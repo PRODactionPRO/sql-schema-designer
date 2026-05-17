@@ -18,6 +18,7 @@ import {
   getProjectDomains,
   nextWorkspaceId,
   selectionMatches,
+  withClassDiagram,
   withSchema,
 } from '../model/workspace-project-utils';
 
@@ -56,8 +57,12 @@ export function ProjectTreePane({
   onOpenDocument: (documentId: string, fallback?: { type: WorkspaceTab['type']; title: string }) => void;
 }) {
   const [rootCollapsed, setRootCollapsed] = useState(false);
-  const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
-  const [editingProcessName, setEditingProcessName] = useState('');
+  const [editingTarget, setEditingTarget] = useState<{
+    kind: 'table' | 'field' | 'class' | 'classAttribute' | 'diagram';
+    id: string;
+    parentId?: string;
+  } | null>(null);
+  const [editingName, setEditingName] = useState('');
   const [processToDelete, setProcessToDelete] = useState<Idef0ProjectDocument | null>(null);
   const [diagramMenuOpen, setDiagramMenuOpen] = useState(false);
   const diagramMenuRef = useRef<HTMLDivElement | null>(null);
@@ -79,7 +84,8 @@ export function ProjectTreePane({
     );
   }
 
-  const classDiagram = getClassDiagramDocument(project)?.classDiagram;
+  const classDiagramDocument = getClassDiagramDocument(project);
+  const classDiagram = classDiagramDocument?.classDiagram;
   const domains = getProjectDomains(project);
   const processModels = project.documents.filter((document): document is Idef0ProjectDocument => document.type === 'idef0');
   const diagrams = project.documents.filter((document) => (
@@ -184,33 +190,112 @@ export function ProjectTreePane({
     });
   };
 
-  const startRenameProcess = (document: Idef0ProjectDocument) => {
-    setEditingProcessId(document.id);
-    setEditingProcessName(document.name);
+  const startInlineRename = (
+    kind: 'table' | 'field' | 'class' | 'classAttribute' | 'diagram',
+    id: string,
+    currentName: string,
+    parentId?: string,
+  ) => {
+    setEditingTarget({ kind, id, parentId });
+    setEditingName(currentName);
   };
 
-  const commitRenameProcess = () => {
-    if (!editingProcessId) return;
-    const nextName = editingProcessName.trim();
+  const cancelInlineRename = () => {
+    setEditingTarget(null);
+    setEditingName('');
+  };
+
+  const commitInlineRename = () => {
+    if (!editingTarget) return;
+    const nextName = editingName.trim();
     if (!nextName) {
-      setEditingProcessId(null);
-      setEditingProcessName('');
+      cancelInlineRename();
       return;
     }
-    commitProjectDocuments(project.documents.map((document) => {
-      if (document.id !== editingProcessId || document.type !== 'idef0') return document;
-      return {
-        ...document,
-        name: nextName,
-        updatedAt: new Date().toISOString(),
-        idef0: {
-          ...document.idef0,
-          name: nextName,
-        },
+
+    if (editingTarget.kind === 'table') {
+      commitProjectSchema({
+        ...project.schema,
+        tables: project.schema.tables.map((table) => (
+          table.id === editingTarget.id ? { ...table, name: nextName } : table
+        )),
+      });
+      cancelInlineRename();
+      return;
+    }
+
+    if (editingTarget.kind === 'field') {
+      commitProjectSchema({
+        ...project.schema,
+        tables: project.schema.tables.map((table) => (
+          table.id !== editingTarget.parentId
+            ? table
+            : {
+                ...table,
+                fields: table.fields.map((field) => (
+                  field.id === editingTarget.id ? { ...field, name: nextName } : field
+                )),
+              }
+        )),
+      });
+      cancelInlineRename();
+      return;
+    }
+
+    if (editingTarget.kind === 'class' && classDiagramDocument) {
+      const nextDiagram = {
+        ...classDiagramDocument.classDiagram,
+        classes: classDiagramDocument.classDiagram.classes.map((entity) => (
+          entity.id === editingTarget.id ? { ...entity, name: nextName } : entity
+        )),
       };
-    }));
-    setEditingProcessId(null);
-    setEditingProcessName('');
+      onProjectChange(withClassDiagram(project, nextDiagram));
+      cancelInlineRename();
+      return;
+    }
+
+    if (editingTarget.kind === 'classAttribute' && classDiagramDocument) {
+      const nextDiagram = {
+        ...classDiagramDocument.classDiagram,
+        classes: classDiagramDocument.classDiagram.classes.map((entity) => (
+          entity.id !== editingTarget.parentId
+            ? entity
+            : {
+                ...entity,
+                attributes: entity.attributes.map((attribute) => (
+                  attribute.id === editingTarget.id ? { ...attribute, name: nextName } : attribute
+                )),
+              }
+        )),
+      };
+      onProjectChange(withClassDiagram(project, nextDiagram));
+      cancelInlineRename();
+      return;
+    }
+
+    if (editingTarget.kind === 'diagram') {
+      const now = new Date().toISOString();
+      commitProjectDocuments(project.documents.map((document) => {
+        if (document.id !== editingTarget.id) return document;
+        if (document.type === 'idef0') {
+          return {
+            ...document,
+            name: nextName,
+            updatedAt: now,
+            idef0: {
+              ...document.idef0,
+              name: nextName,
+            },
+          };
+        }
+        return {
+          ...document,
+          name: nextName,
+          updatedAt: now,
+        };
+      }));
+      cancelInlineRename();
+    }
   };
 
   const deleteProcessModel = () => {
@@ -277,6 +362,20 @@ export function ProjectTreePane({
                 collapsed={collapsedTableIds.has(table.id)}
                 onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
                 onToggle={() => onToggleTableCollapse(table.id)}
+                onDoubleClick={() => startInlineRename('table', table.id, table.name)}
+                labelNode={editingTarget?.kind === 'table' && editingTarget.id === table.id ? (
+                  <InlineRenameInput
+                    value={editingName}
+                    onChange={setEditingName}
+                    onCommit={commitInlineRename}
+                    onCancel={cancelInlineRename}
+                  />
+                ) : undefined}
+                actions={editingTarget?.kind === 'table' && editingTarget.id === table.id ? null : (
+                  <TreeActionButton label="Rename table" onClick={() => startInlineRename('table', table.id, table.name)}>
+                    <Pencil className="size-3" />
+                  </TreeActionButton>
+                )}
               >
                 {table.fields.map((field) => (
                   <TreeRow
@@ -291,6 +390,15 @@ export function ProjectTreePane({
                       && (selection.sourceView === 'model' || selection.sourceView === 'erd')
                     }
                     onClick={() => onSelectionChange({ kind: 'field', id: field.id, parentId: table.id, sourceView: 'model' })}
+                    onDoubleClick={() => startInlineRename('field', field.id, field.name, table.id)}
+                    labelNode={editingTarget?.kind === 'field' && editingTarget.id === field.id && editingTarget.parentId === table.id ? (
+                      <InlineRenameInput
+                        value={editingName}
+                        onChange={setEditingName}
+                        onCommit={commitInlineRename}
+                        onCancel={cancelInlineRename}
+                      />
+                    ) : undefined}
                   />
                 ))}
               </TreeBranch>
@@ -305,38 +413,67 @@ export function ProjectTreePane({
             collapsed={collapsedSectionIds.has('entities')}
             onToggle={() => onToggleSectionCollapse('entities')}
           >
-            {classDiagram.classes.map((entity) => (
-              <div key={entity.id}>
-                <TreeRow
+            {classDiagram.classes.map((entity) => {
+              const entityActive = selectionMatches(selection, { kind: 'class', id: entity.id, sourceView: 'model' });
+              return (
+                <TreeBranch
+                  key={entity.id}
                   depth={2}
                   icon={<Box className="size-3.5" />}
                   label={entity.name}
                   meta={entity.kind ?? 'class'}
-                  active={selectionMatches(selection, { kind: 'class', id: entity.id, sourceView: 'model' })}
+                  active={entityActive}
+                  activeGuide={entityActive}
+                  collapsed={collapsedTableIds.has(entity.id)}
                   onClick={() => onSelectionChange({ kind: 'class', id: entity.id, sourceView: 'model' })}
-                />
-                {entity.attributes.map((attribute) => (
-                  <TreeRow
-                    key={attribute.id}
-                    depth={3}
-                    label={attribute.name}
-                    meta={attribute.type}
-                    active={selectionMatches(selection, { kind: 'classAttribute', id: attribute.id, parentId: entity.id, sourceView: 'model' })}
-                    onClick={() => onSelectionChange({ kind: 'classAttribute', id: attribute.id, parentId: entity.id, sourceView: 'model' })}
-                  />
-                ))}
-                {entity.methods.map((method) => (
-                  <TreeRow
-                    key={method.id}
-                    depth={3}
-                    label={`${method.name}()`}
-                    meta={method.returnType ?? 'void'}
-                    active={selectionMatches(selection, { kind: 'classMethod', id: method.id, parentId: entity.id, sourceView: 'model' })}
-                    onClick={() => onSelectionChange({ kind: 'classMethod', id: method.id, parentId: entity.id, sourceView: 'model' })}
-                  />
-                ))}
-              </div>
-            ))}
+                  onToggle={() => onToggleTableCollapse(entity.id)}
+                  onDoubleClick={() => startInlineRename('class', entity.id, entity.name)}
+                  labelNode={editingTarget?.kind === 'class' && editingTarget.id === entity.id ? (
+                    <InlineRenameInput
+                      value={editingName}
+                      onChange={setEditingName}
+                      onCommit={commitInlineRename}
+                      onCancel={cancelInlineRename}
+                    />
+                  ) : undefined}
+                  actions={editingTarget?.kind === 'class' && editingTarget.id === entity.id ? null : (
+                    <TreeActionButton label="Rename class" onClick={() => startInlineRename('class', entity.id, entity.name)}>
+                      <Pencil className="size-3" />
+                    </TreeActionButton>
+                  )}
+                >
+                  {entity.attributes.map((attribute) => (
+                    <TreeRow
+                      key={attribute.id}
+                      depth={3}
+                      label={attribute.name}
+                      meta={attribute.type}
+                      active={selectionMatches(selection, { kind: 'classAttribute', id: attribute.id, parentId: entity.id, sourceView: 'model' })}
+                      onClick={() => onSelectionChange({ kind: 'classAttribute', id: attribute.id, parentId: entity.id, sourceView: 'model' })}
+                      onDoubleClick={() => startInlineRename('classAttribute', attribute.id, attribute.name, entity.id)}
+                      labelNode={editingTarget?.kind === 'classAttribute' && editingTarget.id === attribute.id && editingTarget.parentId === entity.id ? (
+                        <InlineRenameInput
+                          value={editingName}
+                          onChange={setEditingName}
+                          onCommit={commitInlineRename}
+                          onCancel={cancelInlineRename}
+                        />
+                      ) : undefined}
+                    />
+                  ))}
+                  {entity.methods.map((method) => (
+                    <TreeRow
+                      key={method.id}
+                      depth={3}
+                      label={`${method.name}()`}
+                      meta={method.returnType ?? 'void'}
+                      active={selectionMatches(selection, { kind: 'classMethod', id: method.id, parentId: entity.id, sourceView: 'model' })}
+                      onClick={() => onSelectionChange({ kind: 'classMethod', id: method.id, parentId: entity.id, sourceView: 'model' })}
+                    />
+                  ))}
+                </TreeBranch>
+              );
+            })}
           </TreeSection>
         ) : null}
         <TreeSection
@@ -395,7 +532,7 @@ export function ProjectTreePane({
           )}
         >
           {processModels.map((document) => {
-            const isEditing = editingProcessId === document.id;
+            const isEditing = editingTarget?.kind === 'diagram' && editingTarget.id === document.id;
             return (
               <TreeRow
                 key={document.id}
@@ -407,30 +544,16 @@ export function ProjectTreePane({
                 onClick={() => onSelectionChange({ kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
                 onDoubleClick={() => onOpenDocument(document.id, { type: 'idef0', title: document.name })}
                 labelNode={isEditing ? (
-                  <input
-                    className="min-w-0 flex-1 rounded border border-blue-300 bg-white px-1.5 py-0.5 text-xs text-slate-900 outline-none"
-                    value={editingProcessName}
-                    autoFocus
-                    onChange={(event) => setEditingProcessName(event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    onBlur={commitRenameProcess}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        commitRenameProcess();
-                      }
-                      if (event.key === 'Escape') {
-                        event.preventDefault();
-                        setEditingProcessId(null);
-                        setEditingProcessName('');
-                      }
-                    }}
+                  <InlineRenameInput
+                    value={editingName}
+                    onChange={setEditingName}
+                    onCommit={commitInlineRename}
+                    onCancel={cancelInlineRename}
                   />
                 ) : undefined}
                 actions={!isEditing ? (
                   <>
-                    <TreeActionButton label="Rename process model" onClick={() => startRenameProcess(document)}>
+                    <TreeActionButton label="Rename process model" onClick={() => startInlineRename('diagram', document.id, document.name)}>
                       <Pencil className="size-3" />
                     </TreeActionButton>
                     <TreeActionButton label="Delete process model" danger onClick={() => setProcessToDelete(document)}>
@@ -482,6 +605,19 @@ export function ProjectTreePane({
               active={selectionMatches(selection, { kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
               onClick={() => onSelectionChange({ kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
               onDoubleClick={() => onOpenDocument(document.id)}
+              labelNode={editingTarget?.kind === 'diagram' && editingTarget.id === document.id ? (
+                <InlineRenameInput
+                  value={editingName}
+                  onChange={setEditingName}
+                  onCommit={commitInlineRename}
+                  onCancel={cancelInlineRename}
+                />
+              ) : undefined}
+              actions={editingTarget?.kind === 'diagram' && editingTarget.id === document.id ? null : (
+                <TreeActionButton label="Rename diagram" onClick={() => startInlineRename('diagram', document.id, document.name)}>
+                  <Pencil className="size-3" />
+                </TreeActionButton>
+              )}
             />
           ))}
         </TreeSection>
@@ -511,6 +647,9 @@ function TreeBranch({
   collapsed,
   onClick,
   onToggle,
+  onDoubleClick,
+  labelNode,
+  actions,
   children,
 }: {
   depth: number;
@@ -522,6 +661,9 @@ function TreeBranch({
   collapsed: boolean;
   onClick: () => void;
   onToggle: () => void;
+  onDoubleClick?: () => void;
+  labelNode?: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const fontSize = getTreeFontSize(depth);
@@ -559,12 +701,14 @@ function TreeBranch({
         </button>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="group/tree-row flex min-w-0 flex-1 items-center gap-2 text-left"
           onClick={onClick}
+          onDoubleClick={onDoubleClick}
         >
           <span className="flex size-3.5 shrink-0 items-center justify-center text-slate-400">{icon}</span>
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {labelNode ?? <span className="min-w-0 flex-1 truncate">{label}</span>}
           {meta !== undefined ? <span className="shrink-0 text-[10px] text-slate-400">{meta}</span> : null}
+          {actions ? <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 group-hover/tree-row:opacity-100">{actions}</span> : null}
         </button>
       </div>
       {collapsed ? null : children}
@@ -625,7 +769,7 @@ function TreeSection({
       >
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left font-semibold"
+          className={cn('flex min-w-0 flex-1 items-center gap-2 text-left', depth === 0 ? 'font-semibold' : 'font-medium')}
           onClick={onToggle}
         >
           <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', activeGuide ? 'text-blue-500' : 'text-slate-400', collapsed && '-rotate-90')} />
@@ -640,7 +784,7 @@ function TreeSection({
 }
 
 function getTreeFontSize(depth: number): number {
-  return Math.max(10, 15 - depth);
+  return Math.max(11, 13 - depth);
 }
 
 function TreeRow({
@@ -683,6 +827,41 @@ function TreeRow({
       {meta !== undefined ? <span className="shrink-0 text-[10px] text-slate-400">{meta}</span> : null}
       {actions ? <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 group-hover/tree-row:opacity-100">{actions}</span> : null}
     </button>
+  );
+}
+
+function InlineRenameInput({
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <input
+      className="min-w-0 flex-1 rounded border border-blue-300 bg-white px-1.5 py-0.5 text-slate-900 outline-none"
+      style={{ fontSize: 'inherit', lineHeight: '18px' }}
+      value={value}
+      autoFocus
+      onChange={(event) => onChange(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onBlur={onCommit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onCommit();
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    />
   );
 }
 
