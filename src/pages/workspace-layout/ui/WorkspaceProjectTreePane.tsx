@@ -64,36 +64,50 @@ export function ProjectTreePane({
           ))}
         </TreeSection>
         <TreeSection title="Tables" icon={<Table2 className="size-3.5" />} depth={1} activeGuide={tablesActive}>
-          {project.schema.tables.map((table) => (
-            <TreeBranch
-              key={table.id}
-              depth={2}
-              icon={<Table2 className="size-3.5" />}
-              label={table.name}
-              meta={table.fields.length}
-              active={selectionMatches(selection, { kind: 'table', id: table.id, sourceView: 'model' })}
-              activeGuide={selection?.kind === 'field' && selection.parentId === table.id}
-              collapsed={collapsedTableIds.has(table.id)}
-              onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
-              onToggle={() => setCollapsedTableIds((current) => {
-                const next = new Set(current);
-                if (next.has(table.id)) next.delete(table.id);
-                else next.add(table.id);
-                return next;
-              })}
-            >
-              {table.fields.map((field) => (
-                <TreeRow
-                  key={field.id}
-                  depth={3}
-                  label={field.name}
-                  meta={field.type}
-                  active={selectionMatches(selection, { kind: 'field', id: field.id, parentId: table.id, sourceView: 'model' })}
-                  onClick={() => onSelectionChange({ kind: 'field', id: field.id, parentId: table.id, sourceView: 'model' })}
-                />
-              ))}
-            </TreeBranch>
-          ))}
+          {project.schema.tables.map((table) => {
+            const tableActive = selection?.kind === 'table'
+              && selection.id === table.id
+              && (selection.sourceView === 'model' || selection.sourceView === 'erd');
+            const tableFieldActive = selection?.kind === 'field'
+              && selection.parentId === table.id
+              && (selection.sourceView === 'model' || selection.sourceView === 'erd');
+
+            return (
+              <TreeBranch
+                key={table.id}
+                depth={2}
+                icon={<Table2 className="size-3.5" />}
+                label={table.name}
+                meta={table.fields.length}
+                active={tableActive}
+                activeGuide={tableActive || tableFieldActive}
+                collapsed={collapsedTableIds.has(table.id)}
+                onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
+                onToggle={() => setCollapsedTableIds((current) => {
+                  const next = new Set(current);
+                  if (next.has(table.id)) next.delete(table.id);
+                  else next.add(table.id);
+                  return next;
+                })}
+              >
+                {table.fields.map((field) => (
+                  <TreeRow
+                    key={field.id}
+                    depth={3}
+                    label={field.name}
+                    meta={field.type}
+                    active={
+                      selection?.kind === 'field'
+                      && selection.id === field.id
+                      && selection.parentId === table.id
+                      && (selection.sourceView === 'model' || selection.sourceView === 'erd')
+                    }
+                    onClick={() => onSelectionChange({ kind: 'field', id: field.id, parentId: table.id, sourceView: 'model' })}
+                  />
+                ))}
+              </TreeBranch>
+            );
+          })}
         </TreeSection>
         {classDiagram ? (
           <TreeSection title="Entities" icon={<Box className="size-3.5" />} depth={1} activeGuide={entitiesActive}>
@@ -199,7 +213,7 @@ function TreeBranch({
   children: ReactNode;
 }) {
   const fontSize = getTreeFontSize(depth);
-  const guideLeft = 33 + depth * 14;
+  const guideLeft = 20 + depth * 14;
 
   return (
     <div className="relative">
@@ -229,7 +243,7 @@ function TreeBranch({
             onToggle();
           }}
         >
-          <ChevronDown className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')} />
+          <ChevronDown className={cn('size-3.5 transition-transform', activeGuide && 'text-blue-500', collapsed && '-rotate-90')} />
         </button>
         <button
           type="button"
