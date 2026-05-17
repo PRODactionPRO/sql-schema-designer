@@ -40,7 +40,7 @@ describe('normalizeProjectData IDEF0 documents', () => {
               {
                 id: 'concept-1',
                 name: 'Email',
-                kind: 'information_object',
+                kind: 'dataset',
                 status: 'active',
               },
             ],
@@ -70,7 +70,7 @@ describe('normalizeProjectData IDEF0 documents', () => {
     });
     expect(document.idef0.concepts[0]).toMatchObject({
       id: 'concept-1',
-      kind: 'information_object',
+      kind: 'dataset',
       status: 'active',
     });
     expect(document.idef0.arrows[0]).toMatchObject({

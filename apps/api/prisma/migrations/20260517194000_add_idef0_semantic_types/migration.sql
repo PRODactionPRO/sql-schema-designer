@@ -23,30 +23,19 @@ VALUES
         CURRENT_TIMESTAMP,
         CURRENT_TIMESTAMP
     ),
-    (
-        'object_type_information_object',
-        'information_object',
-        'Information Object',
-        'Information',
-        '{"properties":{"kind":{"type":"string"},"status":{"type":"string"}}}'::jsonb,
-        '["domain", "function"]'::jsonb,
-        '["idef0_input", "idef0_output", "references", "affects"]'::jsonb,
-        'system',
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-    ),
-    (
-        'object_type_mechanism',
-        'mechanism',
-        'Mechanism',
-        'Behavior',
-        '{"properties":{"kind":{"type":"string"},"status":{"type":"string"}}}'::jsonb,
-        '["domain"]'::jsonb,
-        '["idef0_mechanism", "references", "affects"]'::jsonb,
-        'system',
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
-    );
+    ('object_type_dataset', 'dataset', 'Dataset', 'Information', '{"properties":{"subtype":{"type":"string"},"status":{"type":"string"}}}'::jsonb, '["domain", "function"]'::jsonb, '["idef0_input", "idef0_output", "references", "affects"]'::jsonb, 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('object_type_artifact', 'artifact', 'Artifact', 'Information', '{"properties":{"subtype":{"type":"string"},"status":{"type":"string"}}}'::jsonb, '["domain", "function"]'::jsonb, '["idef0_input", "idef0_output", "references", "affects"]'::jsonb, 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('object_type_material_object', 'material_object', 'Material Object', 'Physical', '{"properties":{"status":{"type":"string"}}}'::jsonb, '["domain", "function"]'::jsonb, '["idef0_input", "idef0_output", "references", "affects"]'::jsonb, 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('object_type_rule', 'rule', 'Rule / Constraint', 'Governance', '{"properties":{"subtype":{"type":"string"},"status":{"type":"string"}}}'::jsonb, '["domain"]'::jsonb, '["idef0_control", "references", "affects"]'::jsonb, 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('object_type_actor', 'actor', 'Actor / Role', 'Behavior', '{"properties":{"subtype":{"type":"string"},"status":{"type":"string"}}}'::jsonb, '["domain"]'::jsonb, '["idef0_mechanism", "references", "affects"]'::jsonb, 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+UPDATE "ObjectType"
+SET
+    "schema" = '{"properties":{"status":{"type":"string"}}}'::jsonb,
+    "allowedParentTypes" = '["state_machine", "domain", "function"]'::jsonb,
+    "allowedRelationTypes" = '["idef0_input", "idef0_output", "references", "affects"]'::jsonb,
+    "updatedAt" = CURRENT_TIMESTAMP
+WHERE "id" = 'object_type_state';
 
 INSERT INTO "RelationType" (
     "id",

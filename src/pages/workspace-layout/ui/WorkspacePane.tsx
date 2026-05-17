@@ -9,6 +9,7 @@ import type {
   WorkspaceCanvasViewport,
   WorkspaceCanvasViewportId,
   WorkspaceSelection,
+  WorkspaceTab,
   WorkspaceWindow,
   WorkspaceWindowId,
 } from '../model/types';
@@ -46,6 +47,8 @@ export function WorkspacePane({
   onStartTabDrag,
   onProjectChange,
   onSelectionChange,
+  onCloseDocument,
+  onOpenDocument,
   onCanvasViewportChange,
 }: {
   windowState: WorkspaceWindow;
@@ -75,9 +78,17 @@ export function WorkspacePane({
   onStartTabDrag: (windowId: WorkspaceWindowId, tabId: string, event: ReactPointerEvent<HTMLElement>) => void;
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
+  onCloseDocument: (documentId: string) => void;
+  onOpenDocument: (documentId: string, fallback?: { type: WorkspaceWindow['tabs'][number]['type']; title: string }) => void;
   onCanvasViewportChange: (viewId: WorkspaceCanvasViewportId, viewport: WorkspaceCanvasViewport) => void;
 }) {
   const activeTab = windowState.tabs.find((tab) => tab.id === windowState.activeTabId) ?? windowState.tabs[0] ?? null;
+  const resolveTabTitle = (tab: WorkspaceTab): WorkspaceTab => {
+    if (!tab.documentId || !project) return tab;
+    const document = project.documents.find((item) => item.id === tab.documentId);
+    if (!document || document.name === tab.title) return tab;
+    return { ...tab, title: document.name };
+  };
 
   return (
     <section
@@ -110,19 +121,22 @@ export function WorkspacePane({
           <>
             <div className="flex min-w-0 flex-1 items-center py-2">
               <div className="workspace-tabs-scroll flex min-w-0 max-w-full shrink items-center gap-1 overflow-x-auto">
-                {headerWindowState.tabs.map((tab) => (
-                  <DraggableTab
-                    key={tab.id}
-                    tab={tab}
-                    windowId={headerWindowState.id}
-                    active={tab.id === activeTab?.id}
-                    dragging={draggingTabId === tab.id}
-                    held={heldTabId === tab.id}
-                    onActivate={onActivate}
-                    onClose={onCloseTab}
-                    onStartDrag={onStartTabDrag}
-                  />
-                ))}
+                {headerWindowState.tabs.map((tab) => {
+                  const displayTab = resolveTabTitle(tab);
+                  return (
+                    <DraggableTab
+                      key={tab.id}
+                      tab={displayTab}
+                      windowId={headerWindowState.id}
+                      active={tab.id === activeTab?.id}
+                      dragging={draggingTabId === tab.id}
+                      held={heldTabId === tab.id}
+                      onActivate={onActivate}
+                      onClose={onCloseTab}
+                      onStartDrag={onStartTabDrag}
+                    />
+                  );
+                })}
               </div>
               <button
                 type="button"
@@ -166,6 +180,8 @@ export function WorkspacePane({
             viewportRestoreKey={viewportRestoreKey}
             onProjectChange={onProjectChange}
             onSelectionChange={onSelectionChange}
+            onCloseDocument={onCloseDocument}
+            onOpenDocument={onOpenDocument}
             onCanvasViewportChange={onCanvasViewportChange}
           />
         ) : <EmptyPane />}

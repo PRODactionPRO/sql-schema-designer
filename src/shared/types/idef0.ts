@@ -13,31 +13,45 @@ export const IDEF0_ARROW_STATUSES = ['required', 'optional', 'conditional'] as c
 export type Idef0ArrowStatus = typeof IDEF0_ARROW_STATUSES[number];
 
 export const IDEF0_CONCEPT_KINDS = [
-  'information_object',
-  'document',
-  'data_set',
+  'dataset',
+  'artifact',
   'material_object',
   'state',
-  'business_rule',
-  'requirement',
-  'standard',
-  'decision',
-  'condition',
-  'schema_or_contract',
   'event',
-  'state_change',
-  'command_or_task',
-  'artifact',
-  'role',
-  'team',
-  'system',
+  'rule',
+  'actor',
   'component',
-  'tool',
-  'database_or_storage',
-  'model_or_agent',
 ] as const;
 
 export type Idef0ConceptKind = typeof IDEF0_CONCEPT_KINDS[number];
+
+export const IDEF0_CONCEPT_SUBTYPES = [
+  'single_field',
+  'record',
+  'table',
+  'payload',
+  'data_mart',
+  'document',
+  'report',
+  'file',
+  'diagram',
+  'migration',
+  'business_rule',
+  'regulatory_requirement',
+  'schema_contract',
+  'sla',
+  'role',
+  'agent',
+  'service',
+  'database',
+  'storage',
+  'tool',
+  'ui',
+  'worker',
+  'artifact',
+] as const;
+
+export type Idef0ConceptSubtype = typeof IDEF0_CONCEPT_SUBTYPES[number];
 
 export interface Idef0Function {
   id: string;
@@ -57,6 +71,7 @@ export interface Idef0Concept {
   id: string;
   name: string;
   kind: Idef0ConceptKind;
+  subtype?: Idef0ConceptSubtype;
   description?: string;
   status: Idef0ConceptStatus;
   domainId?: string;
@@ -83,6 +98,10 @@ export interface Idef0Arrow {
 }
 
 export interface Idef0DiagramModel {
+  id?: string;
+  processModelId?: string;
+  parentFunctionId?: string;
+  name?: string;
   functions: Idef0Function[];
   concepts: Idef0Concept[];
   arrows: Idef0Arrow[];

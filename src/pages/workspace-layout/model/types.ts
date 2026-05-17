@@ -32,6 +32,7 @@ export interface WorkspaceTab {
   id: string;
   type: TabType;
   title: string;
+  documentId?: string;
 }
 
 export interface WorkspaceWindow {

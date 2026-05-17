@@ -42,6 +42,7 @@ import {
   IDEF0_ARROW_ROLES,
   IDEF0_ARROW_STATUSES,
   IDEF0_CONCEPT_KINDS,
+  IDEF0_CONCEPT_SUBTYPES,
   IDEF0_CONCEPT_STATUSES,
   IDEF0_FUNCTION_STATUSES,
   type Idef0Arrow,
@@ -51,6 +52,7 @@ import {
   type Idef0Concept,
   type Idef0ConceptKind,
   type Idef0ConceptStatus,
+  type Idef0ConceptSubtype,
   type Idef0DiagramModel,
   type Idef0Function,
   type Idef0FunctionStatus,
@@ -871,7 +873,11 @@ function normalizeIdef0FunctionStatus(value: unknown): Idef0FunctionStatus {
 }
 
 function normalizeIdef0ConceptKind(value: unknown): Idef0ConceptKind {
-  return IDEF0_CONCEPT_KINDS.includes(value as Idef0ConceptKind) ? value as Idef0ConceptKind : 'information_object';
+  return IDEF0_CONCEPT_KINDS.includes(value as Idef0ConceptKind) ? value as Idef0ConceptKind : 'dataset';
+}
+
+function normalizeIdef0ConceptSubtype(value: unknown): Idef0ConceptSubtype | undefined {
+  return IDEF0_CONCEPT_SUBTYPES.includes(value as Idef0ConceptSubtype) ? value as Idef0ConceptSubtype : undefined;
 }
 
 function normalizeIdef0ConceptStatus(value: unknown): Idef0ConceptStatus {
@@ -924,6 +930,7 @@ function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
     id: asString(record.id, `idef0_concept_${index}`),
     name: asString(record.name, `Concept ${index + 1}`),
     kind: normalizeIdef0ConceptKind(record.kind),
+    subtype: normalizeIdef0ConceptSubtype(record.subtype),
     description: asString(record.description) || undefined,
     status: normalizeIdef0ConceptStatus(record.status),
     domainId: asString(record.domainId) || undefined,
@@ -971,6 +978,10 @@ export function normalizeIdef0Diagram(input: unknown, projectDomains?: Domain[])
   );
 
   return {
+    id: asString(record.id) || undefined,
+    processModelId: asString(record.processModelId) || undefined,
+    parentFunctionId: asString(record.parentFunctionId) || undefined,
+    name: asString(record.name) || undefined,
     functions,
     concepts,
     arrows: uniqueById((Array.isArray(record.arrows) ? record.arrows : []).map(normalizeIdef0Arrow))

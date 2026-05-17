@@ -245,14 +245,18 @@ export function createClassDiagramProjectDocument(name = 'Class Diagram', domain
 
 export function createIdef0ProjectDocument(name = 'IDEF0 Functional Model', domains: Domain[] = []): Idef0ProjectDocument {
   const now = new Date().toISOString();
+  const id = nextProjectObjectId('doc_idef0');
   return {
-    id: nextProjectObjectId('doc_idef0'),
+    id,
     name,
     type: 'idef0',
     createdAt: now,
     updatedAt: now,
     idef0: {
       ...createEmptyIdef0Diagram(),
+      id,
+      processModelId: id,
+      name,
       domains,
     },
   };

@@ -82,11 +82,12 @@ export const INITIAL_WINDOWS: Record<WorkspaceWindowId, WorkspaceWindow> = {
 
 let nextTabCounter = 1;
 
-export function createTab(type: TabType, id?: string): WorkspaceTab {
+export function createTab(type: TabType, id?: string, options: { title?: string; documentId?: string } = {}): WorkspaceTab {
   const item = CATALOG_BY_TYPE.get(type);
   return {
     id: id ?? `${type}-${nextTabCounter++}`,
     type,
-    title: item?.title ?? type,
+    title: options.title ?? item?.title ?? type,
+    documentId: options.documentId,
   };
 }
