@@ -218,6 +218,37 @@ export class CreateRelationInViewCommandDto {
   edge?: SemanticEdgeOptionsDto;
 }
 
+export class CreateRelationCommandDto {
+  @IsString()
+  sourceObjectId!: string;
+
+  @IsString()
+  targetObjectId!: string;
+
+  @IsString()
+  type!: string;
+
+  @IsOptional()
+  @IsString()
+  direction?: string;
+
+  @IsOptional()
+  @IsString()
+  cardinalitySource?: string;
+
+  @IsOptional()
+  @IsString()
+  cardinalityTarget?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  required?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  metadata?: Record<string, unknown>;
+}
+
 export class UpdateRelationCommandDto {
   @IsOptional()
   @IsString()

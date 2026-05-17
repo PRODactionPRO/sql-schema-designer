@@ -83,6 +83,17 @@ export interface CreateRelationInViewCommandPayload {
   };
 }
 
+export interface CreateRelationCommandPayload {
+  sourceObjectId: string;
+  targetObjectId: string;
+  type: string;
+  direction?: string;
+  cardinalitySource?: string;
+  cardinalityTarget?: string;
+  required?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
 export interface UpdateRelationCommandPayload {
   relationId?: string;
   legacyRelationId?: string;
@@ -234,6 +245,19 @@ export function createRelationInViewCommand(
 ): Promise<{ relation: SemanticModelRelation; edge: SemanticViewEdge }> {
   return apiRequest<{ relation: SemanticModelRelation; edge: SemanticViewEdge }>(
     `/projects/${projectId}/semantic/commands/create-relation-in-view`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function createRelationCommand(
+  projectId: string,
+  payload: CreateRelationCommandPayload,
+): Promise<SemanticModelRelation> {
+  return apiRequest<SemanticModelRelation>(
+    `/projects/${projectId}/semantic/commands/create-relation`,
     {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { Box, CircleDot, Database, FileText, Maximize2, Plus, ShieldCheck, Trash2, UserRound, Workflow, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Idef0Arrow, Idef0ArrowRole, Idef0Concept, Idef0ConceptKind, Idef0Function } from '@/shared/types/idef0';
-import type { Idef0ProjectDocument, ProjectData } from '@/shared/types/project';
+import { createRelationCommand, deleteRelationFromViewCommand } from '@/shared/api/semantic-model';
+import type { Idef0Arrow, Idef0ArrowRole, Idef0Concept, Idef0ConceptKind, Idef0DataReference, Idef0Function } from '@/shared/types/idef0';
+import type { Idef0ProjectDocument, ProjectData, ProjectSemanticObjectBinding } from '@/shared/types/project';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
 import { ContextMenu } from '@/shared/ui/ContextMenu';
@@ -22,9 +23,10 @@ import {
   type Idef0NodeSide,
 } from '../model/idef0-view-utils';
 import { IDEF0_ARROW_ROLE_META, IDEF0_CONCEPT_KIND_META } from '../model/idef0-meta';
+import { createSemanticObjectProjection } from '../model/semantic-object-commands';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceIdef0Canvas } from '../model/useWorkspaceIdef0Canvas';
-import { withIdef0Diagram } from '../model/workspace-project-utils';
+import { getObjectBinding, updateProjectBinding, withIdef0Diagram } from '../model/workspace-project-utils';
 import { WorkspaceFloatingCanvasToolbar } from './WorkspaceFloatingCanvasToolbar';
 
 const CONCEPT_MENU: Array<{ kind: Idef0ConceptKind; label: string; icon: ReactNode; separatorBefore?: boolean }> = [
@@ -37,6 +39,27 @@ const CONCEPT_MENU: Array<{ kind: Idef0ConceptKind; label: string; icon: ReactNo
   { kind: 'actor', label: 'Mechanism: Actor / role', icon: <UserRound className="size-3.5" />, separatorBefore: true },
   { kind: 'component', label: 'Mechanism: Component', icon: <Wrench className="size-3.5" /> },
 ];
+
+const IDEF0_FUNCTION_OBJECT_PREFIX = 'idef0_fn';
+const IDEF0_DATA_LINK_RELATION_PREFIX = 'idef0_data_link';
+
+function idef0FunctionLegacyId(documentId: string, functionId: string): string {
+  return `${IDEF0_FUNCTION_OBJECT_PREFIX}::${documentId}::${functionId}`;
+}
+
+function idef0DataReferenceKey(ref: Idef0DataReference): string {
+  return ref.objectId ?? ref.legacyId ?? ref.id;
+}
+
+function idef0DataReferenceLegacyId(ref: Idef0DataReference): string | undefined {
+  if (ref.legacyId) return ref.legacyId;
+  return ref.id.startsWith('class_attr::') ? ref.id : undefined;
+}
+
+function isDatasetLikeConcept(concept: Idef0Concept | undefined): boolean {
+  if (!concept) return false;
+  return concept.kind === 'dataset' || concept.kind === 'artifact';
+}
 
 export function Idef0Canvas({
   project,
@@ -89,6 +112,191 @@ export function Idef0Canvas({
   });
   const functionsById = useMemo(() => new Map(canvas.diagram.functions.map((fn) => [fn.id, fn])), [canvas.diagram.functions]);
   const conceptsById = useMemo(() => new Map(canvas.diagram.concepts.map((concept) => [concept.id, concept])), [canvas.diagram.concepts]);
+  const projectRef = useRef(project);
+  const localIdef0ObjectBindingsRef = useRef(new Map<string, ProjectSemanticObjectBinding>());
+  const pendingIdef0ObjectCreatesRef = useRef(new Map<string, Promise<ProjectSemanticObjectBinding | null>>());
+  const syncedDataRelationIdsRef = useRef(new Set<string>());
+  const pendingDataRelationCreatesRef = useRef(new Set<string>());
+  const desiredDataRelationIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
+
+  useEffect(() => {
+    localIdef0ObjectBindingsRef.current.clear();
+    pendingIdef0ObjectCreatesRef.current.clear();
+    syncedDataRelationIdsRef.current.clear();
+    pendingDataRelationCreatesRef.current.clear();
+    desiredDataRelationIdsRef.current.clear();
+  }, [document.id, project.id]);
+
+  const getIdef0ObjectBinding = useCallback((legacyId: string): ProjectSemanticObjectBinding | undefined => (
+    getObjectBinding(projectRef.current, legacyId) ?? localIdef0ObjectBindingsRef.current.get(legacyId)
+  ), []);
+
+  const ensureIdef0FunctionBinding = useCallback(async (fn: Idef0Function): Promise<ProjectSemanticObjectBinding | null> => {
+    const legacyId = idef0FunctionLegacyId(document.id, fn.id);
+    const existingBinding = getIdef0ObjectBinding(legacyId);
+    if (existingBinding) return existingBinding;
+
+    const pending = pendingIdef0ObjectCreatesRef.current.get(legacyId);
+    if (pending) return pending;
+
+    const createPending = createSemanticObjectProjection({
+      projectId: project.id,
+      type: 'idef0_function',
+      name: fn.name,
+      description: fn.description,
+      domainId: fn.domainId,
+      metadata: {
+        ...fn,
+        id: legacyId,
+        documentId: document.id,
+      },
+    })
+      .then((binding) => {
+        localIdef0ObjectBindingsRef.current.set(legacyId, binding);
+        if (onProjectChange) {
+          const nextProject = updateProjectBinding(
+            projectRef.current,
+            legacyId,
+            binding.objectId,
+            binding.metadata,
+          );
+          projectRef.current = nextProject;
+          onProjectChange(nextProject);
+        }
+        return binding;
+      })
+      .catch((error) => {
+        console.error('[workspace] Failed to create semantic IDEF0 function object', error);
+        return null;
+      })
+      .finally(() => {
+        pendingIdef0ObjectCreatesRef.current.delete(legacyId);
+      });
+
+    pendingIdef0ObjectCreatesRef.current.set(legacyId, createPending);
+    return createPending;
+  }, [document.id, getIdef0ObjectBinding, onProjectChange, project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncDataRelations = async () => {
+      const currentProject = projectRef.current;
+      const desiredRelationIds = new Set<string>();
+      const desiredRelations: Array<{
+        legacyId: string;
+        relationType: 'consumes' | 'produces';
+        functionObjectId: string;
+        attributeObjectId: string;
+        metadata: Record<string, unknown>;
+      }> = [];
+
+      for (const arrow of canvas.diagram.arrows) {
+        if (!arrow.conceptId) continue;
+        const concept = conceptsById.get(arrow.conceptId);
+        if (!concept || !isDatasetLikeConcept(concept)) continue;
+        const dataReferences = concept?.dataReferences ?? [];
+        if (dataReferences.length === 0) continue;
+
+        const functionId = arrow.source.kind === 'function'
+          ? arrow.source.id
+          : arrow.target.kind === 'function'
+            ? arrow.target.id
+            : undefined;
+        if (!functionId) continue;
+
+        const fn = functionsById.get(functionId);
+        if (!fn) continue;
+        const functionBinding = await ensureIdef0FunctionBinding(fn);
+        if (cancelled || !functionBinding?.objectId) return;
+
+        const relationType: 'consumes' | 'produces' = arrow.role === 'output' ? 'produces' : 'consumes';
+        for (const dataRef of dataReferences) {
+          const dataRefKey = idef0DataReferenceKey(dataRef);
+          const dataRefLegacyId = idef0DataReferenceLegacyId(dataRef);
+          const attributeObjectId = dataRef.objectId
+            ?? (dataRefLegacyId ? getObjectBinding(currentProject, dataRefLegacyId)?.objectId : undefined);
+          if (!attributeObjectId) continue;
+
+          const legacyId = `${IDEF0_DATA_LINK_RELATION_PREFIX}::${document.id}::${arrow.id}::${functionId}::${dataRefKey}::${relationType}`;
+          desiredRelationIds.add(legacyId);
+          desiredRelations.push({
+            legacyId,
+            relationType,
+            functionObjectId: functionBinding.objectId,
+            attributeObjectId,
+            metadata: {
+              id: legacyId,
+              documentId: document.id,
+              arrowId: arrow.id,
+              role: arrow.role,
+              conceptId: concept.id,
+              conceptKind: concept.kind,
+              conceptName: concept.name,
+              functionId: fn.id,
+              functionName: fn.name,
+              functionLegacyId: idef0FunctionLegacyId(document.id, fn.id),
+              dataReferenceId: dataRef.id,
+              dataReferenceLegacyId: dataRefLegacyId,
+              dataReferenceObjectId: dataRef.objectId,
+              attributeName: dataRef.attributeName,
+              classId: dataRef.classId,
+              className: dataRef.className,
+              domainId: dataRef.domainId,
+              domainName: dataRef.domainName,
+              valueType: dataRef.valueType,
+            },
+          });
+        }
+      }
+
+      const previousDesired = desiredDataRelationIdsRef.current;
+      for (const relationId of previousDesired) {
+        if (desiredRelationIds.has(relationId)) continue;
+        syncedDataRelationIdsRef.current.delete(relationId);
+        pendingDataRelationCreatesRef.current.delete(relationId);
+        void deleteRelationFromViewCommand(project.id, {
+          legacyRelationId: relationId,
+          deleteRelation: true,
+        }).catch(() => undefined);
+      }
+      desiredDataRelationIdsRef.current = desiredRelationIds;
+
+      for (const relation of desiredRelations) {
+        if (cancelled) return;
+        if (syncedDataRelationIdsRef.current.has(relation.legacyId)) continue;
+        if (pendingDataRelationCreatesRef.current.has(relation.legacyId)) continue;
+
+        pendingDataRelationCreatesRef.current.add(relation.legacyId);
+        void createRelationCommand(project.id, {
+          sourceObjectId: relation.relationType === 'produces' ? relation.functionObjectId : relation.attributeObjectId,
+          targetObjectId: relation.relationType === 'produces' ? relation.attributeObjectId : relation.functionObjectId,
+          type: relation.relationType,
+          direction: 'directed',
+          required: true,
+          metadata: relation.metadata,
+        })
+          .then(() => {
+            syncedDataRelationIdsRef.current.add(relation.legacyId);
+          })
+          .catch((error) => {
+            console.error('[workspace] Failed to sync IDEF0 semantic data relation', error);
+          })
+          .finally(() => {
+            pendingDataRelationCreatesRef.current.delete(relation.legacyId);
+          });
+      }
+    };
+
+    void syncDataRelations();
+    return () => {
+      cancelled = true;
+    };
+  }, [canvas.diagram.arrows, conceptsById, document.id, ensureIdef0FunctionBinding, functionsById, project.id]);
 
   const startInlineRename = (ref: Idef0NodeRef) => {
     const node = ref.kind === 'function' ? functionsById.get(ref.id) : conceptsById.get(ref.id);

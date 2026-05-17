@@ -1,9 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
 import type { CreateModelObjectDto } from './dto/create-model-object.dto';
 import type {
+  CreateRelationCommandDto,
   CreateObjectInViewCommandDto,
   CreateRelationInViewCommandDto,
   CreateSemanticViewCommandDto,
@@ -274,10 +279,16 @@ export class SemanticModelService {
     ownerId: string,
     dto: MoveViewNodeCommandDto,
   ) {
-    return this.updateViewNodePosition(projectId, ownerId, dto.viewId, dto.nodeId, {
-      x: dto.x,
-      y: dto.y,
-    });
+    return this.updateViewNodePosition(
+      projectId,
+      ownerId,
+      dto.viewId,
+      dto.nodeId,
+      {
+        x: dto.x,
+        y: dto.y,
+      },
+    );
   }
 
   async deleteObjectFromViewCommand(
@@ -364,28 +375,37 @@ export class SemanticModelService {
     await this.findProjectViewOrThrow(projectId, dto.viewId);
 
     const [sourceNode, targetNode] = await Promise.all([
-      this.findProjectViewNodeOrThrow(projectId, dto.viewId, dto.sourceViewNodeId),
-      this.findProjectViewNodeOrThrow(projectId, dto.viewId, dto.targetViewNodeId),
+      this.findProjectViewNodeOrThrow(
+        projectId,
+        dto.viewId,
+        dto.sourceViewNodeId,
+      ),
+      this.findProjectViewNodeOrThrow(
+        projectId,
+        dto.viewId,
+        dto.targetViewNodeId,
+      ),
     ]);
 
     return this.prisma.$transaction(async (tx) => {
       const legacyRelationId = this.getLegacyRelationId(dto.metadata);
       const existingRelationByLegacyId = legacyRelationId
         ? await this.findRelationByLegacyIdInTransaction(
-          tx,
-          projectId,
-          legacyRelationId,
-        )
+            tx,
+            projectId,
+            legacyRelationId,
+          )
         : null;
-      const existingRelation = existingRelationByLegacyId
-        ?? await this.findDuplicateRelationInTransaction(
+      const existingRelation =
+        existingRelationByLegacyId ??
+        (await this.findDuplicateRelationInTransaction(
           tx,
           projectId,
           sourceNode.objectId,
           targetNode.objectId,
           dto.type,
           dto.metadata,
-        );
+        ));
 
       const relation = existingRelation
         ? await tx.modelRelation.update({
@@ -398,11 +418,9 @@ export class SemanticModelService {
               cardinalitySource: dto.cardinalitySource,
               cardinalityTarget: dto.cardinalityTarget,
               required: dto.required ?? existingRelation.required,
-              metadata: (
-                existingRelationByLegacyId
-                  ? dto.metadata ?? existingRelation.metadata
-                  : existingRelation.metadata
-              ) as Prisma.InputJsonValue,
+              metadata: (existingRelationByLegacyId
+                ? (dto.metadata ?? existingRelation.metadata)
+                : existingRelation.metadata) as Prisma.InputJsonValue,
             },
           })
         : await tx.modelRelation.create({
@@ -465,6 +483,71 @@ export class SemanticModelService {
       await this.touchView(tx, dto.viewId);
 
       return { relation, edge };
+    });
+  }
+
+  async createRelationCommand(
+    projectId: string,
+    ownerId: string,
+    dto: CreateRelationCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    await Promise.all([
+      this.findProjectObjectOrThrow(projectId, dto.sourceObjectId),
+      this.findProjectObjectOrThrow(projectId, dto.targetObjectId),
+    ]);
+
+    return this.prisma.$transaction(async (tx) => {
+      const legacyRelationId = this.getLegacyRelationId(dto.metadata);
+      const existingRelationByLegacyId = legacyRelationId
+        ? await this.findRelationByLegacyIdInTransaction(
+            tx,
+            projectId,
+            legacyRelationId,
+          )
+        : null;
+      const existingRelation =
+        existingRelationByLegacyId ??
+        (await this.findDuplicateRelationInTransaction(
+          tx,
+          projectId,
+          dto.sourceObjectId,
+          dto.targetObjectId,
+          dto.type,
+          dto.metadata,
+        ));
+
+      if (existingRelation) {
+        return tx.modelRelation.update({
+          where: { id: existingRelation.id },
+          data: {
+            sourceObjectId: dto.sourceObjectId,
+            targetObjectId: dto.targetObjectId,
+            type: dto.type,
+            direction: dto.direction ?? existingRelation.direction,
+            cardinalitySource: dto.cardinalitySource,
+            cardinalityTarget: dto.cardinalityTarget,
+            required: dto.required ?? existingRelation.required,
+            metadata: (existingRelationByLegacyId
+              ? (dto.metadata ?? existingRelation.metadata)
+              : existingRelation.metadata) as Prisma.InputJsonValue,
+          },
+        });
+      }
+
+      return tx.modelRelation.create({
+        data: {
+          projectId,
+          sourceObjectId: dto.sourceObjectId,
+          targetObjectId: dto.targetObjectId,
+          type: dto.type,
+          direction: dto.direction ?? 'directed',
+          cardinalitySource: dto.cardinalitySource,
+          cardinalityTarget: dto.cardinalityTarget,
+          required: dto.required ?? false,
+          metadata: (dto.metadata ?? {}) as Prisma.InputJsonValue,
+        },
+      });
     });
   }
 
@@ -663,7 +746,10 @@ export class SemanticModelService {
     return object;
   }
 
-  private async findProjectRelationOrThrow(projectId: string, relationId: string) {
+  private async findProjectRelationOrThrow(
+    projectId: string,
+    relationId: string,
+  ) {
     const relation = await this.prisma.modelRelation.findFirst({
       where: {
         id: relationId,
@@ -684,10 +770,13 @@ export class SemanticModelService {
     relationId?: string,
     legacyRelationId?: string,
   ) {
-    if (relationId) return this.findProjectRelationOrThrow(projectId, relationId);
+    if (relationId)
+      return this.findProjectRelationOrThrow(projectId, relationId);
 
     if (!legacyRelationId) {
-      throw new BadRequestException('Relation id or legacy relation id is required');
+      throw new BadRequestException(
+        'Relation id or legacy relation id is required',
+      );
     }
 
     const relation = await this.findRelationByLegacyIdInTransaction(
@@ -724,7 +813,10 @@ export class SemanticModelService {
     ];
 
     return signatureKeys
-      .map((key) => `${key}:${typeof metadata[key] === 'string' ? metadata[key] : ''}`)
+      .map(
+        (key) =>
+          `${key}:${typeof metadata[key] === 'string' ? metadata[key] : ''}`,
+      )
       .join('|');
   }
 
@@ -740,7 +832,12 @@ export class SemanticModelService {
       },
     });
 
-    return relations.find((relation) => this.getLegacyRelationId(relation.metadata) === legacyRelationId) ?? null;
+    return (
+      relations.find(
+        (relation) =>
+          this.getLegacyRelationId(relation.metadata) === legacyRelationId,
+      ) ?? null
+    );
   }
 
   private async findDuplicateRelationInTransaction(
@@ -762,9 +859,13 @@ export class SemanticModelService {
       },
     });
 
-    return relations.find((relation) => (
-      this.getRelationDuplicateSignature(relation.metadata) === requestedSignature
-    )) ?? null;
+    return (
+      relations.find(
+        (relation) =>
+          this.getRelationDuplicateSignature(relation.metadata) ===
+          requestedSignature,
+      ) ?? null
+    );
   }
 
   private async findProjectViewNodeOrThrow(
