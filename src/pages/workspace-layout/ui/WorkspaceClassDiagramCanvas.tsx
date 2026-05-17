@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Copy, GitBranch, LayoutGrid, Link2, Maximize2, Plus, Rows3, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { ClassDiagramProjectDocument, ProjectData } from '@/shared/types/project';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
@@ -9,6 +10,7 @@ import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 import { useContextMenu } from '@/shared/ui/useContextMenu';
 import {
   CLASS_CANVAS_WORLD_SIZE,
+  CLASS_CARD_WIDTH,
   classMethodReturnTypeOptions,
   getClassDiagramBounds,
   getClassEntityKindMeta,
@@ -259,6 +261,112 @@ function ProjectClassDiagramCanvas({
       },
     ]);
   };
+
+  const getSelectedClassIds = useCallback(() => {
+    const ids = new Set(canvas.selectedClassIds);
+    if (selection?.sourceView === 'classDiagram') {
+      if (selection.kind === 'class') ids.add(selection.id);
+      if ((selection.kind === 'classAttribute' || selection.kind === 'classMethod') && selection.parentId) {
+        ids.add(selection.parentId);
+      }
+    }
+    return [...ids];
+  }, [canvas.selectedClassIds, selection]);
+
+  const getPasteOffsetToViewportCenter = useCallback((content: string) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return undefined;
+    }
+
+    const payload = parsed as { classes?: Array<{ position?: { x: number; y: number }; attributes?: unknown[]; methods?: unknown[] }> };
+    const boxes = (payload.classes ?? [])
+      .map((entity) => ({
+        x: entity.position?.x,
+        y: entity.position?.y,
+        width: CLASS_CARD_WIDTH,
+        height: 114
+          + Math.max(1, Array.isArray(entity.attributes) ? entity.attributes.length : 0) * 36
+          + Math.max(1, Array.isArray(entity.methods) ? entity.methods.length : 0) * 36,
+      }))
+      .filter((box): box is { x: number; y: number; width: number; height: number } => (
+        typeof box.x === 'number' && typeof box.y === 'number'
+      ));
+    if (boxes.length === 0) return undefined;
+
+    const rect = canvas.containerRef.current?.getBoundingClientRect();
+    if (!rect) return undefined;
+    const viewportCenter = canvas.screenToWorld({
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    if (!viewportCenter) return undefined;
+
+    const minX = Math.min(...boxes.map((box) => box.x));
+    const minY = Math.min(...boxes.map((box) => box.y));
+    const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+    const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+    return {
+      x: viewportCenter.x - (minX + maxX) / 2,
+      y: viewportCenter.y - (minY + maxY) / 2,
+    };
+  }, [canvas]);
+
+  const handleCopySelection = useCallback(async () => {
+    const payload = canvas.exportSelectionForClipboard(getSelectedClassIds());
+    if (!payload) return;
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      toast.success('Copied selected classes');
+    } catch {
+      toast.error('Cannot access clipboard in this browser context');
+    }
+  }, [canvas, getSelectedClassIds]);
+
+  const handlePasteSelection = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      toast.error('Cannot read clipboard in this browser context');
+      return;
+    }
+
+    const result = canvas.importSelectionFromClipboard(text, getPasteOffsetToViewportCenter(text));
+    if (!result) {
+      toast.error('Clipboard does not contain copied class diagram objects');
+      return;
+    }
+    toast.success(`Pasted ${result.classes} class${result.classes === 1 ? '' : 'es'} and ${result.relations} relation${result.relations === 1 ? '' : 's'}`);
+  }, [canvas, getPasteOffsetToViewportCenter]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'INPUT'
+        || target?.tagName === 'TEXTAREA'
+        || target?.isContentEditable
+        || Boolean(target?.closest('.cm-editor'));
+      if (isTyping) return;
+
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod || event.shiftKey) return;
+      if (event.code === 'KeyC') {
+        event.preventDefault();
+        void handleCopySelection();
+      }
+      if (event.code === 'KeyV') {
+        event.preventDefault();
+        void handlePasteSelection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handleCopySelection, handlePasteSelection]);
 
   if (diagram.classes.length === 0) {
     return (

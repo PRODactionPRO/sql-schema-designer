@@ -27,6 +27,15 @@ import { reorderClassMembers } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
 
 const MAX_HISTORY_LENGTH = 50;
+const WORKSPACE_CLASS_CLIPBOARD_TYPE = 'application/x-prodsql-class-diagram-selection';
+const WORKSPACE_CLASS_CLIPBOARD_VERSION = 1;
+
+interface ClassDiagramClipboardPayload {
+  type: typeof WORKSPACE_CLASS_CLIPBOARD_TYPE;
+  version: typeof WORKSPACE_CLASS_CLIPBOARD_VERSION;
+  classes: ClassEntity[];
+  relations: ClassRelation[];
+}
 
 interface UseWorkspaceClassDiagramCanvasOptions {
   projectId?: string;
@@ -51,6 +60,21 @@ function getUniqueClassName(classes: ClassEntity[], baseName: string): string {
     index += 1;
   }
   return `${baseName}${index}`;
+}
+
+function getUniqueClassNameFromSet(usedNames: Set<string>, baseName: string): string {
+  if (!usedNames.has(baseName.toLowerCase())) {
+    usedNames.add(baseName.toLowerCase());
+    return baseName;
+  }
+
+  let index = 2;
+  while (usedNames.has(`${baseName}${index}`.toLowerCase())) {
+    index += 1;
+  }
+  const nextName = `${baseName}${index}`;
+  usedNames.add(nextName.toLowerCase());
+  return nextName;
 }
 
 function createClassEntity(kind: ClassEntityKind, name: string, position: { x: number; y: number }): ClassEntity {
@@ -659,6 +683,91 @@ export function useWorkspaceClassDiagramCanvas(
     });
   }, [applyDiagram, pushHistory]);
 
+  const exportSelectionForClipboard = useCallback((classIds: string[]) => {
+    const ids = new Set(classIds);
+    if (ids.size === 0) return null;
+
+    const selectedClasses = diagramRef.current.classes.filter((entity) => ids.has(entity.id));
+    if (selectedClasses.length === 0) return null;
+
+    const selectedRelations = diagramRef.current.relations.filter((relation) => (
+      ids.has(relation.fromClassId) && ids.has(relation.toClassId)
+    ));
+    const payload: ClassDiagramClipboardPayload = {
+      type: WORKSPACE_CLASS_CLIPBOARD_TYPE,
+      version: WORKSPACE_CLASS_CLIPBOARD_VERSION,
+      classes: deepClone(selectedClasses),
+      relations: deepClone(selectedRelations),
+    };
+    return JSON.stringify(payload);
+  }, []);
+
+  const importSelectionFromClipboard = useCallback((content: string, offset = { x: 64, y: 64 }) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return null;
+    }
+
+    const payload = parsed as Partial<ClassDiagramClipboardPayload>;
+    if (payload.type !== WORKSPACE_CLASS_CLIPBOARD_TYPE || payload.version !== WORKSPACE_CLASS_CLIPBOARD_VERSION) return null;
+    if (!Array.isArray(payload.classes) || !Array.isArray(payload.relations) || payload.classes.length === 0) return null;
+
+    pushHistory();
+
+    const classIdMap = new Map<string, string>();
+    const usedNames = new Set(diagramRef.current.classes.map((entity) => entity.name.toLowerCase()));
+    const pastedClasses = deepClone(payload.classes).map((sourceEntity) => {
+      const nextId = nextWorkspaceId('class');
+      classIdMap.set(sourceEntity.id, nextId);
+      return {
+        ...sourceEntity,
+        id: nextId,
+        name: getUniqueClassNameFromSet(usedNames, sourceEntity.name),
+        position: {
+          x: sourceEntity.position.x + offset.x,
+          y: sourceEntity.position.y + offset.y,
+        },
+        attributes: sourceEntity.attributes.map((attribute) => ({
+          ...attribute,
+          id: nextWorkspaceId('class_attr'),
+        })),
+        methods: sourceEntity.methods.map((method) => ({
+          ...method,
+          id: nextWorkspaceId('class_method'),
+        })),
+      };
+    });
+    const pastedRelations = deepClone(payload.relations)
+      .map((relation) => {
+        const fromClassId = classIdMap.get(relation.fromClassId);
+        const toClassId = classIdMap.get(relation.toClassId);
+        if (!fromClassId || !toClassId) return null;
+        return {
+          ...relation,
+          id: nextWorkspaceId('class_relation'),
+          fromClassId,
+          toClassId,
+        };
+      })
+      .filter((relation): relation is ClassRelation => Boolean(relation));
+
+    applyDiagram({
+      ...diagramRef.current,
+      classes: [...diagramRef.current.classes, ...pastedClasses],
+      relations: [...diagramRef.current.relations, ...pastedRelations],
+    });
+    pastedClasses.forEach(createClassObject);
+    pastedRelations.forEach(saveClassRelation);
+    setSelectedClassIds(new Set(pastedClasses.map((entity) => entity.id)));
+
+    return {
+      classes: pastedClasses.length,
+      relations: pastedRelations.length,
+    };
+  }, [applyDiagram, createClassObject, pushHistory, saveClassRelation]);
+
   const undo = useCallback(() => {
     const previous = historyPastRef.current.at(-1);
     if (!previous) return;
@@ -711,6 +820,8 @@ export function useWorkspaceClassDiagramCanvas(
     startClassDrag,
     reorderAttributes,
     reorderMethods,
+    exportSelectionForClipboard,
+    importSelectionFromClipboard,
     canUndo: historyPast.length > 0,
     canRedo: historyFuture.length > 0,
     undo,

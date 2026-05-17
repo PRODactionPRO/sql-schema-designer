@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { deepClone } from '@/shared/lib/json';
 import type {
   Idef0Arrow,
+  Idef0ArrowEndpoint,
   Idef0ArrowRole,
   Idef0Attribute,
   Idef0Concept,
@@ -26,6 +27,16 @@ import {
 import { nextWorkspaceId } from './workspace-project-utils';
 
 const MAX_HISTORY_LENGTH = 50;
+const WORKSPACE_IDEF0_CLIPBOARD_TYPE = 'application/x-prodsql-idef0-selection';
+const WORKSPACE_IDEF0_CLIPBOARD_VERSION = 1;
+
+interface Idef0ClipboardPayload {
+  type: typeof WORKSPACE_IDEF0_CLIPBOARD_TYPE;
+  version: typeof WORKSPACE_IDEF0_CLIPBOARD_VERSION;
+  functions: Idef0Function[];
+  concepts: Idef0Concept[];
+  arrows: Idef0Arrow[];
+}
 
 interface UseWorkspaceIdef0CanvasOptions {
   onCommit?: (diagram: Idef0DiagramModel) => void;
@@ -48,6 +59,19 @@ function getUniqueName<T extends { name: string }>(items: T[], baseName: string)
   let index = 2;
   while (used.has(`${baseName} ${index}`.toLowerCase())) index += 1;
   return `${baseName} ${index}`;
+}
+
+function getUniqueNameFromSet(usedNames: Set<string>, baseName: string): string {
+  if (!usedNames.has(baseName.toLowerCase())) {
+    usedNames.add(baseName.toLowerCase());
+    return baseName;
+  }
+
+  let index = 2;
+  while (usedNames.has(`${baseName} ${index}`.toLowerCase())) index += 1;
+  const nextName = `${baseName} ${index}`;
+  usedNames.add(nextName.toLowerCase());
+  return nextName;
 }
 
 function createFunction(position: { x: number; y: number }, functions: Idef0Function[]): Idef0Function {
@@ -114,6 +138,18 @@ function getRoleFromConceptKind(kind?: Idef0ConceptKind): Idef0ArrowRole {
   if (kind === 'rule') return 'control';
   if (kind === 'actor' || kind === 'component') return 'mechanism';
   return 'input';
+}
+
+function cloneIdef0Functions(functions: Idef0Function[]) {
+  return deepClone(functions);
+}
+
+function cloneIdef0Concepts(concepts: Idef0Concept[]) {
+  return deepClone(concepts);
+}
+
+function cloneIdef0Arrows(arrows: Idef0Arrow[]) {
+  return deepClone(arrows);
 }
 
 function inferArrow(from: Idef0NodeRef, to: Idef0NodeRef, diagram: Idef0DiagramModel): Idef0Arrow | null {
@@ -506,6 +542,142 @@ export function useWorkspaceIdef0Canvas(
         });
   }, [applyDiagram, pushHistory]);
 
+  const exportSelectionForClipboard = useCallback(() => {
+    const selectedIds = selectedNodeIdsRef.current;
+    if (selectedIds.size === 0) return null;
+
+    const selectedFunctions = diagramRef.current.functions.filter((fn) => (
+      selectedIds.has(getIdef0NodeId({ kind: 'function', id: fn.id }))
+    ));
+    const selectedConcepts = diagramRef.current.concepts.filter((concept) => (
+      selectedIds.has(getIdef0NodeId({ kind: 'concept', id: concept.id }))
+    ));
+    if (selectedFunctions.length === 0 && selectedConcepts.length === 0) return null;
+
+    const selectedFunctionIds = new Set(selectedFunctions.map((fn) => fn.id));
+    const selectedConceptIds = new Set(selectedConcepts.map((concept) => concept.id));
+    const selectedArrows = diagramRef.current.arrows.filter((arrow) => (
+      arrow.source.kind !== 'boundary'
+      && arrow.target.kind !== 'boundary'
+      && (
+        arrow.source.kind === 'function'
+          ? selectedFunctionIds.has(arrow.source.id ?? '')
+          : selectedConceptIds.has(arrow.source.id ?? '')
+      )
+      && (
+        arrow.target.kind === 'function'
+          ? selectedFunctionIds.has(arrow.target.id ?? '')
+          : selectedConceptIds.has(arrow.target.id ?? '')
+      )
+    ));
+
+    const payload: Idef0ClipboardPayload = {
+      type: WORKSPACE_IDEF0_CLIPBOARD_TYPE,
+      version: WORKSPACE_IDEF0_CLIPBOARD_VERSION,
+      functions: cloneIdef0Functions(selectedFunctions),
+      concepts: cloneIdef0Concepts(selectedConcepts),
+      arrows: cloneIdef0Arrows(selectedArrows),
+    };
+    return JSON.stringify(payload);
+  }, []);
+
+  const importSelectionFromClipboard = useCallback((content: string, offset = { x: 64, y: 64 }) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return null;
+    }
+
+    const payload = parsed as Partial<Idef0ClipboardPayload>;
+    if (payload.type !== WORKSPACE_IDEF0_CLIPBOARD_TYPE || payload.version !== WORKSPACE_IDEF0_CLIPBOARD_VERSION) return null;
+    if (!Array.isArray(payload.functions) || !Array.isArray(payload.concepts) || !Array.isArray(payload.arrows)) return null;
+    if (payload.functions.length === 0 && payload.concepts.length === 0) return null;
+
+    pushHistory();
+
+    const functionIdMap = new Map<string, string>();
+    const conceptIdMap = new Map<string, string>();
+    const usedFunctionNames = new Set(diagramRef.current.functions.map((fn) => fn.name.toLowerCase()));
+    const usedConceptNames = new Set(diagramRef.current.concepts.map((concept) => concept.name.toLowerCase()));
+    const pastedFunctions = cloneIdef0Functions(payload.functions).map((sourceFunction) => {
+      const nextId = nextWorkspaceId('idef0_fn');
+      functionIdMap.set(sourceFunction.id, nextId);
+      return {
+        ...sourceFunction,
+        id: nextId,
+        name: getUniqueNameFromSet(usedFunctionNames, sourceFunction.name),
+        position: {
+          x: sourceFunction.position.x + offset.x,
+          y: sourceFunction.position.y + offset.y,
+        },
+        attributes: sourceFunction.attributes?.map((attribute) => ({
+          ...attribute,
+          id: nextWorkspaceId('idef0_attr'),
+        })),
+      };
+    });
+    const pastedConcepts = cloneIdef0Concepts(payload.concepts).map((sourceConcept) => {
+      const nextId = nextWorkspaceId('idef0_concept');
+      conceptIdMap.set(sourceConcept.id, nextId);
+      return {
+        ...sourceConcept,
+        id: nextId,
+        name: getUniqueNameFromSet(usedConceptNames, sourceConcept.name),
+        position: {
+          x: sourceConcept.position.x + offset.x,
+          y: sourceConcept.position.y + offset.y,
+        },
+        attributes: sourceConcept.attributes?.map((attribute) => ({
+          ...attribute,
+          id: nextWorkspaceId('idef0_attr'),
+        })),
+      };
+    });
+
+    const remapEndpoint = (endpoint: Idef0ArrowEndpoint): Idef0ArrowEndpoint | null => {
+      if (endpoint.kind === 'boundary') return null;
+      const nextId = endpoint.kind === 'function'
+        ? functionIdMap.get(endpoint.id ?? '')
+        : conceptIdMap.get(endpoint.id ?? '');
+      return nextId ? { kind: endpoint.kind, id: nextId } : null;
+    };
+
+    const pastedArrows = cloneIdef0Arrows(payload.arrows)
+      .map((sourceArrow) => {
+        const source = remapEndpoint(sourceArrow.source);
+        const target = remapEndpoint(sourceArrow.target);
+        if (!source || !target) return null;
+        const pastedArrow: Idef0Arrow = {
+          ...sourceArrow,
+          id: nextWorkspaceId('idef0_arrow'),
+          source,
+          target,
+          conceptId: sourceArrow.conceptId ? conceptIdMap.get(sourceArrow.conceptId) : undefined,
+        };
+        return pastedArrow;
+      })
+      .filter((arrow): arrow is Idef0Arrow => arrow !== null);
+
+    applyDiagram({
+      ...diagramRef.current,
+      functions: [...diagramRef.current.functions, ...pastedFunctions],
+      concepts: [...diagramRef.current.concepts, ...pastedConcepts],
+      arrows: [...diagramRef.current.arrows, ...pastedArrows],
+    });
+    selectedNodeIdsRef.current = new Set([
+      ...pastedFunctions.map((fn) => getIdef0NodeId({ kind: 'function', id: fn.id })),
+      ...pastedConcepts.map((concept) => getIdef0NodeId({ kind: 'concept', id: concept.id })),
+    ]);
+    setSelectedNodeIds(new Set(selectedNodeIdsRef.current));
+
+    return {
+      functions: pastedFunctions.length,
+      concepts: pastedConcepts.length,
+      arrows: pastedArrows.length,
+    };
+  }, [applyDiagram, pushHistory]);
+
   const undo = useCallback(() => {
     const previous = historyPastRef.current.at(-1);
     if (!previous) return;
@@ -553,6 +725,8 @@ export function useWorkspaceIdef0Canvas(
     deleteNode,
     deleteArrow,
     renameNode,
+    exportSelectionForClipboard,
+    importSelectionFromClipboard,
     canUndo: historyPast.length > 0,
     canRedo: historyFuture.length > 0,
     undo,

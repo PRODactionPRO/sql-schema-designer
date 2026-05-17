@@ -51,7 +51,7 @@ export function useWorkspaceCommandHistory<T>(sourceValue: T | undefined) {
 
   const undo = useCallback(() => {
     const previous = stateRef.current.past.at(-1);
-    if (!previous) return;
+    if (!previous) return undefined;
 
     setState((current) => {
       const currentValue = current.value;
@@ -61,11 +61,12 @@ export function useWorkspaceCommandHistory<T>(sourceValue: T | undefined) {
         future: currentValue ? [deepClone(currentValue), ...current.future].slice(0, MAX_COMMAND_HISTORY) : current.future,
       };
     });
+    return deepClone(previous);
   }, []);
 
   const redo = useCallback(() => {
     const next = stateRef.current.future[0];
-    if (!next) return;
+    if (!next) return undefined;
 
     setState((current) => {
       const currentValue = current.value;
@@ -75,6 +76,7 @@ export function useWorkspaceCommandHistory<T>(sourceValue: T | undefined) {
         future: current.future.slice(1),
       };
     });
+    return deepClone(next);
   }, []);
 
   return {

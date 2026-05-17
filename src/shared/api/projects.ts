@@ -104,9 +104,10 @@ export async function createProject(payload: {
   return mapApiProjectToProjectData(project);
 }
 
-export async function updateProject(project: ProjectData): Promise<ProjectData> {
+export async function updateProject(project: ProjectData, init: Pick<RequestInit, 'keepalive'> = {}): Promise<ProjectData> {
   const updated = await apiRequest<ApiProject>(`/projects/${project.id}`, {
     method: 'PUT',
+    ...init,
     body: JSON.stringify({
       name: project.name,
       description: project.description,
