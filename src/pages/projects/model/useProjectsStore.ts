@@ -12,11 +12,13 @@ const PROJECTS_QUERY_KEY = ['projects'];
 export function useProjectsStore() {
   const queryClient = useQueryClient();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const userId = useAuthStore((s) => s.user?.id);
+  const projectsQueryKey = useMemo(() => [...PROJECTS_QUERY_KEY, userId], [userId]);
 
   const projectsQuery = useQuery({
-    queryKey: PROJECTS_QUERY_KEY,
+    queryKey: projectsQueryKey,
     queryFn: getProjects,
-    enabled: isAuthenticated,
+    enabled: isAuthenticated && Boolean(userId),
   });
 
   const projects = useMemo(
@@ -25,8 +27,8 @@ export function useProjectsStore() {
   );
 
   const reloadProjects = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: PROJECTS_QUERY_KEY });
-  }, [queryClient]);
+    await queryClient.invalidateQueries({ queryKey: projectsQueryKey });
+  }, [projectsQueryKey, queryClient]);
 
   const createMutation = useMutation({
     mutationFn: (name: string) => createProject({ name }),

@@ -7,7 +7,8 @@ import type {
   TableConstraint,
   TableConstraintType,
 } from '@/shared/types/schema';
-import { nextWorkspaceId, saveObjectMetadata } from '../model/workspace-project-utils';
+import { deleteSemanticObjectProjection } from '../model/semantic-object-commands';
+import { getObjectBinding, nextWorkspaceId, saveObjectMetadata } from '../model/workspace-project-utils';
 
 export function TableProperties({
   project,
@@ -95,6 +96,16 @@ export function TableProperties({
             ...project.schema,
             tables: project.schema.tables.filter((item) => !ids.has(item.id)),
             relations: project.schema.relations.filter((relation) => !ids.has(relation.fromTableId) && !ids.has(relation.toTableId)),
+          });
+          tableIds.forEach((tableId) => {
+            const binding = getObjectBinding(project, tableId);
+            if (!binding) return;
+
+            deleteSemanticObjectProjection({
+              projectId: project.id,
+              semanticBinding: project.semantic?.erd,
+              binding,
+            });
           });
         }}
       />

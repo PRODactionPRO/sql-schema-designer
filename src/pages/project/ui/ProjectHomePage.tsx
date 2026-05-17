@@ -376,11 +376,12 @@ export function ProjectHomePage() {
       <WorkspaceSidebar
         projects={projects}
         activeProjectId={project.id}
-	        query={query}
-	        onQueryChange={setQuery}
-	        onProjectClick={(id) => navigate(`/project/${id}`)}
-	        onViewChange={handleWorkspaceViewChange}
-	        onLogout={() => {
+        query={query}
+        onQueryChange={setQuery}
+        onProjectClick={(id) => navigate(`/project/${id}`)}
+        onViewChange={handleWorkspaceViewChange}
+        onLogout={() => {
+          queryClient.clear();
           clearSession();
           navigate('/auth', { replace: true });
         }}

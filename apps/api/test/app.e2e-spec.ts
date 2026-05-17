@@ -51,6 +51,7 @@ interface CreateRelationInViewResponse {
     sourceObjectId: string;
     targetObjectId: string;
     type: string;
+    metadata?: unknown;
   };
   edge: {
     id: string;
@@ -200,6 +201,52 @@ describe('API critical flow (e2e)', () => {
     const postsSemantic =
       createPostsObjectResponse.body as CreateObjectInViewResponse;
 
+    const createStatusEnumResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'enum',
+        name: 'Status',
+        metadata: {
+          id: 'enum-status',
+          name: 'Status',
+          values: ['draft', 'published'],
+        },
+        position: { x: 760, y: 120 },
+      });
+
+    expect(createStatusEnumResponse.status).toBe(201);
+    const statusEnumSemantic =
+      createStatusEnumResponse.body as CreateObjectInViewResponse;
+    expect(statusEnumSemantic.object.type).toBe('enum');
+    expect(statusEnumSemantic.node.x).toBe(760);
+
+    const createPayloadJsonSchemaResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-object-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        type: 'json_schema',
+        name: 'Payload',
+        metadata: {
+          id: 'json-payload',
+          name: 'Payload',
+          nodes: [{ id: 'json-root', name: 'root', type: 'object', order: 0 }],
+        },
+        position: { x: 920, y: 120 },
+      });
+
+    expect(createPayloadJsonSchemaResponse.status).toBe(201);
+    const payloadJsonSchemaSemantic =
+      createPayloadJsonSchemaResponse.body as CreateObjectInViewResponse;
+    expect(payloadJsonSchemaSemantic.object.type).toBe('json_schema');
+    expect(payloadJsonSchemaSemantic.node.x).toBe(920);
+
     const createSemanticRelationResponse = await request(app.getHttpServer())
       .post(
         `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
@@ -227,6 +274,81 @@ describe('API critical flow (e2e)', () => {
       postsSemantic.object.id,
     );
     expect(semanticRelation.edge.sourceViewNodeId).toBe(postsSemantic.node.id);
+
+    const duplicateSemanticRelationResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        sourceViewNodeId: postsSemantic.node.id,
+        targetViewNodeId: usersSemantic.node.id,
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:N',
+        },
+      });
+
+    expect(duplicateSemanticRelationResponse.status).toBe(201);
+    expect(duplicateSemanticRelationResponse.body.relation.id).toBe(
+      semanticRelation.relation.id,
+    );
+    expect(duplicateSemanticRelationResponse.body.edge.id).toBe(
+      semanticRelation.edge.id,
+    );
+
+    const semanticDuplicateByFieldsResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/create-relation-in-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        viewId: semanticView.id,
+        sourceViewNodeId: postsSemantic.node.id,
+        targetViewNodeId: usersSemantic.node.id,
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users-copy',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:N',
+        },
+      });
+
+    expect(semanticDuplicateByFieldsResponse.status).toBe(201);
+    expect(semanticDuplicateByFieldsResponse.body.relation.id).toBe(
+      semanticRelation.relation.id,
+    );
+    expect(semanticDuplicateByFieldsResponse.body.edge.id).toBe(
+      semanticRelation.edge.id,
+    );
+
+    const updateSemanticRelationResponse = await request(app.getHttpServer())
+      .post(`/api/projects/${projectId}/semantic/commands/update-relation`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        legacyRelationId: 'relation-posts-users',
+        type: 'references',
+        metadata: {
+          id: 'relation-posts-users',
+          fromTableId: 'table-posts',
+          fromFieldId: 'posts-user-id',
+          toTableId: 'table-users',
+          toFieldId: 'users-id',
+          type: '1:1',
+        },
+      });
+
+    expect(updateSemanticRelationResponse.status).toBe(201);
+    expect(updateSemanticRelationResponse.body.metadata.type).toBe('1:1');
 
     const moveNodeResponse = await request(app.getHttpServer())
       .post(`/api/projects/${projectId}/semantic/commands/move-view-node`)
@@ -264,8 +386,43 @@ describe('API critical flow (e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(primaryErdResponse.status).toBe(200);
-    expect(primaryErdResponse.body.view.nodes).toHaveLength(2);
+    expect(primaryErdResponse.body.view.nodes).toHaveLength(4);
     expect(primaryErdResponse.body.view.edges).toHaveLength(1);
+    expect(primaryErdResponse.body.view.nodes.map((node) => node.object.type).sort())
+      .toEqual(['enum', 'json_schema', 'table', 'table']);
+    expect(primaryErdResponse.body.context.objects.map((object) => object.type))
+      .not.toContain('enum');
+    expect(primaryErdResponse.body.context.objects.map((object) => object.type))
+      .not.toContain('json_schema');
+
+    const deleteRelationResponse = await request(app.getHttpServer())
+      .post(
+        `/api/projects/${projectId}/semantic/commands/delete-relation-from-view`,
+      )
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        legacyRelationId: 'relation-posts-users',
+        viewId: semanticView.id,
+      });
+
+    expect(deleteRelationResponse.status).toBe(201);
+    expect(deleteRelationResponse.body.hiddenEdgeIds).toContain(
+      semanticRelation.edge.id,
+    );
+
+    const primaryErdAfterRelationDeleteResponse = await request(
+      app.getHttpServer(),
+    )
+      .get(`/api/projects/${projectId}/semantic/views/primary-erd`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(primaryErdAfterRelationDeleteResponse.status).toBe(200);
+    expect(primaryErdAfterRelationDeleteResponse.body.view.nodes).toHaveLength(
+      4,
+    );
+    expect(primaryErdAfterRelationDeleteResponse.body.view.edges).toHaveLength(
+      0,
+    );
 
     const deleteObjectResponse = await request(app.getHttpServer())
       .post(

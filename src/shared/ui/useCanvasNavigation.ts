@@ -11,6 +11,8 @@ export interface CanvasViewport {
   zoom: number;
 }
 
+export type CanvasResizeAnchor = 'center' | 'document' | 'none';
+
 export interface CanvasBounds {
   minX: number;
   minY: number;
@@ -30,6 +32,7 @@ interface UseCanvasNavigationOptions {
   initialZoom?: number;
   restoreKey?: string | number;
   preserveViewportCenterOnResize?: boolean;
+  resizeAnchor?: CanvasResizeAnchor;
   onViewportChange?: (viewport: CanvasViewport) => void;
 }
 
@@ -65,6 +68,7 @@ export function useCanvasNavigation({
   initialZoom = 1,
   restoreKey,
   preserveViewportCenterOnResize = true,
+  resizeAnchor = 'center',
   onViewportChange,
 }: UseCanvasNavigationOptions = {}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -129,7 +133,8 @@ export function useCanvasNavigation({
   }, [initialPan, initialZoom, maxZoom, minZoom, notifyViewportChange, restoreKey]);
 
   useEffect(() => {
-    if (!preserveViewportCenterOnResize) return undefined;
+    const effectiveResizeAnchor = preserveViewportCenterOnResize ? resizeAnchor : 'none';
+    if (effectiveResizeAnchor === 'none') return undefined;
 
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === 'undefined') return undefined;
@@ -137,12 +142,29 @@ export function useCanvasNavigation({
     let previousRect = container.getBoundingClientRect();
     const observer = new ResizeObserver(() => {
       const nextRect = container.getBoundingClientRect();
+      const deltaLeft = nextRect.left - previousRect.left;
+      const deltaTop = nextRect.top - previousRect.top;
       const deltaWidth = nextRect.width - previousRect.width;
       const deltaHeight = nextRect.height - previousRect.height;
       previousRect = nextRect;
 
       if (middlePanRef.current.active) return;
-      if (Math.abs(deltaWidth) < 0.5 && Math.abs(deltaHeight) < 0.5) return;
+      if (
+        Math.abs(deltaLeft) < 0.5
+        && Math.abs(deltaTop) < 0.5
+        && Math.abs(deltaWidth) < 0.5
+        && Math.abs(deltaHeight) < 0.5
+      ) return;
+
+      if (effectiveResizeAnchor === 'document') {
+        if (Math.abs(deltaLeft) < 0.5 && Math.abs(deltaTop) < 0.5) return;
+
+        setPan((current) => ({
+          x: current.x - deltaLeft,
+          y: current.y - deltaTop,
+        }));
+        return;
+      }
 
       setPan((current) => ({
         x: current.x + deltaWidth / 2,
@@ -155,7 +177,7 @@ export function useCanvasNavigation({
     return () => {
       observer.disconnect();
     };
-  }, [preserveViewportCenterOnResize, setPan]);
+  }, [preserveViewportCenterOnResize, resizeAnchor, setPan]);
 
   const screenToWorld = useCallback((point: Pick<MouseEvent | PointerEvent, 'clientX' | 'clientY'>) => {
     const container = containerRef.current;

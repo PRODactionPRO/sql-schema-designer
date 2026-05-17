@@ -1,6 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { GripVertical } from 'lucide-react';
 import { ALL_FIELD_TYPES } from '@/shared/types/schema';
 import type {
@@ -24,13 +24,13 @@ import {
 } from '../model/class-diagram-view-utils';
 
 const CLASS_ATTRIBUTE_TYPES = ['string', ...ALL_FIELD_TYPES] as const;
-const CLASS_METHOD_RETURN_TYPES = ['void', 'string', ...ALL_FIELD_TYPES] as const;
 
 export function ClassEntityCard({
   entity,
   accent,
   selected,
   selectedMemberId,
+  methodReturnTypeOptions,
   onStartDrag,
   onSelectEntity,
   onSelectAttribute,
@@ -38,7 +38,9 @@ export function ClassEntityCard({
   onEntityContextMenu,
   onAttributeContextMenu,
   onMethodContextMenu,
+  onAttributeNameChange,
   onAttributeTypeChange,
+  onMethodNameChange,
   onMethodReturnTypeChange,
   onReorderAttributes,
   onReorderMethods,
@@ -47,6 +49,7 @@ export function ClassEntityCard({
   accent: string;
   selected?: boolean;
   selectedMemberId?: string;
+  methodReturnTypeOptions: readonly string[];
   onStartDrag: (classId: string, position: { x: number; y: number }, event: ReactPointerEvent<HTMLElement>) => void;
   onSelectEntity: (classId: string) => void;
   onSelectAttribute: (classId: string, attributeId: string) => void;
@@ -54,7 +57,9 @@ export function ClassEntityCard({
   onEntityContextMenu: (event: ReactMouseEvent, classId: string) => void;
   onAttributeContextMenu: (event: ReactMouseEvent, classId: string, attributeId: string) => void;
   onMethodContextMenu: (event: ReactMouseEvent, classId: string, methodId: string) => void;
+  onAttributeNameChange: (classId: string, attributeId: string, name: string) => void;
   onAttributeTypeChange: (classId: string, attributeId: string, type: string) => void;
+  onMethodNameChange: (classId: string, methodId: string, name: string) => void;
   onMethodReturnTypeChange: (classId: string, methodId: string, returnType: string) => void;
   onReorderAttributes: (classId: string, fromIndex: number, toIndex: number) => void;
   onReorderMethods: (classId: string, fromIndex: number, toIndex: number) => void;
@@ -72,7 +77,8 @@ export function ClassEntityCard({
   }));
   const methodRows = entity.methods.map((method) => ({
     id: method.id,
-    name: `${method.name}(${method.parameters ?? ''})`,
+    name: method.name,
+    displayName: `${method.name}(${method.parameters ?? ''})`,
     meta: method.returnType ?? 'void',
     visibility: method.visibility,
   }));
@@ -124,6 +130,7 @@ export function ClassEntityCard({
           typeOptions={CLASS_ATTRIBUTE_TYPES}
           onRowSelect={(attributeId) => onSelectAttribute(entity.id, attributeId)}
           onRowContextMenu={(event, attributeId) => onAttributeContextMenu(event, entity.id, attributeId)}
+          onNameChange={(attributeId, name) => onAttributeNameChange(entity.id, attributeId, name)}
           onTypeChange={(attributeId, type) => onAttributeTypeChange(entity.id, attributeId, type)}
           onReorder={(fromIndex, toIndex) => onReorderAttributes(entity.id, fromIndex, toIndex)}
         />
@@ -134,8 +141,9 @@ export function ClassEntityCard({
           selectedRowId={selectedMemberId}
           title={classEntityMethodSectionLabel(entity.kind)}
           onRowSelect={(methodId) => onSelectMethod(entity.id, methodId)}
-          typeOptions={CLASS_METHOD_RETURN_TYPES}
+          typeOptions={methodReturnTypeOptions}
           onRowContextMenu={(event, methodId) => onMethodContextMenu(event, entity.id, methodId)}
+          onNameChange={(methodId, name) => onMethodNameChange(entity.id, methodId, name)}
           onTypeChange={(methodId, type) => onMethodReturnTypeChange(entity.id, methodId, type)}
           onReorder={(fromIndex, toIndex) => onReorderMethods(entity.id, fromIndex, toIndex)}
         />
@@ -152,6 +160,7 @@ function ClassEntitySection({
   typeOptions,
   onRowSelect,
   onRowContextMenu,
+  onNameChange,
   onTypeChange,
   onReorder,
 }: {
@@ -159,6 +168,7 @@ function ClassEntitySection({
   rows: Array<{
     id: string;
     name: string;
+    displayName?: string;
     meta: string;
     visibility?: ClassMemberVisibility;
     multiplicity?: ClassAttributeMultiplicity;
@@ -168,9 +178,13 @@ function ClassEntitySection({
   typeOptions: readonly string[];
   onRowSelect: (rowId: string) => void;
   onRowContextMenu: (event: ReactMouseEvent, rowId: string) => void;
+  onNameChange: (rowId: string, name: string) => void;
   onTypeChange: (rowId: string, type: string) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
 }) {
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
   const rowById = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows]);
   const dnd = useReorderableDragList({
     itemIds: rows.map((row) => row.id),
@@ -182,6 +196,7 @@ function ClassEntitySection({
     .filter((row): row is {
       id: string;
       name: string;
+      displayName?: string;
       meta: string;
       visibility?: ClassMemberVisibility;
       multiplicity?: ClassAttributeMultiplicity;
@@ -189,6 +204,33 @@ function ClassEntitySection({
   const getTypeOptions = (value: string) => (
     typeOptions.includes(value) ? typeOptions : [value, ...typeOptions]
   );
+  const startNameEdit = (event: ReactMouseEvent, row: { id: string; name: string }) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setEditingRowId(row.id);
+    setNameDraft(row.name);
+  };
+  const commitNameEdit = () => {
+    if (!editingRowId) return;
+
+    const row = rowById.get(editingRowId);
+    const nextName = nameDraft.trim();
+    if (row && nextName && nextName !== row.name) {
+      onNameChange(editingRowId, nextName);
+    }
+    setEditingRowId(null);
+    setNameDraft('');
+  };
+  const cancelNameEdit = () => {
+    setEditingRowId(null);
+    setNameDraft('');
+  };
+
+  useEffect(() => {
+    if (!editingRowId) return;
+    nameInputRef.current?.focus();
+    nameInputRef.current?.select();
+  }, [editingRowId]);
 
   return (
     <div className="border-t border-gray-100">
@@ -212,9 +254,21 @@ function ClassEntitySection({
               selectedRowId === row.id && 'bg-orange-50',
             )}
             draggable={canReorder}
+            data-class-member-row-id={row.id}
             onClick={() => onRowSelect(row.id)}
             onContextMenu={(event) => onRowContextMenu(event, row.id)}
-            onDragStart={canReorder ? (event) => dnd.handleDragStart({ index, itemId: row.id, event }) : undefined}
+            onDoubleClickCapture={(event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest('[data-class-member-name-text]')) startNameEdit(event, row);
+            }}
+            onDragStart={canReorder ? (event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest('[data-class-member-name-text], [data-class-member-name-input]')) {
+                event.preventDefault();
+                return;
+              }
+              dnd.handleDragStart({ index, itemId: row.id, event });
+            } : undefined}
             onDragOver={canReorder ? (event) => dnd.handleDragOver({ index, itemId: row.id, event }) : undefined}
             onDragLeave={canReorder ? dnd.handleDragLeave : undefined}
             onDrop={canReorder ? (event) => dnd.handleDrop({ event }) : undefined}
@@ -226,7 +280,41 @@ function ClassEntitySection({
                 {visibilitySymbol(row.visibility)}
               </span>
             ) : null}
-            <span className="min-w-0 flex-1 truncate text-left text-gray-800">{row.name}</span>
+            {editingRowId === row.id ? (
+              <input
+                ref={nameInputRef}
+                className="min-w-0 flex-1 rounded border border-blue-300 bg-white px-1 py-0.5 text-left text-sm text-gray-900 shadow-sm outline-none ring-2 ring-blue-100"
+                data-class-member-name-input
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                onBlur={commitNameEdit}
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitNameEdit();
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    cancelNameEdit();
+                  }
+                }}
+              />
+            ) : (
+              <span
+                className="min-w-0 flex-1 truncate text-left text-gray-800"
+                data-class-member-name-text
+                draggable={false}
+                onClick={(event) => {
+                  if (event.detail === 2) startNameEdit(event, row);
+                }}
+                onDoubleClick={(event) => startNameEdit(event, row)}
+              >
+                {row.displayName ?? row.name}
+              </span>
+            )}
             {row.multiplicity ? (
               <span className="flex h-5 min-w-8 shrink-0 items-center justify-center rounded bg-gray-100 px-1.5 text-[10px] font-semibold tabular-nums text-gray-500">
                 {attributeMultiplicityLabel(row.multiplicity)}

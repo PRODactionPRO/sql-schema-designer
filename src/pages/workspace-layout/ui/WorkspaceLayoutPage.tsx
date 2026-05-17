@@ -59,6 +59,7 @@ export function WorkspaceLayoutPage() {
     draggingTabId,
     heldTabId,
     projectSearchActive,
+    projectSearchQuery,
     searchFilterMenu,
     layoutVisibility,
     layoutAnimating,
@@ -86,6 +87,7 @@ export function WorkspaceLayoutPage() {
     toggleCanvasMaximized,
     openProjectSearch,
     closeProjectSearch,
+    setProjectSearchQuery,
     toggleSearchFilterMenu,
     startBottomHeaderResize,
     startTabPointerDrag,
@@ -117,8 +119,10 @@ export function WorkspaceLayoutPage() {
       heldTabId={heldTabId}
       isCanvasMaximized={layoutVisibility.canvasMaximized}
       searchActive={windowId === 'project' && projectSearchActive}
+      searchQuery={windowId === 'project' ? projectSearchQuery : ''}
       onActivate={activateTab}
       onCloseSearch={closeProjectSearch}
+      onSearchQueryChange={setProjectSearchQuery}
       onCloseTab={closeTab}
       onCollapseLeft={toggleLeftColumn}
       onOpenSearch={windowId === 'project' ? openProjectSearch : undefined}

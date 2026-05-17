@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   Clock3,
@@ -288,6 +289,7 @@ function ProjectCard({
 export function ProjectsPage() {
   const { isAuthenticated } = useRequireAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const clearSession = useAuthStore((state) => state.clearSession);
   const user = useAuthStore((state) => state.user);
@@ -387,6 +389,7 @@ export function ProjectsPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
+                queryClient.clear();
                 clearSession();
                 navigate('/auth', { replace: true });
               }}

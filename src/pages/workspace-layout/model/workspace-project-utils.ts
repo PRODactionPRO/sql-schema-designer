@@ -1,12 +1,16 @@
-import { updateSemanticObjectMetadata } from '@/shared/api/semantic-model';
 import type {
   ClassDiagramProjectDocument,
   ClassEntity,
   ProjectData,
   ProjectSemanticObjectBinding,
+  ProjectSemanticRelationBinding,
 } from '@/shared/types/project';
 import type { Domain, EnumType, FieldType, JsonSchemaDocument, Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from './types';
+import {
+  objectMetadata,
+  updateSemanticObjectProjection,
+} from './semantic-object-commands';
 
 export const ENUM_TABLE_PREFIX = 'enum::';
 export const JSON_SCHEMA_TABLE_PREFIX = 'jsonschema::';
@@ -27,22 +31,33 @@ export function getObjectBinding(project: ProjectData, legacyId: string): Projec
     ?? project.semantic?.classDiagram?.objectsByLegacyId[legacyId];
 }
 
+export function getRelationBinding(
+  project: ProjectData,
+  legacyId: string,
+  sourceView?: 'erd' | 'classDiagram',
+): ProjectSemanticRelationBinding | undefined {
+  if (sourceView === 'erd') return project.semantic?.erd?.relationsByLegacyId?.[legacyId];
+  if (sourceView === 'classDiagram') return project.semantic?.classDiagram?.relationsByLegacyId?.[legacyId];
+
+  return project.semantic?.erd?.relationsByLegacyId?.[legacyId]
+    ?? project.semantic?.classDiagram?.relationsByLegacyId?.[legacyId];
+}
+
 export function saveObjectMetadata(project: ProjectData, legacyId: string, metadata: unknown): void {
   const binding = getObjectBinding(project, legacyId);
   if (!binding) return;
 
-  const baseMetadata = binding.metadata && typeof binding.metadata === 'object' && !Array.isArray(binding.metadata)
-    ? binding.metadata as Record<string, unknown>
-    : {};
-  const nextMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
-    ? metadata as Record<string, unknown>
-    : {};
-
-  void updateSemanticObjectMetadata(project.id, binding.objectId, {
+  const baseMetadata = objectMetadata(binding.metadata);
+  const nextMetadata = objectMetadata(metadata);
+  const mergedMetadata = {
     ...baseMetadata,
     ...nextMetadata,
-  }).catch((error) => {
-    console.error('[workspace] Failed to save object metadata', error);
+  };
+
+  updateSemanticObjectProjection({
+    projectId: project.id,
+    binding,
+    metadata: mergedMetadata,
   });
 }
 
@@ -143,6 +158,7 @@ export function enumToTable(enumType: EnumType, domains: Domain[], index = 0): T
       : '#0f766e',
     domainId: enumType.domainId,
     sidebarOrder: enumType.sidebarOrder,
+    collapsed: enumType.collapsed,
   };
 }
 
@@ -218,6 +234,7 @@ export function jsonSchemaToTable(doc: JsonSchemaDocument, index = 0): Table {
     color: '#7c3aed',
     domainId: doc.domainId,
     sidebarOrder: doc.sidebarOrder,
+    collapsed: doc.collapsed,
   };
 }
 

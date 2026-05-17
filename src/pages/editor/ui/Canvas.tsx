@@ -6,7 +6,7 @@ import type { DragFieldInfo } from './TableNode';
 import { LayoutGrid, Trash2, Plus, Maximize2, FolderPlus, Pencil, Eye, EyeOff, Key, Code, Trash, Tag } from 'lucide-react';
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
 import { actionMenuClasses } from '@/shared/ui/action-menu-styles';
-import { useCanvasNavigation, type CanvasBounds, type CanvasViewport } from '@/shared/ui/useCanvasNavigation';
+import { useCanvasNavigation, type CanvasBounds, type CanvasResizeAnchor, type CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
 import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 
@@ -50,6 +50,7 @@ interface CanvasProps {
   onTablesDragStop?: (tableIds: string[]) => void;
   initialViewport?: CanvasViewport;
   viewportRestoreKey?: string | number;
+  resizeAnchor?: CanvasResizeAnchor;
   onViewportChange?: (viewport: CanvasViewport) => void;
   isEnumTableId?: (id: string) => boolean;
   isJsonSchemaTableId?: (id: string) => boolean;
@@ -60,6 +61,7 @@ interface CanvasProps {
   onAddJsonSchemaTable?: (position?: { x: number; y: number }) => void;
   onReorderEnumValue?: (enumTableId: string, fromIndex: number, toIndex: number) => void;
   onReorderField?: (tableId: string, fromIndex: number, toIndex: number) => void;
+  onToggleTableCollapse?: (tableId: string) => void;
   onConvertTableToEnum?: (tableId: string) => void;
   onAddFieldToTable?: (tableId: string) => void;
   onValidateTable?: (tableId: string) => void;
@@ -68,9 +70,29 @@ interface CanvasProps {
 const TABLE_WIDTH = 280;
 const HEADER_HEIGHT = 40;
 const FIELD_HEIGHT = 36;
-const CULLING_MARGIN = 800; // world-space padding around viewport before a table is culled
-const CULLING_MIN_TABLES = 180; // avoid culling on medium schemas to prevent visible pop-in
-const WORLD_EXTENT = 50000; // generous workspace extent to avoid clipping at far pan positions
+const CULLING_MARGIN = 400; // screen-space padding around viewport before canvas objects are culled
+const CULLING_MIN_TABLES = 50; // start culling earlier on dense schemas
+const MIN_WORLD_EXTENT = 4000;
+const WORLD_EXTENT_PADDING = 1200;
+
+function getRenderedFieldCount(table: Table): number {
+  return table.collapsed ? 0 : table.fields.length;
+}
+
+function getTableHeight(table: Table): number {
+  return HEADER_HEIGHT + getRenderedFieldCount(table) * FIELD_HEIGHT;
+}
+
+interface CanvasRenderBounds {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function rectsIntersect(a: CanvasRenderBounds, b: CanvasRenderBounds): boolean {
+  return a.x2 >= b.x1 && a.x1 <= b.x2 && a.y2 >= b.y1 && a.y1 <= b.y2;
+}
 
 interface DragState {
   source: DragFieldInfo;
@@ -101,7 +123,7 @@ function getTablesCanvasBounds(tables: Table[]): CanvasBounds | null {
     minX = Math.min(minX, table.position.x);
     minY = Math.min(minY, table.position.y);
     maxX = Math.max(maxX, table.position.x + TABLE_WIDTH);
-    maxY = Math.max(maxY, table.position.y + HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT);
+    maxY = Math.max(maxY, table.position.y + getTableHeight(table));
   }
 
   return {
@@ -130,6 +152,7 @@ export function Canvas({
   onTablesDragStop,
   initialViewport,
   viewportRestoreKey,
+  resizeAnchor,
   onViewportChange,
   isEnumTableId,
   isJsonSchemaTableId,
@@ -140,6 +163,7 @@ export function Canvas({
   onAddJsonSchemaTable,
   onReorderEnumValue,
   onReorderField,
+  onToggleTableCollapse,
   onConvertTableToEnum,
   onAddFieldToTable,
   onValidateTable,
@@ -157,6 +181,7 @@ export function Canvas({
     initialPan: initialViewport?.pan,
     initialZoom: initialViewport?.zoom,
     restoreKey: viewportRestoreKey,
+    resizeAnchor,
     onViewportChange,
   });
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -178,6 +203,8 @@ export function Canvas({
   tablesRef.current = tables;
   relationsRef.current = relations;
   lineTypeRef.current = lineType;
+
+  const tableById = useMemo(() => new Map(tables.map((table) => [table.id, table])), [tables]);
 
   // Drag override: during single-table drag, store the visual position here
   // so SVG arrows can be updated via DOM without React re-renders
@@ -365,8 +392,8 @@ export function Canvas({
   };
 
   const getFieldAnchor = useCallback((tableId: string, fieldId: string, otherTableId: string): { x: number; y: number } | null => {
-    const table = tables.find(t => t.id === tableId);
-    const otherTable = tables.find(t => t.id === otherTableId);
+    const table = tableById.get(tableId);
+    const otherTable = tableById.get(otherTableId);
     if (!table || !otherTable) return null;
     const isHeaderAnchor = fieldId === '__enum_header__' || fieldId === '__json_schema_header__';
     const fi = table.fields.findIndex(f => f.id === fieldId);
@@ -375,17 +402,17 @@ export function Canvas({
     const override = dragOverrideRef.current;
     const tPos = (override && override.tableId === tableId) ? override.pos : table.position;
     const oPos = (override && override.tableId === otherTableId) ? override.pos : otherTable.position;
-    const cy = isHeaderAnchor
+    const cy = isHeaderAnchor || table.collapsed
       ? tPos.y + HEADER_HEIGHT / 2
       : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
     const tcx = tPos.x + TABLE_WIDTH / 2;
     const ocx = oPos.x + TABLE_WIDTH / 2;
     return { x: ocx > tcx ? tPos.x + TABLE_WIDTH : tPos.x, y: cy };
-  }, [tables]);
+  }, [tableById]);
 
   const getRelationHighlight = useCallback((relation: Relation): { highlighted: boolean; color: string } | null => {
     if (!highlightRelations) return null;
-    const fromTable = tables.find(t => t.id === relation.fromTableId);
+    const fromTable = tableById.get(relation.fromTableId);
     if (!fromTable) return null;
     const fkOwnerColor = getTableColor(fromTable);
     const isMultiSelection = selectedTableIds.size >= 2;
@@ -402,23 +429,38 @@ export function Canvas({
       }
     }
     return null;
-  }, [tables, selectedTableId, selectedTableIds, getTableColor, highlightRelations]);
+  }, [tableById, selectedTableId, selectedTableIds, getTableColor, highlightRelations]);
 
-  const buildPath = useCallback((fromPos: { x: number; y: number }, toPos: { x: number; y: number }, fromRight: boolean, toRight: boolean): string => {
+  const getRelationPathGeometry = useCallback((fromPos: { x: number; y: number }, toPos: { x: number; y: number }, fromRight: boolean, toRight: boolean): { path: string; bounds: CanvasRenderBounds } => {
+    const points = [fromPos, toPos];
+    let path: string;
+
     if (lineType === 'straight') {
-      return `M ${fromPos.x} ${fromPos.y} L ${toPos.x} ${toPos.y}`;
-    }
-    if (lineType === 'orthogonal') {
+      path = `M ${fromPos.x} ${fromPos.y} L ${toPos.x} ${toPos.y}`;
+    } else if (lineType === 'orthogonal') {
       const cpOffset = Math.max(40, Math.abs(fromPos.x - toPos.x) * 0.3);
       const midX1 = fromRight ? fromPos.x + cpOffset : fromPos.x - cpOffset;
       const midX2 = toRight ? toPos.x + cpOffset : toPos.x - cpOffset;
       const midX = (midX1 + midX2) / 2;
-      return `M ${fromPos.x} ${fromPos.y} H ${midX} V ${toPos.y} H ${toPos.x}`;
+      points.push({ x: midX, y: fromPos.y }, { x: midX, y: toPos.y });
+      path = `M ${fromPos.x} ${fromPos.y} H ${midX} V ${toPos.y} H ${toPos.x}`;
+    } else {
+      const cpOffset = Math.max(60, Math.abs(fromPos.x - toPos.x) * 0.4);
+      const cp1x = fromRight ? fromPos.x + cpOffset : fromPos.x - cpOffset;
+      const cp2x = toRight ? toPos.x + cpOffset : toPos.x - cpOffset;
+      points.push({ x: cp1x, y: fromPos.y }, { x: cp2x, y: toPos.y });
+      path = `M ${fromPos.x} ${fromPos.y} C ${cp1x} ${fromPos.y}, ${cp2x} ${toPos.y}, ${toPos.x} ${toPos.y}`;
     }
-    const cpOffset = Math.max(60, Math.abs(fromPos.x - toPos.x) * 0.4);
-    const cp1x = fromRight ? fromPos.x + cpOffset : fromPos.x - cpOffset;
-    const cp2x = toRight ? toPos.x + cpOffset : toPos.x - cpOffset;
-    return `M ${fromPos.x} ${fromPos.y} C ${cp1x} ${fromPos.y}, ${cp2x} ${toPos.y}, ${toPos.x} ${toPos.y}`;
+
+    return {
+      path,
+      bounds: {
+        x1: Math.min(...points.map((point) => point.x)),
+        y1: Math.min(...points.map((point) => point.y)),
+        x2: Math.max(...points.map((point) => point.x)),
+        y2: Math.max(...points.map((point) => point.y)),
+      },
+    };
   }, [lineType]);
 
   const drawRelationLine = (relation: Relation) => {
@@ -430,8 +472,8 @@ export function Canvas({
     const isHighlighted = !!highlight;
     const strokeColor = isRelSelected ? '#3b82f6' : isHighlighted ? highlight!.color : (darkMode ? '#585b70' : '#94a3b8');
     const strokeWidth = isRelSelected ? 2.5 : isHighlighted ? 2.5 : 1.5;
-    const fromTable = tables.find(t => t.id === relation.fromTableId)!;
-    const toTable = tables.find(t => t.id === relation.toTableId)!;
+    const fromTable = tableById.get(relation.fromTableId);
+    const toTable = tableById.get(relation.toTableId);
     if (!fromTable || !toTable) return null;
     // Use drag override for fromRight/toRight calculation too
     const override = dragOverrideRef.current;
@@ -439,7 +481,7 @@ export function Canvas({
     const tPos = (override && override.tableId === relation.toTableId) ? override.pos : toTable.position;
     const fromRight = fromPos.x === fPos.x + TABLE_WIDTH;
     const toRight = toPos.x === tPos.x + TABLE_WIDTH;
-    const path = buildPath(fromPos, toPos, fromRight, toRight);
+    const { path } = getRelationPathGeometry(fromPos, toPos, fromRight, toRight);
     const fromDir = fromRight ? 1 : -1;
     const toDir = toRight ? 1 : -1;
     // Only dim if highlighting is enabled and something is selected but this line is not highlighted
@@ -542,7 +584,7 @@ export function Canvas({
         const isHeaderAnchor = fId === '__enum_header__' || fId === '__json_schema_header__';
         const fi = t.fields.findIndex(f => f.id === fId);
         if (!isHeaderAnchor && fi === -1) return null;
-        const cy = isHeaderAnchor
+        const cy = isHeaderAnchor || t.collapsed
           ? tPos.y + HEADER_HEIGHT / 2
           : tPos.y + HEADER_HEIGHT + fi * FIELD_HEIGHT + FIELD_HEIGHT / 2;
         const tcx = tPos.x + TABLE_WIDTH / 2;
@@ -590,27 +632,90 @@ export function Canvas({
   // LOD level based on zoom
   const lodLevel: 'full' | 'compact' | 'minimal' = zoom > 0.45 ? 'full' : zoom > 0.2 ? 'compact' : 'minimal';
 
-  // Viewport culling: only cull tables, never relations (arrows need DOM for direct updates during drag)
-  const visibleTables = useMemo(() => {
-    // Skip culling for medium schemas or when canvas isn't mounted yet.
-    // This prevents noticeable pop-in near viewport edges.
+  const viewportRenderBounds = useMemo<CanvasRenderBounds | null>(() => {
     const canvas = canvasRef.current;
-    if (!canvas || tables.length < CULLING_MIN_TABLES) return tables;
+    if (!canvas) return null;
+
     const rect = canvas.getBoundingClientRect();
     const margin = CULLING_MARGIN / zoom;
-    const x1 = (-pan.x / zoom) - margin;
-    const y1 = (-pan.y / zoom) - margin;
-    const x2 = (rect.width - pan.x) / zoom + margin;
-    const y2 = (rect.height - pan.y) / zoom + margin;
+    return {
+      x1: (-pan.x / zoom) - margin,
+      y1: (-pan.y / zoom) - margin,
+      x2: (rect.width - pan.x) / zoom + margin,
+      y2: (rect.height - pan.y) / zoom + margin,
+    };
+  }, [canvasRef, pan.x, pan.y, zoom]);
+
+  const dynamicWorldExtent = useMemo(() => {
+    const bounds = getTablesCanvasBounds(tables);
+    const width = Math.max(
+      MIN_WORLD_EXTENT,
+      bounds?.maxX ?? 0,
+      viewportRenderBounds?.x2 ?? 0,
+    ) + WORLD_EXTENT_PADDING;
+    const height = Math.max(
+      MIN_WORLD_EXTENT,
+      bounds?.maxY ?? 0,
+      viewportRenderBounds?.y2 ?? 0,
+    ) + WORLD_EXTENT_PADDING;
+
+    return {
+      width: Math.ceil(width),
+      height: Math.ceil(height),
+    };
+  }, [tables, viewportRenderBounds]);
+
+  // Viewport culling: keep a 400px screen-space buffer to avoid visible pop-in while panning.
+  const visibleTables = useMemo(() => {
+    // Skip culling for small schemas or when canvas isn't mounted yet.
+    // This prevents noticeable pop-in near viewport edges.
+    if (!viewportRenderBounds || tables.length < CULLING_MIN_TABLES) return tables;
     return tables.filter(t => {
       // Always keep selected/focused tables rendered
       if (selectedTableId === t.id || selectedTableIds.has(t.id)) return true;
-      const tableH = HEADER_HEIGHT + t.fields.length * FIELD_HEIGHT;
-      const tx2 = t.position.x + TABLE_WIDTH;
-      const ty2 = t.position.y + tableH;
-      return tx2 >= x1 && t.position.x <= x2 && ty2 >= y1 && t.position.y <= y2;
+      const tableH = getTableHeight(t);
+      return rectsIntersect(viewportRenderBounds, {
+        x1: t.position.x,
+        y1: t.position.y,
+        x2: t.position.x + TABLE_WIDTH,
+        y2: t.position.y + tableH,
+      });
     });
-  }, [canvasRef, tables, pan.x, pan.y, zoom, selectedTableId, selectedTableIds]);
+  }, [tables, viewportRenderBounds, selectedTableId, selectedTableIds]);
+
+  const visibleRelations = useMemo(() => {
+    if (!viewportRenderBounds) return relations;
+
+    return relations.filter((relation) => {
+      if (selectedRelation?.id === relation.id) return true;
+      if (selectedTableId === relation.fromTableId || selectedTableId === relation.toTableId) return true;
+      if (selectedTableIds.has(relation.fromTableId) || selectedTableIds.has(relation.toTableId)) return true;
+
+      const fromPos = getFieldAnchor(relation.fromTableId, relation.fromFieldId, relation.toTableId);
+      const toPos = getFieldAnchor(relation.toTableId, relation.toFieldId, relation.fromTableId);
+      const fromTable = tableById.get(relation.fromTableId);
+      const toTable = tableById.get(relation.toTableId);
+      if (!fromPos || !toPos || !fromTable || !toTable) return false;
+
+      const override = dragOverrideRef.current;
+      const fPos = (override && override.tableId === relation.fromTableId) ? override.pos : fromTable.position;
+      const tPos = (override && override.tableId === relation.toTableId) ? override.pos : toTable.position;
+      const fromRight = fromPos.x === fPos.x + TABLE_WIDTH;
+      const toRight = toPos.x === tPos.x + TABLE_WIDTH;
+      const { bounds } = getRelationPathGeometry(fromPos, toPos, fromRight, toRight);
+
+      return rectsIntersect(viewportRenderBounds, bounds);
+    });
+  }, [
+    getFieldAnchor,
+    getRelationPathGeometry,
+    relations,
+    selectedRelation,
+    selectedTableId,
+    selectedTableIds,
+    tableById,
+    viewportRenderBounds,
+  ]);
 
   // Determine which tables are "focused" for the dimming feature (#6)
   const hasSelection = !!selectedTableId || selectedTableIds.size > 0;
@@ -635,7 +740,7 @@ export function Canvas({
       centerOnTableRef.current = (tableId: string) => {
         const table = tables.find(t => t.id === tableId);
         if (table) {
-          const tableHeight = HEADER_HEIGHT + table.fields.length * FIELD_HEIGHT;
+          const tableHeight = getTableHeight(table);
           centerOnBounds({
             minX: table.position.x,
             minY: table.position.y,
@@ -947,11 +1052,11 @@ export function Canvas({
       <div className="absolute inset-0 origin-top-left" style={{
         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
       }}>
-        <svg className="absolute pointer-events-none" style={{ width: WORLD_EXTENT, height: WORLD_EXTENT, pointerEvents: 'none', overflow: 'visible' }}>
-          <g style={{ pointerEvents: 'auto' }}>{relations.map(drawRelationLine)}</g>
+        <svg className="absolute pointer-events-none" style={{ width: dynamicWorldExtent.width, height: dynamicWorldExtent.height, pointerEvents: 'none', overflow: 'visible' }}>
+          <g style={{ pointerEvents: 'auto' }}>{visibleRelations.map(drawRelationLine)}</g>
           {drawDragLine()}
         </svg>
-        <div className="relative" style={{ minWidth: WORLD_EXTENT, minHeight: WORLD_EXTENT }}>
+        <div className="relative" style={{ minWidth: dynamicWorldExtent.width, minHeight: dynamicWorldExtent.height }}>
           {visibleTables.map(table => {
             const isFocused = !hasSelection || focusedTableIds.has(table.id);
             return (
@@ -991,6 +1096,7 @@ export function Canvas({
                 onJsonSchemaFieldTypeChange={(fieldId, schemaType) => onJsonSchemaFieldTypeChange?.(table.id, fieldId, schemaType)}
                 onReorderEnumValue={onReorderEnumValue ? ((fromIndex, toIndex) => onReorderEnumValue(table.id, fromIndex, toIndex)) : undefined}
                 onReorderField={onReorderField ? ((fromIndex, toIndex) => onReorderField(table.id, fromIndex, toIndex)) : undefined}
+                onToggleCollapse={onToggleTableCollapse ? (() => onToggleTableCollapse(table.id)) : undefined}
                 onOpenContextMenu={(tableId, anchor) => {
                   setShowDomainSubmenu(false);
                   const isInCurrentSelection = selectedTableId === tableId || selectedTableIds.has(tableId);

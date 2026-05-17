@@ -1,11 +1,15 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { DragEvent } from 'react';
-import { createObjectInViewCommand, createSemanticModelObject, deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type { ProjectData } from '@/shared/types/project';
 import type { Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceCatalogOrdering } from '../model/useWorkspaceCatalogOrdering';
 import type { WorkspaceCatalogSortMode } from '../model/useWorkspaceCatalogOrdering';
+import { useWorkspacePanelSearch } from '../model/useWorkspacePanelSearch';
+import {
+  createSemanticObjectProjection,
+  deleteSemanticObjectProjection,
+} from '../model/semantic-object-commands';
 import {
   getObjectBinding,
   getProjectDomains,
@@ -38,7 +42,7 @@ export function WorkspaceTablesPane({
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
 }) {
-  const [query, setQuery] = useState('');
+  const search = useWorkspacePanelSearch();
   const [sortMode, setSortMode] = useState<WorkspaceCatalogSortMode>('manual');
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(() => new Set());
   const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
@@ -64,7 +68,7 @@ export function WorkspaceTablesPane({
     itemById: tableById,
   } = useWorkspaceCatalogOrdering({
     items: project?.schema.tables ?? [],
-    query,
+    query: search.query,
     sortMode,
     enabled: Boolean(project),
     onCommitReorder: commitTables,
@@ -88,8 +92,8 @@ export function WorkspaceTablesPane({
         domainId: null,
         tables: noDomainTables,
       },
-    ].filter((group) => group.tables.length > 0 || !query.trim());
-  }, [domainById, domains, filteredTables, query]);
+    ].filter((group) => group.tables.length > 0 || !search.query.trim());
+  }, [domainById, domains, filteredTables, search.query]);
 
   const collapsibleGroupIds = useMemo(() => groups.map((group) => group.id), [groups]);
   const areAllGroupsCollapsed = collapsibleGroupIds.length > 0 && collapsibleGroupIds.every((id) => collapsedGroupIds.has(id));
@@ -121,23 +125,16 @@ export function WorkspaceTablesPane({
     const nextProject = withSchema(project, { ...project.schema, tables: [...project.schema.tables, table] });
     onProjectChange(nextProject);
 
-    const erdViewId = project.semantic?.erd?.viewId;
-    const createTableObject = erdViewId
-      ? createObjectInViewCommand(project.id, {
-          viewId: erdViewId,
-          type: 'table',
-          name: table.name,
-          metadata: { ...table },
-          position: table.position,
-        }).then(({ object, node }) => ({ object, viewNodeId: node.id }))
-      : createSemanticModelObject(project.id, {
-          type: 'table',
-          name: table.name,
-          metadata: { ...table },
-        }).then((object) => ({ object, viewNodeId: undefined }));
-
-    void createTableObject.then(({ object, viewNodeId }) => {
-      onProjectChange(updateProjectBinding(nextProject, table.id, object.id, table, viewNodeId));
+    void createSemanticObjectProjection({
+      projectId: project.id,
+      viewId: project.semantic?.erd?.viewId,
+      type: 'table',
+      name: table.name,
+      domainId: table.domainId,
+      metadata: { ...table },
+      position: table.position,
+    }).then((binding) => {
+      onProjectChange(updateProjectBinding(nextProject, table.id, binding.objectId, binding.metadata, binding.viewNodeId));
     }).catch((error) => {
       console.error('[workspace] Failed to create table object', error);
     });
@@ -153,11 +150,10 @@ export function WorkspaceTablesPane({
 
     const binding = getObjectBinding(project, tableId);
     if (binding) {
-      void deleteObjectFromViewCommand(project.id, {
-        objectId: binding.objectId,
-        viewId: project.semantic?.erd?.viewId,
-      }).catch((error) => {
-        console.error('[workspace] Failed to delete table object', error);
+      deleteSemanticObjectProjection({
+        projectId: project.id,
+        semanticBinding: project.semantic?.erd,
+        binding,
       });
     }
   };
@@ -218,12 +214,15 @@ export function WorkspaceTablesPane({
         title="Tables"
         addLabel="Add table"
         searchPlaceholder="Search tables..."
-        query={query}
+        searchOpen={search.isOpen}
+        query={search.query}
         sortMode={sortMode}
         areAllGroupsCollapsed={areAllGroupsCollapsed}
         collapseDisabled={collapsibleGroupIds.length === 0}
         onAdd={addTable}
-        onQueryChange={setQuery}
+        onQueryChange={search.setQuery}
+        onToggleSearch={search.toggleSearch}
+        onCloseSearch={search.closeSearch}
         onCycleSortMode={cycleSortMode}
         onToggleGroupsCollapsed={() => setCollapsedGroupIds(areAllGroupsCollapsed ? new Set() : new Set(collapsibleGroupIds))}
       />

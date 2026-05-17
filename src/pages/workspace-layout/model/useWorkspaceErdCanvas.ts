@@ -15,6 +15,10 @@ import {
 } from './workspace-erd-canvas-utils';
 import { reorderTableFields } from './workspace-canvas-utils';
 import { nextWorkspaceId } from './workspace-project-utils';
+import {
+  createErdRelationInView,
+  deleteRelationFromSemanticView,
+} from './semantic-relation-commands';
 
 const WORKSPACE_ERD_CLIPBOARD_TYPE = 'archon/workspace-erd-selection';
 const WORKSPACE_ERD_CLIPBOARD_VERSION = 1;
@@ -80,6 +84,13 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     tablesRef,
     tablePositionsRef,
   });
+  const saveRelation = useCallback((relation: Relation) => {
+    createErdRelationInView(project.id, semanticBinding, relation);
+  }, [project.id, semanticBinding]);
+  const deleteRelation = useCallback((relationId: string) => {
+    deleteRelationFromSemanticView(project.id, semanticBinding, relationId);
+  }, [project.id, semanticBinding]);
+
   const applySnapshot = useCallback((snapshot: ReturnType<typeof getSnapshot>) => {
     const nextSnapshot = cloneErdSnapshot(snapshot);
     tablesRef.current = nextSnapshot.tables;
@@ -169,11 +180,25 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     if (updatedTable) saveTableMetadata(updatedTable);
   }, [applyErdState, pushHistory, saveTableMetadata]);
 
+  const toggleTableCollapsed = useCallback((tableId: string) => {
+    pushHistory();
+    let updatedTable: Table | undefined;
+    const nextTables = tablesRef.current.map((table) => {
+      if (table.id !== tableId) return table;
+      updatedTable = { ...table, collapsed: !table.collapsed };
+      return updatedTable;
+    });
+    applyErdState(nextTables);
+    if (updatedTable) saveTableMetadata(updatedTable);
+  }, [applyErdState, pushHistory, saveTableMetadata]);
+
   const deleteTables = useCallback((ids: string[]) => {
     pushHistory();
     const idsSet = new Set(ids);
     const nextTables = tablesRef.current.filter((table) => !idsSet.has(table.id));
+    const removedRelations = relationsRef.current.filter((relation) => idsSet.has(relation.fromTableId) || idsSet.has(relation.toTableId));
     const nextRelations = relationsRef.current.filter((relation) => !idsSet.has(relation.fromTableId) && !idsSet.has(relation.toTableId));
+    removedRelations.forEach((relation) => deleteRelation(relation.id));
     applyErdState(nextTables, nextRelations);
     setSelectedTableId((current) => current && idsSet.has(current) ? null : current);
     setSelectedTableIds((current) => {
@@ -181,7 +206,7 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       ids.forEach((id) => next.delete(id));
       return next;
     });
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, deleteRelation, pushHistory]);
 
   const updateField = useCallback((tableId: string, fieldId: string, updates: Partial<Field>) => {
     pushHistory();
@@ -227,9 +252,11 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
         ? { ...table, fields: table.fields.filter((field) => field.id !== fieldId) }
         : table
     ));
+    const removedRelations = relationsRef.current.filter((relation) => relation.fromFieldId === fieldId || relation.toFieldId === fieldId);
     const nextRelations = relationsRef.current.filter((relation) => relation.fromFieldId !== fieldId && relation.toFieldId !== fieldId);
+    removedRelations.forEach((relation) => deleteRelation(relation.id));
     applyErdState(nextTables, nextRelations);
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, deleteRelation, pushHistory]);
 
   const addTable = useCallback((position = { x: 160, y: 140 }) => {
     pushHistory();
@@ -287,6 +314,14 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       pushHistory();
 
       if (sourceField.isPrimaryKey) {
+        const newRelation: Relation = {
+          id: nextWorkspaceId('relation'),
+          fromTableId: toTableId,
+          fromFieldId: toFieldId,
+          toTableId: fromTableId,
+          toFieldId: fromFieldId,
+          type: '1:N',
+        };
         const nextTables = tablesRef.current.map((table) => (
           table.id === toTableId
             ? {
@@ -301,19 +336,21 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
         ));
         const nextRelations = [
           ...relationsRef.current,
-          {
-            id: nextWorkspaceId('relation'),
-            fromTableId: toTableId,
-            fromFieldId: toFieldId,
-            toTableId: fromTableId,
-            toFieldId: fromFieldId,
-            type: '1:N' as const,
-          },
+          newRelation,
         ];
         applyErdState(nextTables, nextRelations);
+        saveRelation(newRelation);
         return true;
       }
 
+      const newRelation: Relation = {
+        id: nextWorkspaceId('relation'),
+        fromTableId,
+        fromFieldId,
+        toTableId,
+        toFieldId,
+        type: '1:N',
+      };
       const nextTables = tablesRef.current.map((table) => (
         table.id === fromTableId
           ? {
@@ -328,16 +365,10 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
       ));
       const nextRelations = [
         ...relationsRef.current,
-        {
-          id: nextWorkspaceId('relation'),
-          fromTableId,
-          fromFieldId,
-          toTableId,
-          toFieldId,
-          type: '1:N' as const,
-        },
+        newRelation,
       ];
       applyErdState(nextTables, nextRelations);
+      saveRelation(newRelation);
       return true;
     }
 
@@ -345,6 +376,14 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
 
     const newFieldId = nextWorkspaceId('field');
     const newFieldName = `${fromTable.name}_${sourceField.name}`;
+    const newRelation: Relation = {
+      id: nextWorkspaceId('relation'),
+      fromTableId: toTableId,
+      fromFieldId: newFieldId,
+      toTableId: fromTableId,
+      toFieldId: fromFieldId,
+      type: '1:N',
+    };
     const nextTables = tablesRef.current.map((table) => (
       table.id === toTableId
         ? {
@@ -369,18 +408,12 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     ));
     const nextRelations = [
       ...relationsRef.current,
-      {
-        id: nextWorkspaceId('relation'),
-        fromTableId: toTableId,
-        fromFieldId: newFieldId,
-        toTableId: fromTableId,
-        toFieldId: fromFieldId,
-        type: '1:N' as const,
-      },
+      newRelation,
     ];
     applyErdState(nextTables, nextRelations);
+    saveRelation(newRelation);
     return true;
-  }, [applyErdState, pushHistory]);
+  }, [applyErdState, pushHistory, saveRelation]);
 
   const toggleTableSelection = useCallback((id: string, additive: boolean) => {
     setSelectedRelation(null);
@@ -590,6 +623,7 @@ export function useWorkspaceErdCanvas(project: ProjectData) {
     saveTablePosition,
     saveTablePositions,
     reorderField,
+    toggleTableCollapsed,
     deleteTables,
     updateField,
     updateFieldType,

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { Copy, GitBranch, LayoutGrid, Maximize2, Plus, Rows3, Trash2 } from 'lucide-react';
+import { Copy, GitBranch, LayoutGrid, Link2, Maximize2, Plus, Rows3, Trash2 } from 'lucide-react';
 import type { ClassDiagramProjectDocument, ProjectData } from '@/shared/types/project';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
 import { CanvasGridBackground, CanvasZoomIndicator } from '@/shared/ui/canvas-navigation-ui';
@@ -9,6 +9,7 @@ import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 import { useContextMenu } from '@/shared/ui/useContextMenu';
 import {
   CLASS_CANVAS_WORLD_SIZE,
+  classMethodReturnTypeOptions,
   getClassDiagramBounds,
   getClassEntityKindMeta,
   getClassRelationPath,
@@ -74,11 +75,25 @@ function ProjectClassDiagramCanvas({
   onSelectionChange?: (selection: WorkspaceSelection | null) => void;
   onViewportChange?: (viewport: CanvasViewport) => void;
 }) {
+  const classSemanticBinding = useMemo(() => {
+    const binding = project.semantic?.classDiagram;
+    if (!binding) return undefined;
+
+    return {
+      ...binding,
+      objectsByLegacyId: {
+        ...project.semantic?.objectsByLegacyId,
+        ...binding.objectsByLegacyId,
+      },
+    };
+  }, [project.semantic?.classDiagram, project.semantic?.objectsByLegacyId]);
+
   const canvas = useWorkspaceClassDiagramCanvas(sourceDiagram, {
     projectId: project.id,
-    semanticBinding: project.semantic?.classDiagram,
+    semanticBinding: classSemanticBinding,
     initialViewport,
     viewportRestoreKey,
+    resizeAnchor: 'document',
     onViewportChange,
     onCommit: (diagram) => onProjectChange?.(withClassDiagram(project, diagram)),
   });
@@ -87,6 +102,7 @@ function ProjectClassDiagramCanvas({
   const selectedClassId = selection?.sourceView === 'classDiagram' ? selection.id : undefined;
   const domainColorById = useMemo(() => new Map(diagram.domains.map((domain) => [domain.id, domain.color])), [diagram.domains]);
   const classById = useMemo(() => new Map(diagram.classes.map((entity) => [entity.id, entity])), [diagram.classes]);
+  const methodReturnTypeOptions = useMemo(() => classMethodReturnTypeOptions(diagram.classes), [diagram.classes]);
   const bounds = getClassDiagramBounds(diagram.classes);
   const selectedRelationId = selection?.sourceView === 'classDiagram' && selection.kind === 'relation' ? selection.id : undefined;
   const contextMenu = useContextMenu();
@@ -149,6 +165,12 @@ function ProjectClassDiagramCanvas({
   };
 
   const openEntityContextMenu = (event: ReactMouseEvent, classId: string) => {
+    const relationTargets = diagram.classes
+      .filter((entity) => entity.id !== classId)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 8);
+
     onSelectionChange?.({ kind: 'class', id: classId, sourceView: 'classDiagram' });
     canvas.clearClassSelection();
     contextMenu.openContextMenu(event, [
@@ -171,6 +193,16 @@ function ProjectClassDiagramCanvas({
         separatorBefore: true,
         onSelect: () => canvas.duplicateClassEntity(classId),
       },
+      ...relationTargets.map((target, index) => ({
+        id: `relate-${target.id}`,
+        label: `Relate to ${target.name}`,
+        icon: <Link2 className="size-3.5" />,
+        separatorBefore: index === 0,
+        onSelect: () => {
+          const relation = canvas.addClassRelation(classId, target.id);
+          if (relation) onSelectionChange?.({ kind: 'relation', id: relation.id, sourceView: 'classDiagram' });
+        },
+      })),
       {
         id: 'delete-class',
         label: 'Delete class',
@@ -307,6 +339,7 @@ function ProjectClassDiagramCanvas({
             accent={entity.color ?? (entity.domainId ? domainColorById.get(entity.domainId) : undefined) ?? getClassEntityKindMeta(entity.kind).color}
             selected={canvas.selectedClassIds.has(entity.id) || (selectedParentId ? selectedParentId === entity.id : selectedClassId === entity.id)}
             selectedMemberId={selectedParentId === entity.id ? selectedClassId : undefined}
+            methodReturnTypeOptions={methodReturnTypeOptions}
             onStartDrag={canvas.startClassDrag}
             onSelectEntity={(classId) => {
               canvas.clearClassSelection();
@@ -323,7 +356,9 @@ function ProjectClassDiagramCanvas({
             onEntityContextMenu={openEntityContextMenu}
             onAttributeContextMenu={(event, classId, attributeId) => openMemberContextMenu(event, classId, attributeId, 'classAttribute')}
             onMethodContextMenu={(event, classId, methodId) => openMemberContextMenu(event, classId, methodId, 'classMethod')}
+            onAttributeNameChange={canvas.updateAttributeName}
             onAttributeTypeChange={canvas.updateAttributeType}
+            onMethodNameChange={canvas.updateMethodName}
             onMethodReturnTypeChange={canvas.updateMethodReturnType}
             onReorderAttributes={canvas.reorderAttributes}
             onReorderMethods={canvas.reorderMethods}

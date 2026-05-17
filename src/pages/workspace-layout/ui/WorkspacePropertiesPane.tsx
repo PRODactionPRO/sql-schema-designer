@@ -1,4 +1,3 @@
-import { deleteObjectFromViewCommand } from '@/shared/api/semantic-model';
 import type {
   ClassEntity,
   ClassRelation,
@@ -23,6 +22,13 @@ import {
   withClassDiagram,
   withSchema,
 } from '../model/workspace-project-utils';
+import {
+  createErdRelationInView,
+  deleteRelationFromSemanticView,
+  updateClassRelationInView,
+  updateErdRelationInView,
+} from '../model/semantic-relation-commands';
+import { deleteSemanticObjectProjection } from '../model/semantic-object-commands';
 import { ClassRelationPropertiesPane } from './WorkspaceClassRelationPropertiesPane';
 import { ClassModelPropertiesPane } from './WorkspaceClassPropertiesPane';
 import { EnumProperties } from './WorkspaceEnumPropertiesPane';
@@ -97,7 +103,34 @@ export function PropertiesPane({
     if (updatedTable) saveObjectMetadata(project, tableId, updatedTable);
   };
 
+  const createErdRelation = (relation: Relation) => {
+    createErdRelationInView(project.id, project.semantic?.erd, relation);
+  };
+
+  const deleteRelation = (relationId: string, sourceView: 'erd' | 'classDiagram') => {
+    const binding = sourceView === 'erd'
+      ? project.semantic?.erd
+      : project.semantic?.classDiagram;
+    deleteRelationFromSemanticView(project.id, binding, relationId);
+  };
+
   const updateRelations = (relations: Relation[]) => {
+    const nextRelationIds = new Set(relations.map((relation) => relation.id));
+    const currentRelationIds = new Set(project.schema.relations.map((relation) => relation.id));
+    const currentRelationsById = new Map(project.schema.relations.map((relation) => [relation.id, relation]));
+    project.schema.relations
+      .filter((relation) => !nextRelationIds.has(relation.id))
+      .forEach((relation) => deleteRelation(relation.id, 'erd'));
+    relations
+      .filter((relation) => !currentRelationIds.has(relation.id))
+      .forEach(createErdRelation);
+    relations
+      .filter((relation) => {
+        const currentRelation = currentRelationsById.get(relation.id);
+        return Boolean(currentRelation) && JSON.stringify(currentRelation) !== JSON.stringify(relation);
+      })
+      .forEach((relation) => updateErdRelationInView(project.id, project.semantic?.erd, relation));
+
     applySchema({ ...project.schema, relations });
   };
 
@@ -147,23 +180,27 @@ export function PropertiesPane({
 
     const binding = getObjectBinding(project, classId);
     if (binding) {
-      void deleteObjectFromViewCommand(project.id, {
-        objectId: binding.objectId,
-        viewId: project.semantic?.classDiagram?.viewId,
-      }).catch((error) => {
-        console.error('[workspace] Failed to delete class object', error);
+      deleteSemanticObjectProjection({
+        projectId: project.id,
+        semanticBinding: project.semantic?.classDiagram,
+        binding,
       });
     }
   };
 
   const updateClassRelation = (relationId: string, updates: Partial<ClassRelation>) => {
     if (!classDiagram) return;
+    const relations = classDiagram.relations.map((relation) => (
+      relation.id === relationId ? { ...relation, ...updates } : relation
+    ));
+    const updatedRelation = relations.find((relation) => relation.id === relationId);
     onProjectChange(withClassDiagram(project, {
       ...classDiagram,
-      relations: classDiagram.relations.map((relation) => (
-        relation.id === relationId ? { ...relation, ...updates } : relation
-      )),
+      relations,
     }));
+    if (updatedRelation) {
+      updateClassRelationInView(project.id, project.semantic?.classDiagram, updatedRelation);
+    }
   };
 
   const deleteClassRelation = (relationId: string) => {
@@ -173,6 +210,7 @@ export function PropertiesPane({
       relations: classDiagram.relations.filter((relation) => relation.id !== relationId),
     }));
     onSelectionChange?.(null);
+    deleteRelation(relationId, 'classDiagram');
   };
 
   const updateDomain = (domainId: string, updates: Partial<Omit<Domain, 'id'>>) => {

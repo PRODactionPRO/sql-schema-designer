@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -8,14 +8,20 @@ import type {
   CreateRelationInViewCommandDto,
   CreateSemanticViewCommandDto,
   DeleteObjectFromViewCommandDto,
+  DeleteRelationFromViewCommandDto,
   MoveViewNodeCommandDto,
   UpdateObjectCommandDto,
+  UpdateRelationCommandDto,
 } from './dto/semantic-command.dto';
 import type { UpdateModelObjectMetadataDto } from './dto/update-model-object-metadata.dto';
 import type { UpdateViewNodePositionDto } from './dto/update-view-node-position.dto';
 
-const ERD_CONTEXT_OBJECT_TYPES = ['domain', 'enum', 'json_schema'];
-const CLASS_DIAGRAM_CONTEXT_OBJECT_TYPES = ['domain', 'enum', 'json_schema'];
+const ERD_CONTEXT_OBJECT_TYPES = ['domain'];
+const CLASS_DIAGRAM_CONTEXT_OBJECT_TYPES = ['domain'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 @Injectable()
 export class SemanticModelService {
@@ -363,41 +369,210 @@ export class SemanticModelService {
     ]);
 
     return this.prisma.$transaction(async (tx) => {
-      const relation = await tx.modelRelation.create({
-        data: {
+      const legacyRelationId = this.getLegacyRelationId(dto.metadata);
+      const existingRelationByLegacyId = legacyRelationId
+        ? await this.findRelationByLegacyIdInTransaction(
+          tx,
           projectId,
-          sourceObjectId: sourceNode.objectId,
-          targetObjectId: targetNode.objectId,
-          type: dto.type,
-          direction: dto.direction ?? 'directed',
-          cardinalitySource: dto.cardinalitySource,
-          cardinalityTarget: dto.cardinalityTarget,
-          required: dto.required ?? false,
-          metadata: (dto.metadata ?? {}) as Prisma.InputJsonValue,
+          legacyRelationId,
+        )
+        : null;
+      const existingRelation = existingRelationByLegacyId
+        ?? await this.findDuplicateRelationInTransaction(
+          tx,
+          projectId,
+          sourceNode.objectId,
+          targetNode.objectId,
+          dto.type,
+          dto.metadata,
+        );
+
+      const relation = existingRelation
+        ? await tx.modelRelation.update({
+            where: { id: existingRelation.id },
+            data: {
+              sourceObjectId: sourceNode.objectId,
+              targetObjectId: targetNode.objectId,
+              type: dto.type,
+              direction: dto.direction ?? existingRelation.direction,
+              cardinalitySource: dto.cardinalitySource,
+              cardinalityTarget: dto.cardinalityTarget,
+              required: dto.required ?? existingRelation.required,
+              metadata: (
+                existingRelationByLegacyId
+                  ? dto.metadata ?? existingRelation.metadata
+                  : existingRelation.metadata
+              ) as Prisma.InputJsonValue,
+            },
+          })
+        : await tx.modelRelation.create({
+            data: {
+              projectId,
+              sourceObjectId: sourceNode.objectId,
+              targetObjectId: targetNode.objectId,
+              type: dto.type,
+              direction: dto.direction ?? 'directed',
+              cardinalitySource: dto.cardinalitySource,
+              cardinalityTarget: dto.cardinalityTarget,
+              required: dto.required ?? false,
+              metadata: (dto.metadata ?? {}) as Prisma.InputJsonValue,
+            },
+          });
+
+      const existingEdge = await tx.viewEdge.findFirst({
+        where: {
+          viewId: dto.viewId,
+          relationId: relation.id,
         },
       });
 
-      const edge = await tx.viewEdge.create({
-        data: {
-          viewId: dto.viewId,
-          relationId: relation.id,
-          sourceViewNodeId: dto.sourceViewNodeId,
-          targetViewNodeId: dto.targetViewNodeId,
-          isModelRelation: true,
-          visible: dto.edge?.visible ?? true,
-          routing: dto.edge?.routing as Prisma.InputJsonValue | undefined,
-          style: (dto.edge?.style ?? {}) as Prisma.InputJsonValue,
-        },
-        include: {
-          relation: true,
-          sourceViewNode: { include: { object: true } },
-          targetViewNode: { include: { object: true } },
-        },
-      });
+      const edge = existingEdge
+        ? await tx.viewEdge.update({
+            where: { id: existingEdge.id },
+            data: {
+              sourceViewNodeId: dto.sourceViewNodeId,
+              targetViewNodeId: dto.targetViewNodeId,
+              visible: dto.edge?.visible ?? true,
+              routing: dto.edge?.routing as Prisma.InputJsonValue | undefined,
+              style: dto.edge?.style
+                ? (dto.edge.style as Prisma.InputJsonValue)
+                : undefined,
+            },
+            include: {
+              relation: true,
+              sourceViewNode: { include: { object: true } },
+              targetViewNode: { include: { object: true } },
+            },
+          })
+        : await tx.viewEdge.create({
+            data: {
+              viewId: dto.viewId,
+              relationId: relation.id,
+              sourceViewNodeId: dto.sourceViewNodeId,
+              targetViewNodeId: dto.targetViewNodeId,
+              isModelRelation: true,
+              visible: dto.edge?.visible ?? true,
+              routing: dto.edge?.routing as Prisma.InputJsonValue | undefined,
+              style: (dto.edge?.style ?? {}) as Prisma.InputJsonValue,
+            },
+            include: {
+              relation: true,
+              sourceViewNode: { include: { object: true } },
+              targetViewNode: { include: { object: true } },
+            },
+          });
 
       await this.touchView(tx, dto.viewId);
 
       return { relation, edge };
+    });
+  }
+
+  async updateRelationCommand(
+    projectId: string,
+    ownerId: string,
+    dto: UpdateRelationCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    const currentRelation = await this.findProjectRelationByReferenceOrThrow(
+      projectId,
+      dto.relationId,
+      dto.legacyRelationId,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const relation = await tx.modelRelation.update({
+        where: { id: currentRelation.id },
+        data: {
+          type: dto.type,
+          direction: dto.direction,
+          cardinalitySource: dto.cardinalitySource,
+          cardinalityTarget: dto.cardinalityTarget,
+          required: dto.required,
+          metadata: dto.metadata
+            ? (dto.metadata as Prisma.InputJsonValue)
+            : undefined,
+        },
+      });
+
+      const edges = await tx.viewEdge.findMany({
+        where: {
+          relationId: currentRelation.id,
+          view: {
+            is: {
+              projectId,
+              deletedAt: null,
+            },
+          },
+        },
+        select: { viewId: true },
+      });
+
+      await Promise.all(
+        [...new Set(edges.map((edge) => edge.viewId))].map((viewId) =>
+          this.touchView(tx, viewId),
+        ),
+      );
+
+      return relation;
+    });
+  }
+
+  async deleteRelationFromViewCommand(
+    projectId: string,
+    ownerId: string,
+    dto: DeleteRelationFromViewCommandDto,
+  ) {
+    await this.projectsService.findOwnedProjectOrThrow(projectId, ownerId);
+    const currentRelation = await this.findProjectRelationByReferenceOrThrow(
+      projectId,
+      dto.relationId,
+      dto.legacyRelationId,
+    );
+    if (dto.viewId) await this.findProjectViewOrThrow(projectId, dto.viewId);
+
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const edges = await tx.viewEdge.findMany({
+        where: {
+          relationId: currentRelation.id,
+          ...(dto.viewId ? { viewId: dto.viewId } : {}),
+          view: {
+            is: {
+              projectId,
+              deletedAt: null,
+            },
+          },
+        },
+        select: { id: true, viewId: true },
+      });
+      const edgeIds = edges.map((edge) => edge.id);
+
+      if (edgeIds.length > 0) {
+        await tx.viewEdge.updateMany({
+          where: { id: { in: edgeIds } },
+          data: { visible: false },
+        });
+      }
+
+      let relation = null;
+      if (dto.deleteRelation ?? true) {
+        relation = await tx.modelRelation.update({
+          where: { id: currentRelation.id },
+          data: { deletedAt: now },
+        });
+      }
+
+      await Promise.all(
+        [...new Set(edges.map((edge) => edge.viewId))].map((viewId) =>
+          this.touchView(tx, viewId),
+        ),
+      );
+
+      return {
+        relation,
+        hiddenEdgeIds: edgeIds,
+      };
     });
   }
 
@@ -486,6 +661,110 @@ export class SemanticModelService {
     }
 
     return object;
+  }
+
+  private async findProjectRelationOrThrow(projectId: string, relationId: string) {
+    const relation = await this.prisma.modelRelation.findFirst({
+      where: {
+        id: relationId,
+        projectId,
+        deletedAt: null,
+      },
+    });
+
+    if (!relation) {
+      throw new NotFoundException('Model relation not found');
+    }
+
+    return relation;
+  }
+
+  private async findProjectRelationByReferenceOrThrow(
+    projectId: string,
+    relationId?: string,
+    legacyRelationId?: string,
+  ) {
+    if (relationId) return this.findProjectRelationOrThrow(projectId, relationId);
+
+    if (!legacyRelationId) {
+      throw new BadRequestException('Relation id or legacy relation id is required');
+    }
+
+    const relation = await this.findRelationByLegacyIdInTransaction(
+      this.prisma,
+      projectId,
+      legacyRelationId,
+    );
+
+    if (!relation) {
+      throw new NotFoundException('Model relation not found');
+    }
+
+    return relation;
+  }
+
+  private getLegacyRelationId(metadata: unknown) {
+    if (!isRecord(metadata)) return undefined;
+    return typeof metadata.id === 'string' && metadata.id.trim()
+      ? metadata.id
+      : undefined;
+  }
+
+  private getRelationDuplicateSignature(metadata: unknown) {
+    if (!isRecord(metadata)) return '';
+
+    const signatureKeys = [
+      'fromTableId',
+      'fromFieldId',
+      'toTableId',
+      'toFieldId',
+      'fromClassId',
+      'toClassId',
+      'type',
+    ];
+
+    return signatureKeys
+      .map((key) => `${key}:${typeof metadata[key] === 'string' ? metadata[key] : ''}`)
+      .join('|');
+  }
+
+  private async findRelationByLegacyIdInTransaction(
+    tx: Pick<Prisma.TransactionClient, 'modelRelation'>,
+    projectId: string,
+    legacyRelationId: string,
+  ) {
+    const relations = await tx.modelRelation.findMany({
+      where: {
+        projectId,
+        deletedAt: null,
+      },
+    });
+
+    return relations.find((relation) => this.getLegacyRelationId(relation.metadata) === legacyRelationId) ?? null;
+  }
+
+  private async findDuplicateRelationInTransaction(
+    tx: Pick<Prisma.TransactionClient, 'modelRelation'>,
+    projectId: string,
+    sourceObjectId: string,
+    targetObjectId: string,
+    type: string,
+    metadata: unknown,
+  ) {
+    const requestedSignature = this.getRelationDuplicateSignature(metadata);
+    const relations = await tx.modelRelation.findMany({
+      where: {
+        projectId,
+        sourceObjectId,
+        targetObjectId,
+        type,
+        deletedAt: null,
+      },
+    });
+
+    return relations.find((relation) => (
+      this.getRelationDuplicateSignature(relation.metadata) === requestedSignature
+    )) ?? null;
   }
 
   private async findProjectViewNodeOrThrow(

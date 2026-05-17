@@ -32,8 +32,10 @@ export function WorkspacePane({
   heldTabId,
   isCanvasMaximized,
   searchActive,
+  searchQuery,
   onActivate,
   onCloseSearch,
+  onSearchQueryChange,
   onCloseTab,
   onCollapseLeft,
   onMaximizeCanvas,
@@ -59,8 +61,10 @@ export function WorkspacePane({
   heldTabId: string | null;
   isCanvasMaximized: boolean;
   searchActive: boolean;
+  searchQuery: string;
   onActivate: (windowId: WorkspaceWindowId, tabId: string) => void;
   onCloseSearch: () => void;
+  onSearchQueryChange: (query: string) => void;
   onCloseTab: (windowId: WorkspaceWindowId, tabId: string) => void;
   onCollapseLeft: () => void;
   onMaximizeCanvas: () => void;
@@ -97,6 +101,8 @@ export function WorkspacePane({
       >
         {searchActive ? (
           <PanelSearchBar
+            query={searchQuery}
+            onQueryChange={onSearchQueryChange}
             onClose={onCloseSearch}
             onToggleFilters={onToggleSearchFilterMenu}
           />
