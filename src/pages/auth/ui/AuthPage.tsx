@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { Database, Lock, Mail, User } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { useAuthStore } from '@/shared/auth/store';
 
 export function AuthPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const setSession = useAuthStore((s) => s.setSession);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
@@ -33,6 +34,7 @@ export function AuthPage() {
       return register({ email, password, name: name.trim() || undefined });
     },
     onSuccess: (data) => {
+      queryClient.clear();
       setSession({ token: data.accessToken, user: data.user });
       toast.success(mode === 'login' ? 'Signed in' : 'Account created');
       navigate('/', { replace: true });
@@ -50,6 +52,7 @@ export function AuthPage() {
   const demoMutation = useMutation({
     mutationFn: loginDemo,
     onSuccess: (data) => {
+      queryClient.clear();
       setSession({ token: data.accessToken, user: data.user });
       toast.success('Demo session started');
       navigate('/', { replace: true });
