@@ -16,6 +16,7 @@ import type {
 import { IconButton } from '@/shared/ui/icon-button';
 import { cn } from '@/shared/ui/utils';
 import type { ProjectData } from '@/shared/types/project';
+import type { WorkspaceSaveStatus } from '../model/useWorkspaceProjectData';
 import { DraggableTab, PanelSearchBar, ProjectTitleHeader } from './WorkspacePaneHeaders';
 import { EmptyPane, TabContent } from './WorkspaceTabContent';
 
@@ -25,6 +26,7 @@ export function WorkspacePane({
   project,
   projectLoading = false,
   projectError = null,
+  saveStatus = 'idle',
   selection,
   canvasViewports,
   viewportRestoreKey,
@@ -56,6 +58,7 @@ export function WorkspacePane({
   project?: ProjectData;
   projectLoading?: boolean;
   projectError?: string | null;
+  saveStatus?: WorkspaceSaveStatus;
   selection: WorkspaceSelection | null;
   canvasViewports: Partial<Record<WorkspaceCanvasViewportId, WorkspaceCanvasViewport>>;
   viewportRestoreKey: string | number;
@@ -99,7 +102,15 @@ export function WorkspacePane({
       {windowState.id === 'project' ? (
         <ProjectTitleHeader
           projectName={project?.name ?? 'Data Design Schema'}
-          status={projectLoading ? 'Loading project' : projectError ? 'Project unavailable' : 'Saved'}
+          status={projectLoading
+            ? 'Loading project'
+            : projectError
+              ? 'Project unavailable'
+              : saveStatus === 'saving'
+                ? 'Saving...'
+                : saveStatus === 'error'
+                  ? 'Save failed'
+                  : 'Saved'}
           onCollapseLeft={onCollapseLeft}
         />
       ) : null}

@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { Box, CircleDot, Database, FileText, Maximize2, Plus, ShieldCheck, Trash2, UserRound, Workflow, Wrench } from 'lucide-react';
+import { toast } from 'sonner';
 import type { Idef0Arrow, Idef0ArrowRole, Idef0Concept, Idef0ConceptKind, Idef0Function } from '@/shared/types/idef0';
 import type { Idef0ProjectDocument, ProjectData } from '@/shared/types/project';
 import type { CanvasViewport } from '@/shared/ui/useCanvasNavigation';
@@ -186,6 +187,108 @@ export function Idef0Canvas({
       },
     ]);
   };
+
+  const getPasteOffsetToViewportCenter = useCallback((content: string) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return undefined;
+    }
+
+    const payload = parsed as {
+      functions?: Array<{ position?: { x: number; y: number }; size?: { width: number; height: number } }>;
+      concepts?: Array<{ position?: { x: number; y: number }; size?: { width: number; height: number } }>;
+    };
+    const boxes = [
+      ...(payload.functions ?? []).map((fn) => ({
+        x: fn.position?.x,
+        y: fn.position?.y,
+        width: fn.size?.width ?? 240,
+        height: fn.size?.height ?? 128,
+      })),
+      ...(payload.concepts ?? []).map((concept) => ({
+        x: concept.position?.x,
+        y: concept.position?.y,
+        width: concept.size?.width ?? 190,
+        height: concept.size?.height ?? 58,
+      })),
+    ].filter((box): box is { x: number; y: number; width: number; height: number } => (
+      typeof box.x === 'number' && typeof box.y === 'number'
+    ));
+    if (boxes.length === 0) return undefined;
+
+    const rect = canvas.containerRef.current?.getBoundingClientRect();
+    if (!rect) return undefined;
+    const viewportCenter = canvas.screenToWorld({
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    });
+    if (!viewportCenter) return undefined;
+
+    const minX = Math.min(...boxes.map((box) => box.x));
+    const minY = Math.min(...boxes.map((box) => box.y));
+    const maxX = Math.max(...boxes.map((box) => box.x + box.width));
+    const maxY = Math.max(...boxes.map((box) => box.y + box.height));
+    return {
+      x: viewportCenter.x - (minX + maxX) / 2,
+      y: viewportCenter.y - (minY + maxY) / 2,
+    };
+  }, [canvas]);
+
+  const handleCopySelection = useCallback(async () => {
+    const payload = canvas.exportSelectionForClipboard();
+    if (!payload) return;
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      toast.success('Copied selected IDEF0 nodes');
+    } catch {
+      toast.error('Cannot access clipboard in this browser context');
+    }
+  }, [canvas]);
+
+  const handlePasteSelection = useCallback(async () => {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      toast.error('Cannot read clipboard in this browser context');
+      return;
+    }
+
+    const result = canvas.importSelectionFromClipboard(text, getPasteOffsetToViewportCenter(text));
+    if (!result) {
+      toast.error('Clipboard does not contain copied IDEF0 nodes');
+      return;
+    }
+    toast.success(`Pasted ${result.functions + result.concepts} node${result.functions + result.concepts === 1 ? '' : 's'} and ${result.arrows} arrow${result.arrows === 1 ? '' : 's'}`);
+  }, [canvas, getPasteOffsetToViewportCenter]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'INPUT'
+        || target?.tagName === 'TEXTAREA'
+        || target?.isContentEditable
+        || Boolean(target?.closest('.cm-editor'));
+      if (isTyping) return;
+
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod || event.shiftKey) return;
+      if (event.code === 'KeyC') {
+        event.preventDefault();
+        void handleCopySelection();
+      }
+      if (event.code === 'KeyV') {
+        event.preventDefault();
+        void handlePasteSelection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handleCopySelection, handlePasteSelection]);
 
   const handleCanvasMouseDown = (event: ReactMouseEvent) => {
     if (event.button !== 0) return;

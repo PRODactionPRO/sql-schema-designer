@@ -30,6 +30,7 @@ export function WorkspaceLayoutPage() {
     activeProject,
     projectLoading,
     projectError,
+    saveStatus,
     handleProjectChange,
     canUndoProject,
     canRedoProject,
@@ -138,6 +139,7 @@ export function WorkspaceLayoutPage() {
       project={activeProject}
       projectLoading={projectLoading}
       projectError={projectError}
+      saveStatus={saveStatus}
       selection={selection}
       canvasViewports={canvasViewports}
       viewportRestoreKey={hydrationRevision}
