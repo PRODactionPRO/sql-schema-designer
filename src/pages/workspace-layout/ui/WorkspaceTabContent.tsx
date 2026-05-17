@@ -29,6 +29,10 @@ export function TabContent({
   selection,
   canvasViewports,
   viewportRestoreKey,
+  projectTreeCollapsedSectionIds,
+  projectTreeCollapsedTableIds,
+  onToggleProjectTreeSectionCollapse,
+  onToggleProjectTreeTableCollapse,
   onProjectChange,
   onSelectionChange,
   onCloseDocument,
@@ -43,6 +47,10 @@ export function TabContent({
   selection: WorkspaceSelection | null;
   canvasViewports: Partial<Record<WorkspaceCanvasViewportId, WorkspaceCanvasViewport>>;
   viewportRestoreKey: string | number;
+  projectTreeCollapsedSectionIds: Set<string>;
+  projectTreeCollapsedTableIds: Set<string>;
+  onToggleProjectTreeSectionCollapse: (sectionId: string) => void;
+  onToggleProjectTreeTableCollapse: (tableId: string) => void;
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
   onCloseDocument: (documentId: string) => void;
@@ -52,7 +60,22 @@ export function TabContent({
   if (projectLoading) return <PaneMessage>Loading project workspace...</PaneMessage>;
   if (projectError) return <PaneMessage>{projectError}</PaneMessage>;
 
-  if (tab.type === 'file') return <ProjectTreePane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} onCloseDocument={onCloseDocument} onOpenDocument={onOpenDocument} />;
+  if (tab.type === 'file') {
+    return (
+      <ProjectTreePane
+        project={project}
+        selection={selection}
+        collapsedSectionIds={projectTreeCollapsedSectionIds}
+        collapsedTableIds={projectTreeCollapsedTableIds}
+        onToggleSectionCollapse={onToggleProjectTreeSectionCollapse}
+        onToggleTableCollapse={onToggleProjectTreeTableCollapse}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onCloseDocument={onCloseDocument}
+        onOpenDocument={onOpenDocument}
+      />
+    );
+  }
   if (tab.type === 'erDiagram') {
     return project ? (
       <ProjectErDiagramCanvas

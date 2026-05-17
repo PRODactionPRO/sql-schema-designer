@@ -14,6 +14,10 @@ import {
 export function ProjectTreePane({
   project,
   selection,
+  collapsedSectionIds,
+  collapsedTableIds,
+  onToggleSectionCollapse,
+  onToggleTableCollapse,
   onProjectChange,
   onSelectionChange,
   onCloseDocument,
@@ -21,12 +25,16 @@ export function ProjectTreePane({
 }: {
   project?: ProjectData;
   selection: WorkspaceSelection | null;
+  collapsedSectionIds: Set<string>;
+  collapsedTableIds: Set<string>;
+  onToggleSectionCollapse: (sectionId: string) => void;
+  onToggleTableCollapse: (tableId: string) => void;
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
   onCloseDocument: (documentId: string) => void;
   onOpenDocument: (documentId: string, fallback?: { type: WorkspaceTab['type']; title: string }) => void;
 }) {
-  const [collapsedTableIds, setCollapsedTableIds] = useState<Set<string>>(() => new Set());
+  const [rootCollapsed, setRootCollapsed] = useState(false);
   const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
   const [editingProcessName, setEditingProcessName] = useState('');
   const [processToDelete, setProcessToDelete] = useState<Idef0ProjectDocument | null>(null);
@@ -118,8 +126,19 @@ export function ProjectTreePane({
 
   return (
     <div className="h-full overflow-auto p-2">
-      <TreeSection title={project.name} icon={<Layers3 className="size-3.5" />}>
-        <TreeSection title="Domains" icon={<Box className="size-3.5" />} depth={1}>
+      <TreeSection
+        title={project.name}
+        icon={<Layers3 className="size-3.5" />}
+        collapsed={rootCollapsed}
+        onToggle={() => setRootCollapsed((current) => !current)}
+      >
+        <TreeSection
+          title="Domains"
+          icon={<Box className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('domains')}
+          onToggle={() => onToggleSectionCollapse('domains')}
+        >
           {domains.map((domain) => (
             <TreeRow
               key={domain.id}
@@ -132,7 +151,13 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="Tables" icon={<Table2 className="size-3.5" />} depth={1}>
+        <TreeSection
+          title="Tables"
+          icon={<Table2 className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('tables')}
+          onToggle={() => onToggleSectionCollapse('tables')}
+        >
           {project.schema.tables.map((table) => {
             const tableActive = selection?.kind === 'table'
               && selection.id === table.id
@@ -149,12 +174,7 @@ export function ProjectTreePane({
                 activeGuide={tableActive}
                 collapsed={collapsedTableIds.has(table.id)}
                 onClick={() => onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' })}
-                onToggle={() => setCollapsedTableIds((current) => {
-                  const next = new Set(current);
-                  if (next.has(table.id)) next.delete(table.id);
-                  else next.add(table.id);
-                  return next;
-                })}
+                onToggle={() => onToggleTableCollapse(table.id)}
               >
                 {table.fields.map((field) => (
                   <TreeRow
@@ -176,7 +196,13 @@ export function ProjectTreePane({
           })}
         </TreeSection>
         {classDiagram ? (
-          <TreeSection title="Entities" icon={<Box className="size-3.5" />} depth={1}>
+          <TreeSection
+            title="Entities"
+            icon={<Box className="size-3.5" />}
+            depth={1}
+            collapsed={collapsedSectionIds.has('entities')}
+            onToggle={() => onToggleSectionCollapse('entities')}
+          >
             {classDiagram.classes.map((entity) => (
               <div key={entity.id}>
                 <TreeRow
@@ -211,7 +237,13 @@ export function ProjectTreePane({
             ))}
           </TreeSection>
         ) : null}
-        <TreeSection title="Enums" icon={<FileJson className="size-3.5" />} depth={1}>
+        <TreeSection
+          title="Enums"
+          icon={<FileJson className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('enums')}
+          onToggle={() => onToggleSectionCollapse('enums')}
+        >
           {project.schema.enums.map((enumType) => (
             <TreeRow
               key={enumType.id}
@@ -224,7 +256,13 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="JSON Schemas" icon={<FileText className="size-3.5" />} depth={1}>
+        <TreeSection
+          title="JSON Schemas"
+          icon={<FileText className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('jsonSchemas')}
+          onToggle={() => onToggleSectionCollapse('jsonSchemas')}
+        >
           {(project.schema.jsonSchemas ?? []).map((schema) => (
             <TreeRow
               key={schema.id}
@@ -237,7 +275,13 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
-        <TreeSection title="Processes" icon={<Workflow className="size-3.5" />} depth={1}>
+        <TreeSection
+          title="Processes"
+          icon={<Workflow className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('processes')}
+          onToggle={() => onToggleSectionCollapse('processes')}
+        >
           <TreeRow
             depth={2}
             icon={<Plus className="size-3.5" />}
@@ -292,7 +336,13 @@ export function ProjectTreePane({
             );
           })}
         </TreeSection>
-        <TreeSection title="Diagrams" icon={<GitBranch className="size-3.5" />} depth={1}>
+        <TreeSection
+          title="Diagrams"
+          icon={<GitBranch className="size-3.5" />}
+          depth={1}
+          collapsed={collapsedSectionIds.has('diagrams')}
+          onToggle={() => onToggleSectionCollapse('diagrams')}
+        >
           {diagrams.map((document) => (
             <TreeRow
               key={document.id}
@@ -408,15 +458,18 @@ function TreeSection({
   icon,
   depth = 0,
   activeGuide = false,
+  collapsed,
+  onToggle,
   children,
 }: {
   title: string;
   icon: ReactNode;
   depth?: number;
   activeGuide?: boolean;
+  collapsed: boolean;
+  onToggle: () => void;
   children: ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
   const fontSize = getTreeFontSize(depth);
   const guideLeft = 15 + depth * 14;
 
@@ -439,7 +492,7 @@ function TreeSection({
           activeGuide ? 'text-slate-800' : 'text-slate-600',
         )}
         style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={() => setCollapsed((current) => !current)}
+        onClick={onToggle}
       >
         <ChevronDown className={cn('size-3.5 transition-transform', activeGuide ? 'text-blue-500' : 'text-slate-400', collapsed && '-rotate-90')} />
         <span className="text-slate-400">{icon}</span>
