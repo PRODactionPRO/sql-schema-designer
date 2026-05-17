@@ -1,9 +1,11 @@
+import { useEffect, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   Maximize2,
   Menu,
   Plus,
   Search,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type {
   WorkspaceCanvasViewport,
@@ -17,7 +19,8 @@ import { IconButton } from '@/shared/ui/icon-button';
 import { cn } from '@/shared/ui/utils';
 import type { ProjectData } from '@/shared/types/project';
 import type { WorkspaceSaveStatus } from '../model/useWorkspaceProjectData';
-import { DraggableTab, PanelSearchBar, ProjectTitleHeader } from './WorkspacePaneHeaders';
+import { getProjectTreeVisibleSectionIds } from '../model/project-tree-display';
+import { DraggableTab, PanelSearchBar, ProjectTitleHeader, ProjectTreeFiltersPanel } from './WorkspacePaneHeaders';
 import { EmptyPane, TabContent } from './WorkspaceTabContent';
 
 export function WorkspacePane({
@@ -87,12 +90,58 @@ export function WorkspacePane({
   onOpenDocument: (documentId: string, fallback?: { type: WorkspaceWindow['tabs'][number]['type']; title: string }) => void;
   onCanvasViewportChange: (viewId: WorkspaceCanvasViewportId, viewport: WorkspaceCanvasViewport) => void;
 }) {
+  const [projectFiltersOpen, setProjectFiltersOpen] = useState(false);
+  const [projectTreeCollapsedSectionIds, setProjectTreeCollapsedSectionIds] = useState<Set<string>>(() => new Set());
+  const [projectTreeCollapsedTableIds, setProjectTreeCollapsedTableIds] = useState<Set<string>>(() => new Set());
   const activeTab = windowState.tabs.find((tab) => tab.id === windowState.activeTabId) ?? windowState.tabs[0] ?? null;
+  const isProjectTreeTab = windowState.id === 'project' && activeTab?.type === 'file';
+  const projectTreeVisibleSectionIds = isProjectTreeTab ? getProjectTreeVisibleSectionIds(project) : [];
+  const projectTreeTableIds = isProjectTreeTab ? (project?.schema.tables ?? []).map((table) => table.id) : [];
+  const projectTreeCollapsibleCount = projectTreeVisibleSectionIds.length + projectTreeTableIds.length;
+  const areAllProjectTreeItemsCollapsed = projectTreeCollapsibleCount > 0
+    && projectTreeVisibleSectionIds.every((sectionId) => projectTreeCollapsedSectionIds.has(sectionId))
+    && projectTreeTableIds.every((tableId) => projectTreeCollapsedTableIds.has(tableId));
+
+  useEffect(() => {
+    if (!isProjectTreeTab && projectFiltersOpen) {
+      setProjectFiltersOpen(false);
+    }
+  }, [isProjectTreeTab, projectFiltersOpen]);
+
   const resolveTabTitle = (tab: WorkspaceTab): WorkspaceTab => {
     if (!tab.documentId || !project) return tab;
     const document = project.documents.find((item) => item.id === tab.documentId);
     if (!document || document.name === tab.title) return tab;
     return { ...tab, title: document.name };
+  };
+
+  const toggleProjectTreeSectionCollapse = (sectionId: string) => {
+    setProjectTreeCollapsedSectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
+  const toggleProjectTreeTableCollapse = (tableId: string) => {
+    setProjectTreeCollapsedTableIds((current) => {
+      const next = new Set(current);
+      if (next.has(tableId)) next.delete(tableId);
+      else next.add(tableId);
+      return next;
+    });
+  };
+
+  const toggleProjectTreeCollapseAll = () => {
+    if (areAllProjectTreeItemsCollapsed) {
+      setProjectTreeCollapsedSectionIds(new Set());
+      setProjectTreeCollapsedTableIds(new Set());
+      return;
+    }
+
+    setProjectTreeCollapsedSectionIds(new Set(projectTreeVisibleSectionIds));
+    setProjectTreeCollapsedTableIds(new Set(projectTreeTableIds));
   };
 
   return (
@@ -174,13 +223,31 @@ export function WorkspacePane({
                   <Search className="size-4" />
                 </IconButton>
               ) : null}
-              <IconButton label="Menu">
-                <Menu className="size-4" />
-              </IconButton>
+              {windowState.id === 'project' ? (
+                <IconButton
+                  label="Filters"
+                  active={projectFiltersOpen}
+                  disabled={!isProjectTreeTab}
+                  onClick={() => setProjectFiltersOpen((current) => !current)}
+                >
+                  <SlidersHorizontal className="size-4" />
+                </IconButton>
+              ) : (
+                <IconButton label="Menu">
+                  <Menu className="size-4" />
+                </IconButton>
+              )}
             </div>
           </>
         )}
       </div>
+      {isProjectTreeTab && projectFiltersOpen ? (
+        <ProjectTreeFiltersPanel
+          areAllCollapsed={areAllProjectTreeItemsCollapsed}
+          disabled={projectTreeCollapsibleCount === 0}
+          onToggleCollapseAll={toggleProjectTreeCollapseAll}
+        />
+      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden">
         {activeTab ? (
           <TabContent
@@ -192,6 +259,10 @@ export function WorkspacePane({
             selection={selection}
             canvasViewports={canvasViewports}
             viewportRestoreKey={viewportRestoreKey}
+            projectTreeCollapsedSectionIds={projectTreeCollapsedSectionIds}
+            projectTreeCollapsedTableIds={projectTreeCollapsedTableIds}
+            onToggleProjectTreeSectionCollapse={toggleProjectTreeSectionCollapse}
+            onToggleProjectTreeTableCollapse={toggleProjectTreeTableCollapse}
             onProjectChange={onProjectChange}
             onSelectionChange={onSelectionChange}
             onCloseDocument={onCloseDocument}

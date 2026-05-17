@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import {
   Copy,
+  Minimize2,
   PanelLeftClose,
   Search,
   SlidersHorizontal,
@@ -88,6 +89,39 @@ export function PanelSearchBar({
       >
         <X className="size-4" />
       </button>
+    </div>
+  );
+}
+
+export function ProjectTreeFiltersPanel({
+  areAllCollapsed,
+  disabled = false,
+  onToggleCollapseAll,
+}: {
+  areAllCollapsed: boolean;
+  disabled?: boolean;
+  onToggleCollapseAll: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-b border-[#e6e7e9] bg-[#f8f8f9] px-3 py-2">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-[#e6e7e9] bg-white px-3 py-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Tree Display</p>
+          <p className="text-xs font-medium text-slate-600">Structure and visibility</p>
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#e6e7e9] px-3 text-xs font-semibold text-slate-700 transition-colors hover:bg-[#f8f8f9] disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-white',
+            areAllCollapsed && 'bg-[#eeeff0]',
+          )}
+          onClick={onToggleCollapseAll}
+        >
+          <Minimize2 className="size-3.5" />
+          {areAllCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
     </div>
   );
 }
