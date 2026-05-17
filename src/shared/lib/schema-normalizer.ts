@@ -52,6 +52,7 @@ import {
   type Idef0ArrowRole,
   type Idef0ArrowStatus,
   type Idef0Attribute,
+  type Idef0DataReference,
   type Idef0AttributeValueType,
   type Idef0Concept,
   type Idef0ConceptKind,
@@ -952,6 +953,26 @@ function normalizeIdef0Attributes(value: unknown): Idef0Attribute[] {
   return uniqueById((Array.isArray(value) ? value : []).map(normalizeIdef0Attribute));
 }
 
+function normalizeIdef0DataReference(value: unknown, index: number): Idef0DataReference {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `idef0_data_ref_${index}`),
+    objectId: asString(record.objectId) || undefined,
+    legacyId: asString(record.legacyId) || undefined,
+    classId: asString(record.classId) || undefined,
+    className: asString(record.className) || undefined,
+    attributeId: asString(record.attributeId) || undefined,
+    attributeName: asString(record.attributeName, `attribute_${index + 1}`),
+    valueType: asString(record.valueType) || undefined,
+    domainId: asString(record.domainId) || undefined,
+    domainName: asString(record.domainName) || undefined,
+  };
+}
+
+function normalizeIdef0DataReferences(value: unknown): Idef0DataReference[] {
+  return uniqueById((Array.isArray(value) ? value : []).map(normalizeIdef0DataReference));
+}
+
 function normalizeIdef0Endpoint(value: unknown): Idef0ArrowEndpoint {
   const record = isRecord(value) ? value : {};
   const kind = record.kind === 'function' || record.kind === 'concept' || record.kind === 'boundary'
@@ -1003,6 +1024,7 @@ function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
     domainId: asString(record.domainId) || undefined,
     ownerId: asString(record.ownerId) || undefined,
     linkedObjectId: asString(record.linkedObjectId) || undefined,
+    dataReferences: normalizeIdef0DataReferences(record.dataReferences),
     attributes: normalizeIdef0Attributes(record.attributes),
     metadata: isRecord(record.metadata) ? record.metadata : undefined,
   };

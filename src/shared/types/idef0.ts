@@ -64,6 +64,19 @@ export interface Idef0Attribute {
   description?: string;
 }
 
+export interface Idef0DataReference {
+  id: string;
+  objectId?: string;
+  legacyId?: string;
+  classId?: string;
+  className?: string;
+  attributeId?: string;
+  attributeName: string;
+  valueType?: string;
+  domainId?: string;
+  domainName?: string;
+}
+
 export interface Idef0Function {
   id: string;
   name: string;
@@ -91,6 +104,7 @@ export interface Idef0Concept {
   domainId?: string;
   ownerId?: string;
   linkedObjectId?: string;
+  dataReferences?: Idef0DataReference[];
   attributes?: Idef0Attribute[];
   metadata?: Record<string, unknown>;
 }
