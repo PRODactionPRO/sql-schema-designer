@@ -354,18 +354,20 @@ export const TableNode = memo(function TableNode({
     onUpdateField?.(field.id, { isUnique: !field.isUnique });
   };
 
-  // --- Minimal LOD: colored rectangle with table name only ---
+  // --- Minimal LOD: compact table silhouette for zoomed-out navigation ---
   if (lodLevel === 'minimal') {
-    const totalH = 40;
+    const totalH = 62;
     return (
       <div
         ref={nodeRef}
-        className="absolute rounded-lg overflow-hidden select-none"
+        className="absolute overflow-hidden rounded-lg bg-white select-none"
         style={{
           left: table.position.x, top: table.position.y, width: 280, height: totalH,
           willChange: 'transform',
-          backgroundColor: headerBg,
-          border: isMultiSelected || isSelected ? `3px solid ${borderColor}` : '1px solid #e5e7eb',
+          border: isMultiSelected || isSelected ? `3px solid ${borderColor}` : '1px solid rgba(148, 163, 184, 0.7)',
+          boxShadow: isMultiSelected || isSelected
+            ? `0 0 0 4px ${borderColor}20, 0 8px 18px -10px rgba(15, 23, 42, 0.35)`
+            : '0 5px 14px -12px rgba(15, 23, 42, 0.45)',
           opacity: textOpacity,
         }}
         data-table-id={table.id}
@@ -379,11 +381,16 @@ export const TableNode = memo(function TableNode({
         }}
       >
         <div
-          className="table-header px-3 py-1.5 flex items-center cursor-move"
+          className="table-header flex h-6 cursor-move items-center px-3"
+          style={{ backgroundColor: headerBg }}
           data-table-header={table.id}
         >
           <span className="text-white truncate text-xs" style={{ fontWeight: 600 }}>{table.name}</span>
           <span className="text-white/60 ml-auto text-[10px]">{fieldCount}</span>
+        </div>
+        <div className="h-[38px] border-t border-slate-200 bg-white px-3 py-2">
+          <div className="mb-1.5 h-1.5 w-4/5 rounded-full bg-slate-200" />
+          <div className="h-1.5 w-3/5 rounded-full bg-slate-100" />
         </div>
       </div>
     );
