@@ -11,7 +11,9 @@ import { useContextMenu } from '@/shared/ui/useContextMenu';
 import { cn } from '@/shared/ui/utils';
 import {
   getIdef0ArrowRoleLabel,
+  getIdef0ConceptWidthForName,
   getIdef0DiagramBounds,
+  getIdef0FunctionWidthForName,
   getIdef0NodeId,
   getIdef0Path,
   IDEF0_CANVAS_WORLD_SIZE,
@@ -371,7 +373,8 @@ function Idef0FunctionNode({
   onStartConnection: (from: Idef0NodeRef, event: ReactPointerEvent<HTMLElement>) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
-  const width = fn.size?.width ?? 240;
+  const baseWidth = fn.size?.width ?? 240;
+  const width = editing ? getIdef0FunctionWidthForName(editingName, baseWidth) : baseWidth;
   const height = fn.size?.height ?? 128;
   const accent = fn.domainId ? '#2563eb' : '#111827';
 
@@ -484,7 +487,8 @@ function Idef0ConceptNode({
   onContextMenu: (event: ReactMouseEvent) => void;
 }) {
   const meta = IDEF0_CONCEPT_KIND_META[concept.kind];
-  const width = concept.size?.width ?? 190;
+  const baseWidth = concept.size?.width ?? 190;
+  const width = editing ? getIdef0ConceptWidthForName(editingName, baseWidth) : baseWidth;
   const height = concept.size?.height ?? 58;
 
   return (

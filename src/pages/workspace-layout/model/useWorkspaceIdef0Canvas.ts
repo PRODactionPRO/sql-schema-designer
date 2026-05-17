@@ -15,7 +15,9 @@ import type { CanvasResizeAnchor, CanvasViewport } from '@/shared/ui/useCanvasNa
 import {
   conceptKindSupportsRole,
   getDefaultConceptName,
+  getIdef0ConceptWidthForName,
   getIdef0ConceptSize,
+  getIdef0FunctionWidthForName,
   getIdef0FunctionSize,
   getIdef0NodeBoxes,
   getIdef0NodeId,
@@ -474,11 +476,33 @@ export function useWorkspaceIdef0Canvas(
     applyDiagram(ref.kind === 'function'
       ? {
           ...diagramRef.current,
-          functions: diagramRef.current.functions.map((fn) => (fn.id === ref.id ? { ...fn, name: nextName } : fn)),
+          functions: diagramRef.current.functions.map((fn) => {
+            if (fn.id !== ref.id) return fn;
+            const size = getIdef0FunctionSize(fn);
+            return {
+              ...fn,
+              name: nextName,
+              size: {
+                ...size,
+                width: getIdef0FunctionWidthForName(nextName, size.width),
+              },
+            };
+          }),
         }
       : {
           ...diagramRef.current,
-          concepts: diagramRef.current.concepts.map((concept) => (concept.id === ref.id ? { ...concept, name: nextName } : concept)),
+          concepts: diagramRef.current.concepts.map((concept) => {
+            if (concept.id !== ref.id) return concept;
+            const size = getIdef0ConceptSize(concept);
+            return {
+              ...concept,
+              name: nextName,
+              size: {
+                ...size,
+                width: getIdef0ConceptWidthForName(nextName, size.width),
+              },
+            };
+          }),
         });
   }, [applyDiagram, pushHistory]);
 
