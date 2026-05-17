@@ -1,8 +1,16 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Box, ChevronDown, Database, FileJson, FileText, GitBranch, Layers3, Pencil, PencilRuler, Plus, Table2, Trash2, Workflow } from 'lucide-react';
-import { createIdef0ProjectDocument, type Idef0ProjectDocument, type ProjectData, type ProjectDocument } from '@/shared/types/project';
+import {
+  createClassDiagramProjectDocument,
+  createErdProjectDocument,
+  createIdef0ProjectDocument,
+  type Idef0ProjectDocument,
+  type ProjectData,
+  type ProjectDocument,
+} from '@/shared/types/project';
 import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
+import { useOutsidePointerDown } from '@/shared/ui/useOutsidePointerDown';
 import { cn } from '@/shared/ui/utils';
 import type { WorkspaceSelection, WorkspaceTab } from '../model/types';
 import {
@@ -38,6 +46,15 @@ export function ProjectTreePane({
   const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
   const [editingProcessName, setEditingProcessName] = useState('');
   const [processToDelete, setProcessToDelete] = useState<Idef0ProjectDocument | null>(null);
+  const [diagramMenuOpen, setDiagramMenuOpen] = useState(false);
+  const diagramMenuRef = useRef<HTMLDivElement | null>(null);
+  const diagramCreateButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useOutsidePointerDown({
+    enabled: diagramMenuOpen,
+    refs: [diagramMenuRef, diagramCreateButtonRef],
+    onOutsidePointerDown: () => setDiagramMenuOpen(false),
+  });
 
   if (!project) {
     return (
@@ -85,6 +102,34 @@ export function ProjectTreePane({
     commitProjectDocuments([...project.documents, processDocument]);
     onSelectionChange({ kind: 'diagram', id: processDocument.id, sourceView: 'diagrams' });
     onOpenDocument(processDocument.id, { type: 'idef0', title: processDocument.name });
+  };
+
+  const createDiagram = (type: 'erd' | 'class-diagram' | 'idef0') => {
+    if (type === 'idef0') {
+      setDiagramMenuOpen(false);
+      createProcessModel();
+      return;
+    }
+
+    const typeDocuments = project.documents.filter((document) => document.type === type);
+    const name = type === 'erd'
+      ? typeDocuments.length === 0
+        ? 'ERD Diagram'
+        : `ERD Diagram ${typeDocuments.length + 1}`
+      : typeDocuments.length === 0
+        ? 'Class Diagram'
+        : `Class Diagram ${typeDocuments.length + 1}`;
+    const document = type === 'erd'
+      ? createErdProjectDocument(name, project.schema)
+      : createClassDiagramProjectDocument(name, domains);
+
+    commitProjectDocuments([...project.documents, document]);
+    setDiagramMenuOpen(false);
+    onSelectionChange({ kind: 'diagram', id: document.id, sourceView: 'diagrams' });
+    onOpenDocument(document.id, {
+      type: type === 'erd' ? 'erDiagram' : 'classDiagram',
+      title: document.name,
+    });
   };
 
   const startRenameProcess = (document: Idef0ProjectDocument) => {
@@ -341,6 +386,29 @@ export function ProjectTreePane({
           depth={1}
           collapsed={collapsedSectionIds.has('diagrams')}
           onToggle={() => onToggleSectionCollapse('diagrams')}
+          actions={(
+            <div className="relative">
+              <TreeSectionActionButton
+                buttonRef={diagramCreateButtonRef}
+                label="Create diagram"
+                onClick={() => setDiagramMenuOpen((current) => !current)}
+              >
+                <Plus className="size-3.5" />
+              </TreeSectionActionButton>
+              {diagramMenuOpen ? (
+                <div
+                  ref={diagramMenuRef}
+                  className="absolute right-0 top-6 z-30 w-[240px] overflow-hidden rounded-2xl bg-[#1f1f1f] py-2 text-white shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+                >
+                  <div className="workspace-dark-popup-scroll max-h-[220px] overflow-y-auto px-2">
+                    <DiagramCreateMenuItem icon={<Database className="size-4 text-white/75" />} label="ERD diagram" onClick={() => createDiagram('erd')} />
+                    <DiagramCreateMenuItem icon={<GitBranch className="size-4 text-white/75" />} label="Class diagram" onClick={() => createDiagram('class-diagram')} />
+                    <DiagramCreateMenuItem icon={<Workflow className="size-4 text-white/75" />} label="IDEF0 functional model" onClick={() => createDiagram('idef0')} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
         >
           {diagrams.map((document) => (
             <TreeRow
@@ -595,14 +663,17 @@ function TreeActionButton({
 function TreeSectionActionButton({
   label,
   onClick,
+  buttonRef,
   children,
 }: {
   label: string;
   onClick: () => void;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
   children: ReactNode;
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={label}
       title={label}
@@ -613,6 +684,27 @@ function TreeSectionActionButton({
       }}
     >
       {children}
+    </button>
+  );
+}
+
+function DiagramCreateMenuItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs font-semibold text-white hover:bg-white/10"
+      onClick={onClick}
+    >
+      {icon}
+      {label}
     </button>
   );
 }
