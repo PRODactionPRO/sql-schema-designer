@@ -41,6 +41,7 @@ import {
 import {
   IDEF0_ARROW_ROLES,
   IDEF0_ARROW_STATUSES,
+  IDEF0_ATTRIBUTE_VALUE_TYPES,
   IDEF0_CONCEPT_KINDS,
   IDEF0_CONCEPT_SUBTYPES,
   IDEF0_CONCEPT_STATUSES,
@@ -49,6 +50,8 @@ import {
   type Idef0ArrowEndpoint,
   type Idef0ArrowRole,
   type Idef0ArrowStatus,
+  type Idef0Attribute,
+  type Idef0AttributeValueType,
   type Idef0Concept,
   type Idef0ConceptKind,
   type Idef0ConceptStatus,
@@ -892,6 +895,25 @@ function normalizeIdef0ArrowStatus(value: unknown): Idef0ArrowStatus {
   return IDEF0_ARROW_STATUSES.includes(value as Idef0ArrowStatus) ? value as Idef0ArrowStatus : 'required';
 }
 
+function normalizeIdef0AttributeValueType(value: unknown): Idef0AttributeValueType {
+  return IDEF0_ATTRIBUTE_VALUE_TYPES.includes(value as Idef0AttributeValueType) ? value as Idef0AttributeValueType : 'text';
+}
+
+function normalizeIdef0Attribute(value: unknown, index: number): Idef0Attribute {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `idef0_attr_${index}`),
+    name: asString(record.name, `attribute_${index + 1}`),
+    value: asString(record.value) || undefined,
+    valueType: normalizeIdef0AttributeValueType(record.valueType),
+    description: asString(record.description) || undefined,
+  };
+}
+
+function normalizeIdef0Attributes(value: unknown): Idef0Attribute[] {
+  return uniqueById((Array.isArray(value) ? value : []).map(normalizeIdef0Attribute));
+}
+
 function normalizeIdef0Endpoint(value: unknown): Idef0ArrowEndpoint {
   const record = isRecord(value) ? value : {};
   const kind = record.kind === 'function' || record.kind === 'concept' || record.kind === 'boundary'
@@ -921,6 +943,7 @@ function normalizeIdef0Function(value: unknown, index: number): Idef0Function {
     decompositionDiagramId: asString(record.decompositionDiagramId) || undefined,
     ownerId: asString(record.ownerId) || undefined,
     sidebarOrder: typeof record.sidebarOrder === 'number' ? record.sidebarOrder : undefined,
+    attributes: normalizeIdef0Attributes(record.attributes),
   };
 }
 
@@ -942,6 +965,7 @@ function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
     domainId: asString(record.domainId) || undefined,
     ownerId: asString(record.ownerId) || undefined,
     linkedObjectId: asString(record.linkedObjectId) || undefined,
+    attributes: normalizeIdef0Attributes(record.attributes),
     metadata: isRecord(record.metadata) ? record.metadata : undefined,
   };
 }

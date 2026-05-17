@@ -56,6 +56,8 @@ export function Idef0Canvas({
 }) {
   const contextMenu = useContextMenu();
   const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null);
+  const [editingNode, setEditingNode] = useState<Idef0NodeRef | null>(null);
+  const [editingName, setEditingName] = useState('');
   const canvas = useWorkspaceIdef0Canvas(document.idef0, {
     initialViewport,
     viewportRestoreKey,
@@ -84,6 +86,20 @@ export function Idef0Canvas({
   });
   const functionsById = useMemo(() => new Map(canvas.diagram.functions.map((fn) => [fn.id, fn])), [canvas.diagram.functions]);
   const conceptsById = useMemo(() => new Map(canvas.diagram.concepts.map((concept) => [concept.id, concept])), [canvas.diagram.concepts]);
+
+  const startInlineRename = (ref: Idef0NodeRef) => {
+    const node = ref.kind === 'function' ? functionsById.get(ref.id) : conceptsById.get(ref.id);
+    setEditingNode(ref);
+    setEditingName(node?.name ?? '');
+  };
+
+  const commitInlineRename = () => {
+    if (!editingNode) return;
+    const nextName = editingName.trim();
+    if (nextName) canvas.renameNode(editingNode, nextName);
+    setEditingNode(null);
+    setEditingName('');
+  };
 
   const selectNode = (ref: Idef0NodeRef, additive = false) => {
     setSelectedArrowId(null);
@@ -130,16 +146,12 @@ export function Idef0Canvas({
 
   const openNodeContextMenu = (event: ReactMouseEvent, ref: Idef0NodeRef) => {
     selectNode(ref);
-    const node = ref.kind === 'function' ? functionsById.get(ref.id) : conceptsById.get(ref.id);
     contextMenu.openContextMenu(event, [
       {
         id: 'rename-node',
         label: 'Rename',
         icon: <FileText className="size-3.5" />,
-        onSelect: () => {
-          const nextName = window.prompt('Name', node?.name ?? '');
-          if (nextName) canvas.renameNode(ref, nextName);
-        },
+        onSelect: () => startInlineRename(ref),
       },
       {
         id: 'delete-node',
@@ -251,9 +263,11 @@ export function Idef0Canvas({
                   markerEnd={`url(#idef0-arrow-${arrow.role})`}
                   className="pointer-events-none"
                 />
-                <text x={path.labelX} y={path.labelY} className="pointer-events-none fill-slate-500 text-[10px] font-semibold">
-                  {arrow.label ?? getIdef0ArrowRoleLabel(arrow.role)}
-                </text>
+                {arrow.label ? (
+                  <text x={path.labelX} y={path.labelY} className="pointer-events-none fill-slate-500 text-[10px] font-semibold">
+                    {arrow.label}
+                  </text>
+                ) : null}
               </g>
             );
           })}
@@ -272,8 +286,15 @@ export function Idef0Canvas({
           <Idef0FunctionNode
             key={fn.id}
             fn={fn}
-            selected={canvas.selectedNodeIds.has(getIdef0NodeId({ kind: 'function', id: fn.id }))}
+            selected={canvas.selectedNodeIds.has(getIdef0NodeId({ kind: 'function', id: fn.id }))
+              || (selection?.sourceView === 'idef0' && selection.kind === 'idef0Function' && selection.id === fn.id)}
+            editing={editingNode?.kind === 'function' && editingNode.id === fn.id}
+            editingName={editingName}
+            onEditingNameChange={setEditingName}
+            onCommitEditing={commitInlineRename}
+            onCancelEditing={() => setEditingNode(null)}
             onSelect={(event) => selectNode({ kind: 'function', id: fn.id }, event.shiftKey)}
+            onStartRename={() => startInlineRename({ kind: 'function', id: fn.id })}
             onStartDrag={canvas.startNodeDrag}
             onStartConnection={canvas.startConnectionDrag}
             onContextMenu={(event) => openNodeContextMenu(event, { kind: 'function', id: fn.id })}
@@ -283,8 +304,15 @@ export function Idef0Canvas({
           <Idef0ConceptNode
             key={concept.id}
             concept={concept}
-            selected={canvas.selectedNodeIds.has(getIdef0NodeId({ kind: 'concept', id: concept.id }))}
+            selected={canvas.selectedNodeIds.has(getIdef0NodeId({ kind: 'concept', id: concept.id }))
+              || (selection?.sourceView === 'idef0' && selection.kind === 'idef0Concept' && selection.id === concept.id)}
+            editing={editingNode?.kind === 'concept' && editingNode.id === concept.id}
+            editingName={editingName}
+            onEditingNameChange={setEditingName}
+            onCommitEditing={commitInlineRename}
+            onCancelEditing={() => setEditingNode(null)}
             onSelect={(event) => selectNode({ kind: 'concept', id: concept.id }, event.shiftKey)}
+            onStartRename={() => startInlineRename({ kind: 'concept', id: concept.id })}
             onStartDrag={canvas.startNodeDrag}
             onStartConnection={canvas.startConnectionDrag}
             onContextMenu={(event) => openNodeContextMenu(event, { kind: 'concept', id: concept.id })}
@@ -319,14 +347,26 @@ export function Idef0Canvas({
 function Idef0FunctionNode({
   fn,
   selected,
+  editing,
+  editingName,
+  onEditingNameChange,
+  onCommitEditing,
+  onCancelEditing,
   onSelect,
+  onStartRename,
   onStartDrag,
   onStartConnection,
   onContextMenu,
 }: {
   fn: Idef0Function;
   selected: boolean;
+  editing: boolean;
+  editingName: string;
+  onEditingNameChange: (value: string) => void;
+  onCommitEditing: () => void;
+  onCancelEditing: () => void;
   onSelect: (event: ReactMouseEvent) => void;
+  onStartRename: () => void;
   onStartDrag: (ref: Idef0NodeRef, position: { x: number; y: number }, event: ReactPointerEvent<HTMLElement>) => void;
   onStartConnection: (from: Idef0NodeRef, event: ReactPointerEvent<HTMLElement>) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
@@ -339,6 +379,7 @@ function Idef0FunctionNode({
     <div
       data-idef0-node-kind="function"
       data-idef0-node-id={fn.id}
+      data-idef0-node-side="left"
       className={cn(
         'absolute rounded border bg-white shadow-sm transition-shadow',
         selected ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-300 hover:border-slate-400',
@@ -349,12 +390,26 @@ function Idef0FunctionNode({
         onSelect(event);
       }}
       onPointerDown={(event) => onStartDrag({ kind: 'function', id: fn.id }, fn.position, event)}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onStartRename();
+      }}
       onContextMenu={onContextMenu}
     >
       <div className="flex h-full flex-col overflow-hidden rounded">
         <div className="flex h-8 items-center gap-2 border-b border-slate-200 px-3" style={{ backgroundColor: accent }}>
           <Workflow className="size-3.5 shrink-0 text-white/90" />
-          <div className="min-w-0 flex-1 truncate text-xs font-semibold text-white">{fn.name}</div>
+          {editing ? (
+            <InlineNameInput
+              value={editingName}
+              dark
+              onChange={onEditingNameChange}
+              onCommit={onCommitEditing}
+              onCancel={onCancelEditing}
+            />
+          ) : (
+            <div className="min-w-0 flex-1 truncate text-xs font-semibold text-white">{fn.name}</div>
+          )}
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-[11px] font-medium leading-4 text-slate-500">
           {fn.description || 'Function'}
@@ -404,14 +459,26 @@ function FunctionHandle({
 function Idef0ConceptNode({
   concept,
   selected,
+  editing,
+  editingName,
+  onEditingNameChange,
+  onCommitEditing,
+  onCancelEditing,
   onSelect,
+  onStartRename,
   onStartDrag,
   onStartConnection,
   onContextMenu,
 }: {
   concept: Idef0Concept;
   selected: boolean;
+  editing: boolean;
+  editingName: string;
+  onEditingNameChange: (value: string) => void;
+  onCommitEditing: () => void;
+  onCancelEditing: () => void;
   onSelect: (event: ReactMouseEvent) => void;
+  onStartRename: () => void;
   onStartDrag: (ref: Idef0NodeRef, position: { x: number; y: number }, event: ReactPointerEvent<HTMLElement>) => void;
   onStartConnection: (from: Idef0NodeRef, event: ReactPointerEvent<HTMLElement>) => void;
   onContextMenu: (event: ReactMouseEvent) => void;
@@ -424,6 +491,7 @@ function Idef0ConceptNode({
     <div
       data-idef0-node-kind="concept"
       data-idef0-node-id={concept.id}
+      data-idef0-node-side="center"
       className={cn(
         'absolute rounded border bg-white shadow-sm transition-shadow',
         selected ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-300 hover:border-slate-400',
@@ -434,12 +502,27 @@ function Idef0ConceptNode({
         onSelect(event);
       }}
       onPointerDown={(event) => onStartDrag({ kind: 'concept', id: concept.id }, concept.position, event)}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onStartRename();
+      }}
       onContextMenu={onContextMenu}
     >
       <div className="flex h-full min-h-[58px] items-center gap-2 px-3">
-        <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} />
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-md text-white" style={{ backgroundColor: meta.color }}>
+          {getConceptIcon(concept.kind, 'size-3.5')}
+        </span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-semibold text-slate-800">{concept.name}</div>
+          {editing ? (
+            <InlineNameInput
+              value={editingName}
+              onChange={onEditingNameChange}
+              onCommit={onCommitEditing}
+              onCancel={onCancelEditing}
+            />
+          ) : (
+            <div className="truncate text-xs font-semibold text-slate-800">{concept.name}</div>
+          )}
           <div className="truncate text-[10px] font-medium text-slate-400">{meta.label}</div>
         </div>
       </div>
@@ -457,4 +540,55 @@ function Idef0ConceptNode({
       />
     </div>
   );
+}
+
+function InlineNameInput({
+  value,
+  dark = false,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  dark?: boolean;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <input
+      autoFocus
+      value={value}
+      className={cn(
+        'min-w-0 flex-1 rounded px-1.5 py-0.5 text-xs font-semibold outline-none',
+        dark ? 'bg-white/95 text-slate-900' : 'border border-blue-300 bg-white text-slate-900',
+      )}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={onCommit}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          onCommit();
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onCancel();
+        }
+      }}
+    />
+  );
+}
+
+function getConceptIcon(kind: Idef0ConceptKind, className = 'size-3.5') {
+  if (kind === 'dataset') return <Database className={className} />;
+  if (kind === 'artifact') return <FileText className={className} />;
+  if (kind === 'material_object') return <Box className={className} />;
+  if (kind === 'state') return <CircleDot className={className} />;
+  if (kind === 'event') return <Workflow className={className} />;
+  if (kind === 'rule') return <ShieldCheck className={className} />;
+  if (kind === 'actor') return <UserRound className={className} />;
+  return <Wrench className={className} />;
 }

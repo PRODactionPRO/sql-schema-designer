@@ -4,6 +4,7 @@ import { deepClone } from '@/shared/lib/json';
 import type {
   Idef0Arrow,
   Idef0ArrowRole,
+  Idef0Attribute,
   Idef0Concept,
   Idef0ConceptKind,
   Idef0DiagramModel,
@@ -51,9 +52,11 @@ function createFunction(position: { x: number; y: number }, functions: Idef0Func
   return {
     id: nextWorkspaceId('idef0_fn'),
     name: getUniqueName(functions, 'Function'),
+    description: '',
     status: 'draft',
     position,
     size: { width: 240, height: 128 },
+    attributes: createDefaultAttributes('function'),
   };
 }
 
@@ -63,16 +66,51 @@ function createConcept(kind: Idef0ConceptKind, position: { x: number; y: number 
     id: nextWorkspaceId('idef0_concept'),
     name: getUniqueName(concepts, baseName),
     kind,
+    description: '',
     status: kind === 'component' || kind === 'actor' ? 'external' : 'draft',
     position,
     size: { width: 190, height: 58 },
+    attributes: createDefaultAttributes(kind),
   };
+}
+
+function createDefaultAttributes(kind: Idef0ConceptKind | 'function'): Idef0Attribute[] {
+  const names: string[] = kind === 'function'
+    ? ['Owner', 'Trigger', 'Expected result']
+    : kind === 'dataset'
+      ? ['Source', 'Schema / shape', 'Freshness']
+      : kind === 'artifact'
+        ? ['Format', 'Storage location', 'Version']
+        : kind === 'material_object'
+          ? ['Identifier', 'Location', 'Quantity / state']
+          : kind === 'state'
+            ? ['Object', 'State value', 'Transition rule']
+            : kind === 'event'
+              ? ['Producer', 'Topic / channel', 'Payload']
+              : kind === 'rule'
+                ? ['Source', 'Priority', 'Validation logic']
+                : kind === 'actor'
+                  ? ['Role owner', 'Team', 'Authority']
+                  : ['System', 'Interface', 'Runtime'];
+
+  return names.map((name) => ({
+    id: nextWorkspaceId('idef0_attr'),
+    name,
+    value: '',
+    valueType: 'text' as const,
+  }));
 }
 
 function getRoleFromFunctionSide(side?: Idef0NodeRef['side']): Idef0ArrowRole {
   if (side === 'top') return 'control';
   if (side === 'right') return 'output';
   if (side === 'bottom') return 'mechanism';
+  return 'input';
+}
+
+function getRoleFromConceptKind(kind?: Idef0ConceptKind): Idef0ArrowRole {
+  if (kind === 'rule') return 'control';
+  if (kind === 'actor' || kind === 'component') return 'mechanism';
   return 'input';
 }
 
@@ -86,7 +124,7 @@ function inferArrow(from: Idef0NodeRef, to: Idef0NodeRef, diagram: Idef0DiagramM
   let conceptId: string | undefined;
 
   if (from.kind === 'function' && to.kind === 'concept') {
-    role = getRoleFromFunctionSide(from.side);
+    role = from.side ? getRoleFromFunctionSide(from.side) : 'output';
     if (role === 'output') {
       source = { kind: 'function', id: from.id };
       target = { kind: 'concept', id: to.id };
@@ -96,7 +134,8 @@ function inferArrow(from: Idef0NodeRef, to: Idef0NodeRef, diagram: Idef0DiagramM
     }
     conceptId = to.id;
   } else if (from.kind === 'concept' && to.kind === 'function') {
-    role = getRoleFromFunctionSide(to.side);
+    const sourceConcept = conceptsById.get(from.id);
+    role = to.side ? getRoleFromFunctionSide(to.side) : getRoleFromConceptKind(sourceConcept?.kind);
     if (role === 'output') {
       source = { kind: 'function', id: to.id };
       target = { kind: 'concept', id: from.id };
