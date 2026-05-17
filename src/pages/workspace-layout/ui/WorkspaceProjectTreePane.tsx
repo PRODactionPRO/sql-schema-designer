@@ -281,13 +281,12 @@ export function ProjectTreePane({
           depth={1}
           collapsed={collapsedSectionIds.has('processes')}
           onToggle={() => onToggleSectionCollapse('processes')}
+          actions={(
+            <TreeSectionActionButton label="Create process model" onClick={createProcessModel}>
+              <Plus className="size-3.5" />
+            </TreeSectionActionButton>
+          )}
         >
-          <TreeRow
-            depth={2}
-            icon={<Plus className="size-3.5" />}
-            label="Create process model"
-            onClick={createProcessModel}
-          />
           {processModels.map((document) => {
             const isEditing = editingProcessId === document.id;
             return (
@@ -460,6 +459,7 @@ function TreeSection({
   activeGuide = false,
   collapsed,
   onToggle,
+  actions,
   children,
 }: {
   title: string;
@@ -468,6 +468,7 @@ function TreeSection({
   activeGuide?: boolean;
   collapsed: boolean;
   onToggle: () => void;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const fontSize = getTreeFontSize(depth);
@@ -485,19 +486,24 @@ function TreeSection({
           style={{ left: guideLeft }}
         />
       ) : null}
-      <button
-        type="button"
+      <div
         className={cn(
-          'relative z-10 flex h-7 w-full items-center gap-2 rounded-md px-2 text-left font-semibold transition-colors hover:bg-white/70',
+          'relative z-10 flex h-7 w-full items-center gap-1 rounded-md px-2 transition-colors hover:bg-white/70',
           activeGuide ? 'text-slate-800' : 'text-slate-600',
         )}
         style={{ paddingLeft: 8 + depth * 14 }}
-        onClick={onToggle}
       >
-        <ChevronDown className={cn('size-3.5 transition-transform', activeGuide ? 'text-blue-500' : 'text-slate-400', collapsed && '-rotate-90')} />
-        <span className="text-slate-400">{icon}</span>
-        <span className="min-w-0 truncate" style={{ fontSize, lineHeight: '18px' }}>{title}</span>
-      </button>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left font-semibold"
+          onClick={onToggle}
+        >
+          <ChevronDown className={cn('size-3.5 shrink-0 transition-transform', activeGuide ? 'text-blue-500' : 'text-slate-400', collapsed && '-rotate-90')} />
+          <span className="shrink-0 text-slate-400">{icon}</span>
+          <span className="min-w-0 truncate" style={{ fontSize, lineHeight: '18px' }}>{title}</span>
+        </button>
+        {actions ? <div className="ml-auto flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+      </div>
       {collapsed ? null : children}
     </div>
   );
@@ -583,5 +589,30 @@ function TreeActionButton({
     >
       {children}
     </span>
+  );
+}
+
+function TreeSectionActionButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className="flex size-5 items-center justify-center rounded text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
   );
 }
