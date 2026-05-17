@@ -93,9 +93,12 @@ export const TableNode = memo(function TableNode({
   const headerHandledClick = useRef(false);
   const suppressNextClick = useRef(false);
   const positionRef = useRef(table.position);
+  const fieldNameInputRef = useRef<HTMLInputElement>(null);
   positionRef.current = table.position;
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
   const [isFieldReorderPointerDown, setIsFieldReorderPointerDown] = useState(false);
+  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
+  const [fieldNameDraft, setFieldNameDraft] = useState('');
 
   const borderColor = tableColor;
   const availableTypes = enabledFieldTypes || ALL_FIELD_TYPES;
@@ -108,6 +111,12 @@ export const TableNode = memo(function TableNode({
     window.addEventListener('mouseup', handleMouseUp);
     return () => window.removeEventListener('mouseup', handleMouseUp);
   }, []);
+
+  useEffect(() => {
+    if (!editingFieldId) return;
+    fieldNameInputRef.current?.focus();
+    fieldNameInputRef.current?.select();
+  }, [editingFieldId]);
 
   const enumDnD = useReorderableDragList({
     itemIds: table.fields.map((f) => f.id),
@@ -149,7 +158,7 @@ export const TableNode = memo(function TableNode({
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       const target = e.target as HTMLElement;
-      const isBlockedTarget = Boolean(target.closest('button, input, textarea, select, [role="button"], [data-no-table-drag], [data-field-reorder-handle], [data-relation-handle]'));
+      const isBlockedTarget = Boolean(target.closest('button, input, textarea, select, [role="button"], [data-no-table-drag], [data-field-reorder-handle], [data-relation-handle], [data-field-name-text]'));
       if (!isBlockedTarget && target.closest('[data-table-drag-surface]')) {
         if (isMultiSelected && onGroupDragStart) {
           onGroupDragStart(table.id, e as any);
@@ -218,6 +227,71 @@ export const TableNode = memo(function TableNode({
     } else if (onFieldTypeChange) {
       onFieldTypeChange(fieldId, type as FieldType);
     }
+  };
+
+  const startFieldNameEdit = (e: React.MouseEvent, field: Field) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setEditingFieldId(field.id);
+    setFieldNameDraft(field.name);
+  };
+
+  const commitFieldNameEdit = () => {
+    if (!editingFieldId) return;
+    const field = table.fields.find((item) => item.id === editingFieldId);
+    const nextName = fieldNameDraft.trim();
+    if (field && nextName && nextName !== field.name) {
+      onUpdateField?.(editingFieldId, { name: nextName });
+    }
+    setEditingFieldId(null);
+    setFieldNameDraft('');
+  };
+
+  const cancelFieldNameEdit = () => {
+    setEditingFieldId(null);
+    setFieldNameDraft('');
+  };
+
+  const renderFieldName = (field: Field) => {
+    if (editingFieldId === field.id) {
+      return (
+        <input
+          ref={fieldNameInputRef}
+          className="min-w-0 flex-1 rounded border border-blue-300 bg-white px-1 py-0.5 text-sm text-gray-900 shadow-sm outline-none ring-2 ring-blue-100"
+          data-no-table-drag
+          value={fieldNameDraft}
+          onChange={(event) => setFieldNameDraft(event.target.value)}
+          onBlur={commitFieldNameEdit}
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitFieldNameEdit();
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              cancelFieldNameEdit();
+            }
+          }}
+        />
+      );
+    }
+
+    return (
+      <span
+        data-field-name-text
+        className={`min-w-0 flex-1 truncate text-sm ${field.isForeignKey ? 'text-blue-600' : ''}`}
+        style={{ opacity: textOpacity }}
+        onClick={(event) => {
+          if (event.detail === 2) startFieldNameEdit(event, field);
+        }}
+        onDoubleClick={(event) => startFieldNameEdit(event, field)}
+      >
+        {field.name}
+      </span>
+    );
   };
 
   const handleFieldDragStart = (e: React.MouseEvent, field: Field) => {
@@ -371,11 +445,19 @@ export const TableNode = memo(function TableNode({
               className="px-3 py-2 flex items-center"
               data-field-id={field.id}
               data-table-id={table.id}
+              onClickCapture={(e) => {
+                const target = e.target as HTMLElement;
+                if (e.detail === 2 && target.closest('[data-field-name-text]')) startFieldNameEdit(e, field);
+              }}
+              onDoubleClickCapture={(e) => {
+                const target = e.target as HTMLElement;
+                if (target.closest('[data-field-name-text]')) startFieldNameEdit(e, field);
+              }}
             >
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 {field.isPrimaryKey && <Key className="size-3 text-yellow-500 flex-shrink-0" />}
                 {field.isForeignKey && !field.isPrimaryKey && <Key className="size-3 text-blue-400 flex-shrink-0" style={{ transform: 'rotate(45deg)' }} />}
-                <span className={`text-sm truncate ${field.isForeignKey ? 'text-blue-600' : ''}`} style={{ opacity: textOpacity }}>{field.name}</span>
+                {renderFieldName(field)}
               </div>
                 <span className="text-xs text-gray-400 flex-shrink-0">{getFieldTypeLabel(field)}</span>
             </div>
@@ -540,6 +622,14 @@ export const TableNode = memo(function TableNode({
               data-field-id={field.id}
               data-table-id={table.id}
               title={dragState?.reason}
+              onClickCapture={(e) => {
+                const target = e.target as HTMLElement;
+                if (e.detail === 2 && target.closest('[data-field-name-text]')) startFieldNameEdit(e, field);
+              }}
+              onDoubleClickCapture={(e) => {
+                const target = e.target as HTMLElement;
+                if (target.closest('[data-field-name-text]')) startFieldNameEdit(e, field);
+              }}
               onMouseEnter={() => setHoveredFieldId(field.id)}
               onMouseLeave={() => setHoveredFieldId(null)}
               onDragOver={isEnumTable ? (e) => enumDnD.handleDragOver({ index: fieldIndex, itemId: field.id, event: e }) : undefined}
@@ -604,7 +694,7 @@ export const TableNode = memo(function TableNode({
                 })()}
                 {field.isPrimaryKey && <Key className="size-3 text-yellow-500 flex-shrink-0" />}
                 {field.isForeignKey && !field.isPrimaryKey && <Key className="size-3 text-blue-400 flex-shrink-0" style={{ transform: 'rotate(45deg)' }} />}
-                <span className={`text-sm truncate ${field.isForeignKey ? 'text-blue-600' : ''}`} style={{ opacity: textOpacity }}>{field.name}</span>
+                {renderFieldName(field)}
               </div>
               <div className="flex items-center gap-0.5 ml-1" style={{ minWidth: isEnumTable ? 28 : 68 }}>
                 {/* Always render 3 button slots to prevent width changes */}
