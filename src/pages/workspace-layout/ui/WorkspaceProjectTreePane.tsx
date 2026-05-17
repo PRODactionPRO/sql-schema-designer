@@ -36,6 +36,7 @@ export function ProjectTreePane({
   const diagrams = project.documents.filter((document) => (
     document.type === 'erd'
     || document.type === 'class-diagram'
+    || document.type === 'idef0'
     || document.type === 'bpmn'
     || document.type === 'openapi'
     || document.type === 'sequence'
@@ -254,6 +255,7 @@ function TreeBranch({
 function getDiagramIcon(type: ProjectDocument['type']) {
   if (type === 'erd') return <Database className="size-3.5" />;
   if (type === 'class-diagram') return <GitBranch className="size-3.5" />;
+  if (type === 'idef0') return <Workflow className="size-3.5" />;
   if (type === 'bpmn') return <Workflow className="size-3.5" />;
   if (type === 'openapi') return <FileJson className="size-3.5" />;
   if (type === 'sequence') return <PencilRuler className="size-3.5" />;

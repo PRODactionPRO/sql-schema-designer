@@ -3,10 +3,13 @@
 
 import type { Table, Relation, Domain, EnumType, JsonSchemaDocument, ProjectSettings } from './schema';
 import { DEFAULT_PROJECT_SETTINGS } from './schema';
+import type { Idef0DiagramModel } from './idef0';
+import { createEmptyIdef0Diagram } from './idef0';
 
 export type ProjectDocumentType =
   | 'erd'
   | 'class-diagram'
+  | 'idef0'
   | 'bpmn'
   | 'openapi'
   | 'sequence';
@@ -127,6 +130,11 @@ export interface ClassDiagramProjectDocument extends ProjectDocumentBase {
   classDiagram: ClassDiagramModel;
 }
 
+export interface Idef0ProjectDocument extends ProjectDocumentBase {
+  type: 'idef0';
+  idef0: Idef0DiagramModel;
+}
+
 export interface PlaceholderProjectDocument extends ProjectDocumentBase {
   type: 'bpmn' | 'openapi' | 'sequence';
 }
@@ -134,6 +142,7 @@ export interface PlaceholderProjectDocument extends ProjectDocumentBase {
 export type ProjectDocument =
   | ErdProjectDocument
   | ClassDiagramProjectDocument
+  | Idef0ProjectDocument
   | PlaceholderProjectDocument;
 
 /**
@@ -234,12 +243,29 @@ export function createClassDiagramProjectDocument(name = 'Class Diagram', domain
   };
 }
 
+export function createIdef0ProjectDocument(name = 'IDEF0 Functional Model', domains: Domain[] = []): Idef0ProjectDocument {
+  const now = new Date().toISOString();
+  return {
+    id: nextProjectObjectId('doc_idef0'),
+    name,
+    type: 'idef0',
+    createdAt: now,
+    updatedAt: now,
+    idef0: {
+      ...createEmptyIdef0Diagram(),
+      domains,
+    },
+  };
+}
+
 export function getDocumentBadge(type: ProjectDocumentType): string {
   switch (type) {
     case 'erd':
       return 'ERD';
     case 'class-diagram':
       return 'CLASS';
+    case 'idef0':
+      return 'IDEF0';
     case 'bpmn':
       return 'BPMN';
     case 'openapi':
@@ -257,6 +283,8 @@ export function getDocumentTypeLabel(type: ProjectDocumentType): string {
       return 'ERD diagram';
     case 'class-diagram':
       return 'Class diagram';
+    case 'idef0':
+      return 'IDEF0 functional model';
     case 'bpmn':
       return 'BPMN process';
     case 'openapi':

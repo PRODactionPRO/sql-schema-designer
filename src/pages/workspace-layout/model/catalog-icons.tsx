@@ -31,6 +31,7 @@ export const CATALOG_ICON_BY_TYPE: Record<TabType, ReactNode> = {
   schemas: <Braces className="size-3.5" />,
   erDiagram: <Network className="size-3.5" />,
   classDiagram: <Blocks className="size-3.5" />,
+  idef0: <Workflow className="size-3.5" />,
   dependencyGraph: <Network className="size-3.5" />,
   lifecycle: <Workflow className="size-3.5" />,
   impact: <GitCompare className="size-3.5" />,

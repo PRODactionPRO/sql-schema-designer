@@ -8,6 +8,9 @@ function getDocumentPayload(document: ProjectDocument): Record<string, unknown> 
   if (document.type === 'class-diagram') {
     return document.classDiagram as unknown as Record<string, unknown>;
   }
+  if (document.type === 'idef0') {
+    return document.idef0 as unknown as Record<string, unknown>;
+  }
   return {};
 }
 

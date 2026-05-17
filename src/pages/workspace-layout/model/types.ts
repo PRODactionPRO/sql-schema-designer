@@ -9,6 +9,7 @@ export type TabType =
   | 'schemas'
   | 'erDiagram'
   | 'classDiagram'
+  | 'idef0'
   | 'dependencyGraph'
   | 'lifecycle'
   | 'impact'
@@ -92,7 +93,7 @@ export interface TabLocation {
 
 export type WorkspacePanelGroupId = 'root' | 'left' | 'center';
 
-export type WorkspaceCanvasViewportId = 'erDiagram' | 'classDiagram';
+export type WorkspaceCanvasViewportId = 'erDiagram' | 'classDiagram' | 'idef0';
 
 export interface WorkspaceCanvasViewport {
   pan: {

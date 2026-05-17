@@ -38,6 +38,23 @@ import {
   type ProjectDocumentType,
   type ProjectSchemaModel,
 } from '@/shared/types/project';
+import {
+  IDEF0_ARROW_ROLES,
+  IDEF0_ARROW_STATUSES,
+  IDEF0_CONCEPT_KINDS,
+  IDEF0_CONCEPT_STATUSES,
+  IDEF0_FUNCTION_STATUSES,
+  type Idef0Arrow,
+  type Idef0ArrowEndpoint,
+  type Idef0ArrowRole,
+  type Idef0ArrowStatus,
+  type Idef0Concept,
+  type Idef0ConceptKind,
+  type Idef0ConceptStatus,
+  type Idef0DiagramModel,
+  type Idef0Function,
+  type Idef0FunctionStatus,
+} from '@/shared/types/idef0';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -849,9 +866,122 @@ export function normalizeClassDiagram(input: unknown, projectDomains?: Domain[])
   };
 }
 
+function normalizeIdef0FunctionStatus(value: unknown): Idef0FunctionStatus {
+  return IDEF0_FUNCTION_STATUSES.includes(value as Idef0FunctionStatus) ? value as Idef0FunctionStatus : 'draft';
+}
+
+function normalizeIdef0ConceptKind(value: unknown): Idef0ConceptKind {
+  return IDEF0_CONCEPT_KINDS.includes(value as Idef0ConceptKind) ? value as Idef0ConceptKind : 'information_object';
+}
+
+function normalizeIdef0ConceptStatus(value: unknown): Idef0ConceptStatus {
+  return IDEF0_CONCEPT_STATUSES.includes(value as Idef0ConceptStatus) ? value as Idef0ConceptStatus : 'draft';
+}
+
+function normalizeIdef0ArrowRole(value: unknown): Idef0ArrowRole {
+  return IDEF0_ARROW_ROLES.includes(value as Idef0ArrowRole) ? value as Idef0ArrowRole : 'input';
+}
+
+function normalizeIdef0ArrowStatus(value: unknown): Idef0ArrowStatus {
+  return IDEF0_ARROW_STATUSES.includes(value as Idef0ArrowStatus) ? value as Idef0ArrowStatus : 'required';
+}
+
+function normalizeIdef0Endpoint(value: unknown): Idef0ArrowEndpoint {
+  const record = isRecord(value) ? value : {};
+  const kind = record.kind === 'function' || record.kind === 'concept' || record.kind === 'boundary'
+    ? record.kind
+    : 'boundary';
+  return {
+    kind,
+    id: asString(record.id) || undefined,
+  };
+}
+
+function normalizeIdef0Function(value: unknown, index: number): Idef0Function {
+  const record = isRecord(value) ? value : {};
+  const size = isRecord(record.size) ? record.size : {};
+  return {
+    id: asString(record.id, `idef0_function_${index}`),
+    name: asString(record.name, `Function ${index + 1}`),
+    description: asString(record.description) || undefined,
+    status: normalizeIdef0FunctionStatus(record.status),
+    position: asPosition(record.position, { x: 160 + index * 56, y: 140 + index * 40 }),
+    size: {
+      width: asNumber(size.width, 220),
+      height: asNumber(size.height, 120),
+    },
+    domainId: asString(record.domainId) || undefined,
+    parentFunctionId: asString(record.parentFunctionId) || undefined,
+    decompositionDiagramId: asString(record.decompositionDiagramId) || undefined,
+    ownerId: asString(record.ownerId) || undefined,
+    sidebarOrder: typeof record.sidebarOrder === 'number' ? record.sidebarOrder : undefined,
+  };
+}
+
+function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `idef0_concept_${index}`),
+    name: asString(record.name, `Concept ${index + 1}`),
+    kind: normalizeIdef0ConceptKind(record.kind),
+    description: asString(record.description) || undefined,
+    status: normalizeIdef0ConceptStatus(record.status),
+    domainId: asString(record.domainId) || undefined,
+    ownerId: asString(record.ownerId) || undefined,
+    linkedObjectId: asString(record.linkedObjectId) || undefined,
+    metadata: isRecord(record.metadata) ? record.metadata : undefined,
+  };
+}
+
+function normalizeIdef0Arrow(value: unknown, index: number): Idef0Arrow {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `idef0_arrow_${index}`),
+    role: normalizeIdef0ArrowRole(record.role),
+    source: normalizeIdef0Endpoint(record.source),
+    target: normalizeIdef0Endpoint(record.target),
+    conceptId: asString(record.conceptId) || undefined,
+    label: asString(record.label) || undefined,
+    description: asString(record.description) || undefined,
+    status: normalizeIdef0ArrowStatus(record.status),
+    condition: asString(record.condition) || undefined,
+  };
+}
+
+export function normalizeIdef0Diagram(input: unknown, projectDomains?: Domain[]): Idef0DiagramModel {
+  const record = isRecord(input) ? input : {};
+  const domains = projectDomains ?? normalizeDomainList(record.domains);
+  const domainIds = new Set(domains.map((domain) => domain.id));
+  const functions = uniqueById((Array.isArray(record.functions) ? record.functions : []).map(normalizeIdef0Function))
+    .map((fn) => ({
+      ...fn,
+      domainId: fn.domainId && domainIds.has(fn.domainId) ? fn.domainId : undefined,
+    }));
+  const concepts = uniqueById((Array.isArray(record.concepts) ? record.concepts : []).map(normalizeIdef0Concept))
+    .map((concept) => ({
+      ...concept,
+      domainId: concept.domainId && domainIds.has(concept.domainId) ? concept.domainId : undefined,
+    }));
+  const functionIds = new Set(functions.map((fn) => fn.id));
+  const conceptIds = new Set(concepts.map((concept) => concept.id));
+  const endpointExists = (endpoint: Idef0ArrowEndpoint) => (
+    endpoint.kind === 'boundary'
+    || (endpoint.kind === 'function' && endpoint.id && functionIds.has(endpoint.id))
+    || (endpoint.kind === 'concept' && endpoint.id && conceptIds.has(endpoint.id))
+  );
+
+  return {
+    functions,
+    concepts,
+    arrows: uniqueById((Array.isArray(record.arrows) ? record.arrows : []).map(normalizeIdef0Arrow))
+      .filter((arrow) => endpointExists(arrow.source) && endpointExists(arrow.target)),
+    domains,
+  };
+}
+
 function normalizeDocumentType(value: unknown): ProjectDocumentType | null {
   const type = asString(value);
-  if (type === 'erd' || type === 'class-diagram' || type === 'bpmn' || type === 'openapi' || type === 'sequence') {
+  if (type === 'erd' || type === 'class-diagram' || type === 'idef0' || type === 'bpmn' || type === 'openapi' || type === 'sequence') {
     return type;
   }
   return null;
@@ -865,7 +995,7 @@ function normalizeProjectDocument(value: unknown, index: number, fallbackSchema:
   const createdAt = asString(record.createdAt, new Date().toISOString());
   const base = {
     id: asString(record.id, `document_${index}`),
-    name: asString(record.name, type === 'class-diagram' ? 'Class Diagram' : type === 'erd' ? 'ERD Diagram' : 'Document'),
+    name: asString(record.name, type === 'class-diagram' ? 'Class Diagram' : type === 'idef0' ? 'IDEF0 Functional Model' : type === 'erd' ? 'ERD Diagram' : 'Document'),
     description: asString(record.description) || undefined,
     createdAt,
     updatedAt: asString(record.updatedAt, createdAt),
@@ -885,6 +1015,14 @@ function normalizeProjectDocument(value: unknown, index: number, fallbackSchema:
       ...base,
       type,
       classDiagram: normalizeClassDiagram(record.classDiagram, projectDomains),
+    };
+  }
+
+  if (type === 'idef0') {
+    return {
+      ...base,
+      type,
+      idef0: normalizeIdef0Diagram(record.idef0 ?? record.payload, projectDomains),
     };
   }
 
