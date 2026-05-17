@@ -121,6 +121,24 @@ export function ProjectTreePane({
     onOpenDocument(processDocument.id, { type: 'idef0', title: processDocument.name });
   };
 
+  const createTable = () => {
+    const name = getUniqueName(project.schema.tables.map((item) => item.name), 'Table');
+    const table = {
+      id: nextWorkspaceId('table'),
+      name,
+      fields: [],
+      position: { x: 160 + project.schema.tables.length * 28, y: 140 + project.schema.tables.length * 28 },
+      color: '#64748b',
+      sidebarOrder: project.schema.tables.length,
+    };
+
+    commitProjectSchema({
+      ...project.schema,
+      tables: [...project.schema.tables, table],
+    });
+    onSelectionChange({ kind: 'table', id: table.id, sourceView: 'model' });
+  };
+
   const createEnum = () => {
     const name = getUniqueName(project.schema.enums.map((item) => item.name), 'NewEnum');
     const enumType = {
@@ -236,6 +254,11 @@ export function ProjectTreePane({
           depth={1}
           collapsed={collapsedSectionIds.has('tables')}
           onToggle={() => onToggleSectionCollapse('tables')}
+          actions={(
+            <TreeSectionActionButton label="Create table" onClick={createTable}>
+              <Plus className="size-3.5" />
+            </TreeSectionActionButton>
+          )}
         >
           {project.schema.tables.map((table) => {
             const tableActive = selection?.kind === 'table'

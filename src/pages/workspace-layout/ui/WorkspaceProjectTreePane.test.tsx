@@ -126,4 +126,44 @@ describe('ProjectTreePane', () => {
       sourceView: 'model',
     });
   });
+
+  it('creates a table from the Tables header action', () => {
+    const project = createEmptyProject('Product Analytics Demo');
+    const onProjectChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onCloseDocument = vi.fn();
+    const onOpenDocument = vi.fn();
+
+    render(
+      <ProjectTreePane
+        project={project}
+        selection={null}
+        collapsedSectionIds={new Set()}
+        collapsedTableIds={new Set()}
+        onToggleSectionCollapse={vi.fn()}
+        onToggleTableCollapse={vi.fn()}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onCloseDocument={onCloseDocument}
+        onOpenDocument={onOpenDocument}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create table' }).at(-1)!);
+
+    expect(onProjectChange).toHaveBeenCalledTimes(1);
+    const nextProject = onProjectChange.mock.calls[0][0];
+    expect(nextProject.schema.tables).toHaveLength(1);
+    expect(nextProject.schema.tables[0]).toMatchObject({
+      name: 'Table',
+      fields: [],
+      color: '#64748b',
+      sidebarOrder: 0,
+    });
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      kind: 'table',
+      id: nextProject.schema.tables[0].id,
+      sourceView: 'model',
+    });
+  });
 });
