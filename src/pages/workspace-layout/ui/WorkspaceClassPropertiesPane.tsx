@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react';
 import type {
   ClassEntity,
   ClassEntityKind,
+  ClassAttributeValueType,
 } from '@/shared/types/project';
 import type { Domain, Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from '../model/types';
@@ -61,6 +62,7 @@ export function ClassModelPropertiesPane({
           id: nextWorkspaceId('class_attr'),
           name: isEnum ? `Value${entity.attributes.length + 1}` : `attribute_${entity.attributes.length + 1}`,
           type: isEnum ? entity.name : 'string',
+          valueType: (isEnum ? 'enum' : 'string') as ClassAttributeValueType,
           visibility: 'public',
           multiplicity: 'one',
           required: true,

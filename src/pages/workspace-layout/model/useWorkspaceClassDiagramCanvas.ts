@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { deepClone } from '@/shared/lib/json';
 import type {
+  ClassAttribute,
+  ClassAttributeValueType,
   ClassDiagramModel,
   ClassEntity,
   ClassEntityKind,
@@ -29,6 +31,7 @@ import { nextWorkspaceId } from './workspace-project-utils';
 const MAX_HISTORY_LENGTH = 50;
 const WORKSPACE_CLASS_CLIPBOARD_TYPE = 'application/x-prodsql-class-diagram-selection';
 const WORKSPACE_CLASS_CLIPBOARD_VERSION = 1;
+const CLASS_ATTRIBUTE_LEGACY_PREFIX = 'class_attr';
 
 interface ClassDiagramClipboardPayload {
   type: typeof WORKSPACE_CLASS_CLIPBOARD_TYPE;
@@ -85,6 +88,7 @@ function createClassEntity(kind: ClassEntityKind, name: string, position: { x: n
         id: nextWorkspaceId('class_attr'),
         name: kind === 'enum' ? 'Value1' : 'id',
         type: kind === 'enum' ? name : 'string',
+        valueType: (kind === 'enum' ? 'enum' : 'string') as ClassAttributeValueType,
         visibility: 'public' as const,
         multiplicity: 'one' as const,
         required: true,
@@ -109,6 +113,26 @@ function createClassEntity(kind: ClassEntityKind, name: string, position: { x: n
   };
 }
 
+function classAttributeLegacyId(classId: string, attributeId: string): string {
+  return `${CLASS_ATTRIBUTE_LEGACY_PREFIX}::${classId}::${attributeId}`;
+}
+
+function isClassAttributeLegacyIdForClass(legacyId: string, classId: string): boolean {
+  return legacyId.startsWith(`${CLASS_ATTRIBUTE_LEGACY_PREFIX}::${classId}::`);
+}
+
+function semanticAttributeMetadata(entity: ClassEntity, attribute: ClassAttribute) {
+  return {
+    ...attribute,
+    id: classAttributeLegacyId(entity.id, attribute.id),
+    attributeId: attribute.id,
+    classId: entity.id,
+    className: entity.name,
+    kind: entity.kind ?? 'class',
+    domainId: entity.domainId,
+  };
+}
+
 export function useWorkspaceClassDiagramCanvas(
   sourceDiagram: ClassDiagramModel,
   options: UseWorkspaceClassDiagramCanvasOptions = {},
@@ -127,7 +151,9 @@ export function useWorkspaceClassDiagramCanvas(
   const diagramRef = useRef(diagram);
   const classPositionsRef = useRef(createClassPositionMap(diagram));
   const localObjectBindingsRef = useRef(new Map<string, ProjectSemanticObjectBinding>());
+  const localAttributeBindingsRef = useRef(new Map<string, ProjectSemanticObjectBinding>());
   const pendingObjectCreatesRef = useRef(new Map<string, Promise<ProjectSemanticObjectBinding | null>>());
+  const pendingAttributeCreatesRef = useRef(new Map<string, Promise<ProjectSemanticObjectBinding | null>>());
   const historyPastRef = useRef(historyPast);
   const historyFutureRef = useRef(historyFuture);
   const { projectId, semanticBinding, onCommit } = options;
@@ -140,7 +166,9 @@ export function useWorkspaceClassDiagramCanvas(
     historyPastRef.current = [];
     historyFutureRef.current = [];
     localObjectBindingsRef.current.clear();
+    localAttributeBindingsRef.current.clear();
     pendingObjectCreatesRef.current.clear();
+    pendingAttributeCreatesRef.current.clear();
     setDiagram(nextDiagram);
     setHistoryPast([]);
     setHistoryFuture([]);
@@ -177,6 +205,136 @@ export function useWorkspaceClassDiagramCanvas(
   const getClassObjectBinding = useCallback((classId: string) => (
     semanticBinding?.objectsByLegacyId[classId] ?? localObjectBindingsRef.current.get(classId)
   ), [semanticBinding]);
+
+  const getAttributeObjectBinding = useCallback((legacyId: string) => (
+    semanticBinding?.objectsByLegacyId[legacyId] ?? localAttributeBindingsRef.current.get(legacyId)
+  ), [semanticBinding]);
+
+  const deleteClassAttributeObjects = useCallback((classId: string) => {
+    if (!projectId) return;
+
+    const localLegacyIds = [...localAttributeBindingsRef.current.keys()]
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, classId));
+    const pendingLegacyIds = [...pendingAttributeCreatesRef.current.keys()]
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, classId));
+    const semanticLegacyIds = Object.keys(semanticBinding?.objectsByLegacyId ?? {})
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, classId));
+    const allLegacyIds = new Set([...localLegacyIds, ...pendingLegacyIds, ...semanticLegacyIds]);
+
+    allLegacyIds.forEach((legacyId) => {
+      const binding = getAttributeObjectBinding(legacyId);
+      if (!binding) {
+        const pending = pendingAttributeCreatesRef.current.get(legacyId);
+        if (pending) {
+          void pending.then((resolvedBinding) => {
+            if (!resolvedBinding) return;
+            deleteSemanticObjectProjection({
+              projectId,
+              semanticBinding,
+              binding: resolvedBinding,
+            });
+          });
+        }
+      } else {
+        deleteSemanticObjectProjection({
+          projectId,
+          semanticBinding,
+          binding,
+        });
+      }
+      localAttributeBindingsRef.current.delete(legacyId);
+      pendingAttributeCreatesRef.current.delete(legacyId);
+    });
+  }, [getAttributeObjectBinding, projectId, semanticBinding]);
+
+  const syncClassAttributeObjects = useCallback((entity: ClassEntity, classBinding?: ProjectSemanticObjectBinding) => {
+    if (!projectId) return;
+
+    const parentBinding = classBinding ?? getClassObjectBinding(entity.id);
+    if (!parentBinding) return;
+
+    const desired = new Map(entity.attributes.map((attribute) => [
+      classAttributeLegacyId(entity.id, attribute.id),
+      attribute,
+    ]));
+    const localLegacyIds = [...localAttributeBindingsRef.current.keys()]
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, entity.id));
+    const pendingLegacyIds = [...pendingAttributeCreatesRef.current.keys()]
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, entity.id));
+    const semanticLegacyIds = Object.keys(semanticBinding?.objectsByLegacyId ?? {})
+      .filter((legacyId) => isClassAttributeLegacyIdForClass(legacyId, entity.id));
+    const existingLegacyIds = new Set([...localLegacyIds, ...pendingLegacyIds, ...semanticLegacyIds]);
+
+    existingLegacyIds.forEach((legacyId) => {
+      if (desired.has(legacyId)) return;
+
+      const binding = getAttributeObjectBinding(legacyId);
+      if (!binding) {
+        const pending = pendingAttributeCreatesRef.current.get(legacyId);
+        if (pending) {
+          void pending.then((resolvedBinding) => {
+            if (!resolvedBinding) return;
+            deleteSemanticObjectProjection({
+              projectId,
+              semanticBinding,
+              binding: resolvedBinding,
+            });
+          });
+        }
+      } else {
+        deleteSemanticObjectProjection({
+          projectId,
+          semanticBinding,
+          binding,
+        });
+      }
+      localAttributeBindingsRef.current.delete(legacyId);
+      pendingAttributeCreatesRef.current.delete(legacyId);
+    });
+
+    desired.forEach((attribute, legacyId) => {
+      const metadata = semanticAttributeMetadata(entity, attribute);
+      const binding = getAttributeObjectBinding(legacyId);
+      if (binding) {
+        updateSemanticObjectProjection({
+          projectId,
+          binding,
+          name: attribute.name,
+          description: attribute.description,
+          domainId: entity.domainId,
+          parentId: parentBinding.objectId,
+          metadata,
+        });
+        return;
+      }
+
+      if (pendingAttributeCreatesRef.current.has(legacyId)) return;
+
+      const pending = createSemanticObjectProjection({
+        projectId,
+        type: 'class_attribute',
+        name: attribute.name,
+        description: attribute.description,
+        domainId: entity.domainId,
+        parentId: parentBinding.objectId,
+        metadata,
+      });
+      const tracked = pending
+        .then((createdBinding) => {
+          localAttributeBindingsRef.current.set(legacyId, createdBinding);
+          return createdBinding;
+        })
+        .catch((error) => {
+          console.error('[workspace] Failed to create class attribute object', error);
+          return null;
+        })
+        .finally(() => {
+          pendingAttributeCreatesRef.current.delete(legacyId);
+        });
+
+      pendingAttributeCreatesRef.current.set(legacyId, tracked);
+    });
+  }, [getAttributeObjectBinding, getClassObjectBinding, projectId, semanticBinding]);
 
   const updateClassPosition = useCallback((classId: string, position: { x: number; y: number }) => {
     classPositionsRef.current.set(classId, position);
@@ -228,7 +386,8 @@ export function useWorkspaceClassDiagramCanvas(
       domainId: entity.domainId,
       metadata,
     });
-  }, [getClassObjectBinding, projectId]);
+    syncClassAttributeObjects(entity, objectBinding);
+  }, [getClassObjectBinding, projectId, syncClassAttributeObjects]);
 
   const createClassObject = useCallback((entity: ClassEntity) => {
     if (!projectId) return;
@@ -247,6 +406,7 @@ export function useWorkspaceClassDiagramCanvas(
     const tracked = pending
       .then((binding) => {
         localObjectBindingsRef.current.set(entity.id, binding);
+        syncClassAttributeObjects(entity, binding);
         return binding;
       })
       .catch((error) => {
@@ -258,10 +418,11 @@ export function useWorkspaceClassDiagramCanvas(
       });
 
     pendingObjectCreatesRef.current.set(entity.id, tracked);
-  }, [projectId, semanticBinding]);
+  }, [projectId, semanticBinding, syncClassAttributeObjects]);
 
   const deleteClassObject = useCallback((classId: string) => {
     if (!projectId) return;
+    deleteClassAttributeObjects(classId);
 
     const deleteBinding = (binding: ProjectSemanticObjectBinding | null | undefined) => {
       if (!binding) return;
@@ -281,7 +442,7 @@ export function useWorkspaceClassDiagramCanvas(
 
     const pending = pendingObjectCreatesRef.current.get(classId);
     if (pending) void pending.then(deleteBinding);
-  }, [getClassObjectBinding, projectId, semanticBinding]);
+  }, [deleteClassAttributeObjects, getClassObjectBinding, projectId, semanticBinding]);
 
   const saveClassRelation = useCallback((relation: ClassRelation) => {
     if (!projectId) return;
@@ -480,6 +641,7 @@ export function useWorkspaceClassDiagramCanvas(
                   id: nextWorkspaceId('class_attr'),
                   name: item.kind === 'enum' ? `Value${item.attributes.length + 1}` : `attribute_${item.attributes.length + 1}`,
                   type: item.kind === 'enum' ? item.name : 'string',
+                  valueType: (item.kind === 'enum' ? 'enum' : 'string') as ClassAttributeValueType,
                   visibility: 'public' as const,
                   multiplicity: 'one' as const,
                   required: true,
