@@ -45,4 +45,46 @@ describe('ProjectTreePane', () => {
       { type: 'idef0', title: nextProject.documents[0].name },
     );
   });
+
+  it('opens the diagrams menu and creates an ERD document from it', () => {
+    const project = createEmptyProject('Product Analytics Demo');
+    const onProjectChange = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onCloseDocument = vi.fn();
+    const onOpenDocument = vi.fn();
+
+    render(
+      <ProjectTreePane
+        project={project}
+        selection={null}
+        collapsedSectionIds={new Set()}
+        collapsedTableIds={new Set()}
+        onToggleSectionCollapse={vi.fn()}
+        onToggleTableCollapse={vi.fn()}
+        onProjectChange={onProjectChange}
+        onSelectionChange={onSelectionChange}
+        onCloseDocument={onCloseDocument}
+        onOpenDocument={onOpenDocument}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create diagram' }).at(-1)!);
+    expect(screen.getByRole('button', { name: 'ERD diagram' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'ERD diagram' }).at(-1)!);
+
+    expect(onProjectChange).toHaveBeenCalledTimes(1);
+    const nextProject = onProjectChange.mock.calls[0][0];
+    expect(nextProject.documents).toHaveLength(1);
+    expect(nextProject.documents[0].type).toBe('erd');
+    expect(onSelectionChange).toHaveBeenCalledWith({
+      kind: 'diagram',
+      id: nextProject.documents[0].id,
+      sourceView: 'diagrams',
+    });
+    expect(onOpenDocument).toHaveBeenCalledWith(
+      nextProject.documents[0].id,
+      { type: 'erDiagram', title: nextProject.documents[0].name },
+    );
+  });
 });
