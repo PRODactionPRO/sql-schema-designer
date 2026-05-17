@@ -11,6 +11,10 @@ function getFieldTypeLabel(field: Field): string {
   return field.enumName || 'enum';
 }
 
+const TABLE_NODE_WIDTH = 280;
+const TABLE_HEADER_HEIGHT = 40;
+const TABLE_FIELD_HEIGHT = 36;
+
 export interface DragFieldInfo {
   tableId: string;
   fieldId: string;
@@ -356,13 +360,13 @@ export const TableNode = memo(function TableNode({
 
   // --- Minimal LOD: compact table silhouette for zoomed-out navigation ---
   if (lodLevel === 'minimal') {
-    const totalH = 62;
+    const totalH = TABLE_HEADER_HEIGHT + (isCollapsed ? 0 : fieldCount * TABLE_FIELD_HEIGHT);
     return (
       <div
         ref={nodeRef}
         className="absolute overflow-hidden rounded-lg bg-white select-none"
         style={{
-          left: table.position.x, top: table.position.y, width: 280, height: totalH,
+          left: table.position.x, top: table.position.y, width: TABLE_NODE_WIDTH, height: totalH,
           willChange: 'transform',
           border: isMultiSelected || isSelected ? `3px solid ${borderColor}` : '1px solid rgba(148, 163, 184, 0.7)',
           boxShadow: isMultiSelected || isSelected
@@ -381,17 +385,13 @@ export const TableNode = memo(function TableNode({
         }}
       >
         <div
-          className="table-header flex h-6 cursor-move items-center px-3"
-          style={{ backgroundColor: headerBg }}
+          className="table-header flex cursor-move items-center px-3"
+          style={{ height: TABLE_HEADER_HEIGHT, backgroundColor: headerBg }}
           data-table-header={table.id}
         >
-          <span className="text-white truncate text-xs" style={{ fontWeight: 600 }}>{table.name}</span>
-          <span className="text-white/60 ml-auto text-[10px]">{fieldCount}</span>
+          <span className="truncate text-sm text-white" style={{ fontWeight: 600 }}>{table.name}</span>
         </div>
-        <div className="h-[38px] border-t border-slate-200 bg-white px-3 py-2">
-          <div className="mb-1.5 h-1.5 w-4/5 rounded-full bg-slate-200" />
-          <div className="h-1.5 w-3/5 rounded-full bg-slate-100" />
-        </div>
+        {!isCollapsed ? <div className="bg-white" style={{ height: totalH - TABLE_HEADER_HEIGHT }} /> : null}
       </div>
     );
   }

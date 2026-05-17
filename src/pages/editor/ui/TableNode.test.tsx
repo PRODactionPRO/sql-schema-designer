@@ -75,3 +75,44 @@ describe('TableNode field rename', () => {
     expect(onUpdateField).toHaveBeenCalledWith('field-created-at', { name: 'publishedAt' });
   });
 });
+
+describe('TableNode minimal LOD', () => {
+  it('keeps the full table footprint and domain-colored header while hiding field content', () => {
+    const tableWithFields: Table = {
+      ...table,
+      fields: [
+        ...table.fields,
+        {
+          id: 'field-title',
+          name: 'title',
+          type: 'varchar',
+          isPrimaryKey: false,
+          isNullable: false,
+          isForeignKey: false,
+        },
+        {
+          id: 'field-updated-at',
+          name: 'updatedAt',
+          type: 'timestamp',
+          isPrimaryKey: false,
+          isNullable: false,
+          isForeignKey: false,
+        },
+      ],
+    };
+
+    const { container } = renderTableNode({
+      table: tableWithFields,
+      lodLevel: 'minimal',
+    });
+    const node = container.querySelector('[data-table-id="table-1"]') as HTMLElement | null;
+    const header = container.querySelector('[data-table-header="table-1"]') as HTMLElement | null;
+
+    expect(node).toBeTruthy();
+    expect(header).toBeTruthy();
+    expect(node).toHaveStyle({ width: '280px', height: '148px' });
+    expect(header).toHaveStyle({ height: '40px', backgroundColor: '#ef4444' });
+    expect(container).toHaveTextContent('Brand');
+    expect(container).not.toHaveTextContent('createdAt');
+  });
+});
