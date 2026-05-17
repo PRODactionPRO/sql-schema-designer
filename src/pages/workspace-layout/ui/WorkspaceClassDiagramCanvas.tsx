@@ -9,6 +9,7 @@ import { useCanvasBoxSelection } from '@/shared/ui/useCanvasBoxSelection';
 import { useContextMenu } from '@/shared/ui/useContextMenu';
 import {
   CLASS_CANVAS_WORLD_SIZE,
+  classMethodReturnTypeOptions,
   getClassDiagramBounds,
   getClassEntityKindMeta,
   getClassRelationPath,
@@ -101,6 +102,7 @@ function ProjectClassDiagramCanvas({
   const selectedClassId = selection?.sourceView === 'classDiagram' ? selection.id : undefined;
   const domainColorById = useMemo(() => new Map(diagram.domains.map((domain) => [domain.id, domain.color])), [diagram.domains]);
   const classById = useMemo(() => new Map(diagram.classes.map((entity) => [entity.id, entity])), [diagram.classes]);
+  const methodReturnTypeOptions = useMemo(() => classMethodReturnTypeOptions(diagram.classes), [diagram.classes]);
   const bounds = getClassDiagramBounds(diagram.classes);
   const selectedRelationId = selection?.sourceView === 'classDiagram' && selection.kind === 'relation' ? selection.id : undefined;
   const contextMenu = useContextMenu();
@@ -337,6 +339,7 @@ function ProjectClassDiagramCanvas({
             accent={entity.color ?? (entity.domainId ? domainColorById.get(entity.domainId) : undefined) ?? getClassEntityKindMeta(entity.kind).color}
             selected={canvas.selectedClassIds.has(entity.id) || (selectedParentId ? selectedParentId === entity.id : selectedClassId === entity.id)}
             selectedMemberId={selectedParentId === entity.id ? selectedClassId : undefined}
+            methodReturnTypeOptions={methodReturnTypeOptions}
             onStartDrag={canvas.startClassDrag}
             onSelectEntity={(classId) => {
               canvas.clearClassSelection();

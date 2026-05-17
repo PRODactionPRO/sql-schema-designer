@@ -24,13 +24,13 @@ import {
 } from '../model/class-diagram-view-utils';
 
 const CLASS_ATTRIBUTE_TYPES = ['string', ...ALL_FIELD_TYPES] as const;
-const CLASS_METHOD_RETURN_TYPES = ['void', 'string', ...ALL_FIELD_TYPES] as const;
 
 export function ClassEntityCard({
   entity,
   accent,
   selected,
   selectedMemberId,
+  methodReturnTypeOptions,
   onStartDrag,
   onSelectEntity,
   onSelectAttribute,
@@ -49,6 +49,7 @@ export function ClassEntityCard({
   accent: string;
   selected?: boolean;
   selectedMemberId?: string;
+  methodReturnTypeOptions: readonly string[];
   onStartDrag: (classId: string, position: { x: number; y: number }, event: ReactPointerEvent<HTMLElement>) => void;
   onSelectEntity: (classId: string) => void;
   onSelectAttribute: (classId: string, attributeId: string) => void;
@@ -140,7 +141,7 @@ export function ClassEntityCard({
           selectedRowId={selectedMemberId}
           title={classEntityMethodSectionLabel(entity.kind)}
           onRowSelect={(methodId) => onSelectMethod(entity.id, methodId)}
-          typeOptions={CLASS_METHOD_RETURN_TYPES}
+          typeOptions={methodReturnTypeOptions}
           onRowContextMenu={(event, methodId) => onMethodContextMenu(event, entity.id, methodId)}
           onNameChange={(methodId, name) => onMethodNameChange(entity.id, methodId, name)}
           onTypeChange={(methodId, type) => onMethodReturnTypeChange(entity.id, methodId, type)}

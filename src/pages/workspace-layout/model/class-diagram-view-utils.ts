@@ -14,6 +14,22 @@ export const CLASS_CANVAS_WORLD_SIZE = 20000;
 
 const CLASS_ENTITY_KIND_ORDER: ClassEntityKind[] = ['class', 'abstract-class', 'interface', 'enum', 'datatype'];
 
+export const UML_METHOD_RETURN_TYPES = [
+  'void',
+  'Boolean',
+  'Integer',
+  'Real',
+  'String',
+  'Date',
+  'DateTime',
+  'UUID',
+  'Object',
+  'List',
+  'Set',
+  'Map',
+  'Result',
+] as const;
+
 const CLASS_ENTITY_KIND_META: Record<ClassEntityKind, {
   label: string;
   shortLabel: string;
@@ -51,6 +67,15 @@ export function classEntityAttributeSectionLabel(kind: ClassEntity['kind']): str
 
 export function classEntityMethodSectionLabel(kind: ClassEntity['kind']): string {
   return normalizeClassEntityKindValue(kind) === 'interface' ? 'Operations' : 'Methods';
+}
+
+export function classMethodReturnTypeOptions(classes: ClassEntity[]): string[] {
+  const classifierTypes = classes
+    .map((entity) => entity.name.trim())
+    .filter(Boolean)
+    .flatMap((name) => [name, `List<${name}>`]);
+
+  return Array.from(new Set([...UML_METHOD_RETURN_TYPES, ...classifierTypes]));
 }
 
 export function visibilitySymbol(visibility: ClassMemberVisibility): string {

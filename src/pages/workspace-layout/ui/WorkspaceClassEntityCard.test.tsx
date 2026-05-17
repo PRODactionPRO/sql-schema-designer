@@ -36,6 +36,7 @@ function renderClassEntityCard(overrides: Partial<ComponentProps<typeof ClassEnt
     <ClassEntityCard
       entity={entity}
       accent="#ef4444"
+      methodReturnTypeOptions={['void', 'String', 'User', 'List<User>']}
       onStartDrag={vi.fn()}
       onSelectEntity={vi.fn()}
       onSelectAttribute={vi.fn()}
