@@ -50,6 +50,15 @@ export function useWorkspaceLayout(initialLayoutSnapshot?: WorkspaceLayoutSnapsh
     menus.closeAddMenu();
   };
 
+  const openDocumentTab = (
+    windowId: WorkspaceWindowId,
+    type: TabType,
+    documentId: string,
+    title: string,
+  ) => {
+    tabs.openDocumentTab(windowId, type, documentId, title);
+  };
+
   const updateCanvasViewport = (
     viewId: WorkspaceCanvasViewportId,
     viewport: WorkspaceCanvasViewport,
@@ -78,7 +87,9 @@ export function useWorkspaceLayout(initialLayoutSnapshot?: WorkspaceLayoutSnapsh
     heldTabId: tabDrag.heldTabId,
     activateTab,
     closeTab: tabs.closeTab,
+    closeDocumentTabs: tabs.closeDocumentTabs,
     addTab,
+    openDocumentTab,
     updateCanvasViewport,
     startTabPointerDrag: tabDrag.startTabPointerDrag,
     ...menus,

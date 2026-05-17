@@ -29,6 +29,8 @@ export function TabContent({
   viewportRestoreKey,
   onProjectChange,
   onSelectionChange,
+  onCloseDocument,
+  onOpenDocument,
   onCanvasViewportChange,
 }: {
   tab: WorkspaceTab;
@@ -41,12 +43,14 @@ export function TabContent({
   viewportRestoreKey: string | number;
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
+  onCloseDocument: (documentId: string) => void;
+  onOpenDocument: (documentId: string, fallback?: { type: WorkspaceTab['type']; title: string }) => void;
   onCanvasViewportChange: (viewId: WorkspaceCanvasViewportId, viewport: WorkspaceCanvasViewport) => void;
 }) {
   if (projectLoading) return <PaneMessage>Loading project workspace...</PaneMessage>;
   if (projectError) return <PaneMessage>{projectError}</PaneMessage>;
 
-  if (tab.type === 'file') return <ProjectTreePane project={project} selection={selection} onSelectionChange={onSelectionChange} />;
+  if (tab.type === 'file') return <ProjectTreePane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} onCloseDocument={onCloseDocument} onOpenDocument={onOpenDocument} />;
   if (tab.type === 'erDiagram') {
     return project ? (
       <ProjectErDiagramCanvas
@@ -72,6 +76,12 @@ export function TabContent({
       />
     );
   }
+  if (tab.type === 'idef0') {
+    const document = project?.documents.find((item): item is Extract<ProjectData['documents'][number], { type: 'idef0' }> => (
+      item.id === tab.documentId && item.type === 'idef0'
+    ));
+    return <Idef0Pane document={document} />;
+  }
   if (tab.type === 'aiAssistant') return <AiAssistantPane />;
   if (tab.type === 'codeMode') return <CodeModePane />;
   if (tab.type === 'tables') return <WorkspaceTablesPane project={project} selection={selection} onProjectChange={onProjectChange} onSelectionChange={onSelectionChange} />;
@@ -82,6 +92,41 @@ export function TabContent({
   if (tab.type === 'schemas') return <SemanticList type={tab.type} project={project} selection={selection} onSelectionChange={onSelectionChange} />;
 
   return <GenericPane tab={tab} windowId={windowId} />;
+}
+
+function Idef0Pane({ document }: { document?: Extract<ProjectData['documents'][number], { type: 'idef0' }> }) {
+  if (!document) return <PaneMessage>Select or create an IDEF0 model from the project tree.</PaneMessage>;
+
+  return (
+    <div className="flex h-full flex-col bg-[#f8fafc]">
+      <div className="border-b border-slate-200 bg-white px-5 py-4">
+        <div className="text-sm font-semibold text-slate-900">{document.name}</div>
+        <div className="mt-1 text-xs text-slate-500">IDEF0 functional model</div>
+      </div>
+      <div className="grid flex-1 place-items-center p-6">
+        <div className="w-full max-w-xl rounded-lg border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
+          <div className="font-medium text-slate-800">Canvas placeholder</div>
+          <div className="mt-2 text-xs leading-5">
+            The model contract is ready: functions, concepts, and ICOM arrows. The visual editor can now be built against this tab.
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded border border-slate-200 px-3 py-2">
+              <div className="text-slate-400">Functions</div>
+              <div className="mt-1 font-semibold text-slate-800">{document.idef0.functions.length}</div>
+            </div>
+            <div className="rounded border border-slate-200 px-3 py-2">
+              <div className="text-slate-400">Concepts</div>
+              <div className="mt-1 font-semibold text-slate-800">{document.idef0.concepts.length}</div>
+            </div>
+            <div className="rounded border border-slate-200 px-3 py-2">
+              <div className="text-slate-400">Arrows</div>
+              <div className="mt-1 font-semibold text-slate-800">{document.idef0.arrows.length}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PaneMessage({ children }: { children: React.ReactNode }) {

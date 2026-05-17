@@ -79,6 +79,57 @@ export function useWorkspaceTabs(initialWindows?: Record<WorkspaceWindowId, Work
     });
   };
 
+  const openDocumentTab = (windowId: WorkspaceWindowId, type: TabType, documentId: string, title: string) => {
+    commitWindows((current) => {
+      const target = current[windowId];
+      const existing = target.tabs.find((tab) => tab.documentId === documentId);
+      if (existing) {
+        return {
+          ...current,
+          [windowId]: {
+            ...target,
+            activeTabId: existing.id,
+          },
+        };
+      }
+
+      const nextTab = createTab(type, `${type}-${documentId}`, { documentId, title });
+
+      return {
+        ...current,
+        [windowId]: {
+          ...target,
+          tabs: [...target.tabs, nextTab],
+          activeTabId: nextTab.id,
+        },
+      };
+    });
+  };
+
+  const closeDocumentTabs = (documentId: string) => {
+    commitWindows((current) => {
+      let changed = false;
+      const nextWindows = { ...current };
+
+      for (const windowId of Object.keys(current) as WorkspaceWindowId[]) {
+        const source = current[windowId];
+        const removedIndex = source.tabs.findIndex((tab) => tab.documentId === documentId);
+        if (removedIndex < 0) continue;
+
+        changed = true;
+        const activeTabRemoved = source.tabs.some((tab) => tab.id === source.activeTabId && tab.documentId === documentId);
+        const nextTabs = source.tabs.filter((tab) => tab.documentId !== documentId);
+        nextWindows[windowId] = {
+          ...source,
+          tabs: nextTabs,
+          activeTabId: activeTabRemoved ? getNextActiveTabId(nextTabs, removedIndex) : source.activeTabId,
+        };
+      }
+
+      return changed ? nextWindows : current;
+    });
+  };
+
   const replaceWindows = (nextWindows: Record<WorkspaceWindowId, WorkspaceWindow>) => {
     commitWindows(cloneWorkspaceWindows(nextWindows));
   };
@@ -98,6 +149,8 @@ export function useWorkspaceTabs(initialWindows?: Record<WorkspaceWindowId, Work
     activateTab,
     closeTab,
     addTab,
+    openDocumentTab,
+    closeDocumentTabs,
     moveTab,
     replaceWindows,
   };

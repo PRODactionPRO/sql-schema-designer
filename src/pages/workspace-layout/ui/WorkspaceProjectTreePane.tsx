@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Box, ChevronDown, Database, FileJson, FileText, GitBranch, Layers3, PencilRuler, Table2, Workflow } from 'lucide-react';
-import type { ProjectData, ProjectDocument } from '@/shared/types/project';
+import { Box, ChevronDown, Database, FileJson, FileText, GitBranch, Layers3, Pencil, PencilRuler, Plus, Table2, Trash2, Workflow } from 'lucide-react';
+import { createIdef0ProjectDocument, type Idef0ProjectDocument, type ProjectData, type ProjectDocument } from '@/shared/types/project';
+import { ConfirmDialog } from '@/shared/ui/confirm-dialog';
 import { cn } from '@/shared/ui/utils';
-import type { WorkspaceSelection } from '../model/types';
+import type { WorkspaceSelection, WorkspaceTab } from '../model/types';
 import {
   getClassDiagramDocument,
   getProjectDomains,
@@ -13,13 +14,22 @@ import {
 export function ProjectTreePane({
   project,
   selection,
+  onProjectChange,
   onSelectionChange,
+  onCloseDocument,
+  onOpenDocument,
 }: {
   project?: ProjectData;
   selection: WorkspaceSelection | null;
+  onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
+  onCloseDocument: (documentId: string) => void;
+  onOpenDocument: (documentId: string, fallback?: { type: WorkspaceTab['type']; title: string }) => void;
 }) {
   const [collapsedTableIds, setCollapsedTableIds] = useState<Set<string>>(() => new Set());
+  const [editingProcessId, setEditingProcessId] = useState<string | null>(null);
+  const [editingProcessName, setEditingProcessName] = useState('');
+  const [processToDelete, setProcessToDelete] = useState<Idef0ProjectDocument | null>(null);
 
   if (!project) {
     return (
@@ -33,13 +43,78 @@ export function ProjectTreePane({
 
   const classDiagram = getClassDiagramDocument(project)?.classDiagram;
   const domains = getProjectDomains(project);
+  const processModels = project.documents.filter((document): document is Idef0ProjectDocument => document.type === 'idef0');
   const diagrams = project.documents.filter((document) => (
     document.type === 'erd'
     || document.type === 'class-diagram'
+    || document.type === 'idef0'
     || document.type === 'bpmn'
     || document.type === 'openapi'
     || document.type === 'sequence'
   ));
+
+  const commitProjectDocuments = (documents: ProjectDocument[]) => {
+    onProjectChange({
+      ...project,
+      documents,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  const createProcessModel = () => {
+    const count = processModels.length;
+    const name = count === 0 ? 'New process model' : `New process model ${count + 1}`;
+    const document = createIdef0ProjectDocument(name, domains);
+    const processDocument: Idef0ProjectDocument = {
+      ...document,
+      idef0: {
+        ...document.idef0,
+        id: document.id,
+        processModelId: document.id,
+        name: document.name,
+      },
+    };
+    commitProjectDocuments([...project.documents, processDocument]);
+    onSelectionChange({ kind: 'diagram', id: processDocument.id, sourceView: 'diagrams' });
+    onOpenDocument(processDocument.id, { type: 'idef0', title: processDocument.name });
+  };
+
+  const startRenameProcess = (document: Idef0ProjectDocument) => {
+    setEditingProcessId(document.id);
+    setEditingProcessName(document.name);
+  };
+
+  const commitRenameProcess = () => {
+    if (!editingProcessId) return;
+    const nextName = editingProcessName.trim();
+    if (!nextName) {
+      setEditingProcessId(null);
+      setEditingProcessName('');
+      return;
+    }
+    commitProjectDocuments(project.documents.map((document) => {
+      if (document.id !== editingProcessId || document.type !== 'idef0') return document;
+      return {
+        ...document,
+        name: nextName,
+        updatedAt: new Date().toISOString(),
+        idef0: {
+          ...document.idef0,
+          name: nextName,
+        },
+      };
+    }));
+    setEditingProcessId(null);
+    setEditingProcessName('');
+  };
+
+  const deleteProcessModel = () => {
+    if (!processToDelete) return;
+    commitProjectDocuments(project.documents.filter((document) => document.id !== processToDelete.id));
+    if (selection?.id === processToDelete.id) onSelectionChange(null);
+    onCloseDocument(processToDelete.id);
+    setProcessToDelete(null);
+  };
 
   return (
     <div className="h-full overflow-auto p-2">
@@ -162,6 +237,61 @@ export function ProjectTreePane({
             />
           ))}
         </TreeSection>
+        <TreeSection title="Processes" icon={<Workflow className="size-3.5" />} depth={1}>
+          <TreeRow
+            depth={2}
+            icon={<Plus className="size-3.5" />}
+            label="Create process model"
+            onClick={createProcessModel}
+          />
+          {processModels.map((document) => {
+            const isEditing = editingProcessId === document.id;
+            return (
+              <TreeRow
+                key={document.id}
+                depth={2}
+                icon={<Workflow className="size-3.5" />}
+                label={document.name}
+                meta="IDEF0"
+                active={selectionMatches(selection, { kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
+                onClick={() => onSelectionChange({ kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
+                onDoubleClick={() => onOpenDocument(document.id, { type: 'idef0', title: document.name })}
+                labelNode={isEditing ? (
+                  <input
+                    className="min-w-0 flex-1 rounded border border-blue-300 bg-white px-1.5 py-0.5 text-xs text-slate-900 outline-none"
+                    value={editingProcessName}
+                    autoFocus
+                    onChange={(event) => setEditingProcessName(event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onBlur={commitRenameProcess}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        commitRenameProcess();
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        setEditingProcessId(null);
+                        setEditingProcessName('');
+                      }
+                    }}
+                  />
+                ) : undefined}
+                actions={!isEditing ? (
+                  <>
+                    <TreeActionButton label="Rename process model" onClick={() => startRenameProcess(document)}>
+                      <Pencil className="size-3" />
+                    </TreeActionButton>
+                    <TreeActionButton label="Delete process model" danger onClick={() => setProcessToDelete(document)}>
+                      <Trash2 className="size-3" />
+                    </TreeActionButton>
+                  </>
+                ) : null}
+              />
+            );
+          })}
+        </TreeSection>
         <TreeSection title="Diagrams" icon={<GitBranch className="size-3.5" />} depth={1}>
           {diagrams.map((document) => (
             <TreeRow
@@ -172,10 +302,22 @@ export function ProjectTreePane({
               meta={document.type}
               active={selectionMatches(selection, { kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
               onClick={() => onSelectionChange({ kind: 'diagram', id: document.id, sourceView: 'diagrams' })}
+              onDoubleClick={() => onOpenDocument(document.id)}
             />
           ))}
         </TreeSection>
       </TreeSection>
+      <ConfirmDialog
+        open={!!processToDelete}
+        onOpenChange={(open) => {
+          if (!open) setProcessToDelete(null);
+        }}
+        title="Delete process model?"
+        description={processToDelete ? `This will remove "${processToDelete.name}" from the project tree.` : undefined}
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        onConfirm={deleteProcessModel}
+      />
     </div>
   );
 }
@@ -254,6 +396,7 @@ function TreeBranch({
 function getDiagramIcon(type: ProjectDocument['type']) {
   if (type === 'erd') return <Database className="size-3.5" />;
   if (type === 'class-diagram') return <GitBranch className="size-3.5" />;
+  if (type === 'idef0') return <Workflow className="size-3.5" />;
   if (type === 'bpmn') return <Workflow className="size-3.5" />;
   if (type === 'openapi') return <FileJson className="size-3.5" />;
   if (type === 'sequence') return <PencilRuler className="size-3.5" />;
@@ -315,19 +458,25 @@ function TreeRow({
   depth,
   icon,
   label,
+  labelNode,
   meta,
+  actions,
   active,
   onClick,
+  onDoubleClick,
 }: {
   depth: number;
   icon?: ReactNode;
   label: string;
+  labelNode?: ReactNode;
   meta?: string | number;
+  actions?: ReactNode;
   active?: boolean;
   onClick?: () => void;
+  onDoubleClick?: () => void;
 }) {
   const className = cn(
-    'flex h-7 w-full items-center gap-2 rounded-md pr-2 text-left font-medium transition-colors',
+    'group/tree-row flex h-7 w-full items-center gap-2 rounded-md pr-2 text-left font-medium transition-colors',
     active ? 'bg-[#eeeff0] text-slate-950' : 'text-slate-500 hover:bg-white hover:text-slate-800',
     !onClick && 'cursor-default hover:bg-transparent',
   );
@@ -338,10 +487,48 @@ function TreeRow({
       className={className}
       style={{ paddingLeft: 26 + depth * 14, fontSize: getTreeFontSize(depth), lineHeight: '18px' }}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
     >
       <span className="flex size-3.5 shrink-0 items-center justify-center text-slate-400">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {labelNode ?? <span className="min-w-0 flex-1 truncate">{label}</span>}
       {meta !== undefined ? <span className="shrink-0 text-[10px] text-slate-400">{meta}</span> : null}
+      {actions ? <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 group-hover/tree-row:opacity-100">{actions}</span> : null}
     </button>
+  );
+}
+
+function TreeActionButton({
+  label,
+  danger = false,
+  onClick,
+  children,
+}: {
+  label: string;
+  danger?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={label}
+      className={cn(
+        'flex size-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700',
+        danger && 'hover:text-red-600',
+      )}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </span>
   );
 }

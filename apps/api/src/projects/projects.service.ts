@@ -68,6 +68,9 @@ export class ProjectsService {
     if (type === 'class-diagram') {
       return isRecord(document.classDiagram) ? document.classDiagram : {};
     }
+    if (type === 'idef0') {
+      return isRecord(document.idef0) ? document.idef0 : {};
+    }
     return document.payload ?? document;
   }
 
@@ -85,6 +88,8 @@ export class ProjectsService {
     if (document.type === 'erd') base.erd = document.payload;
     else if (document.type === 'class-diagram') {
       base.classDiagram = document.payload;
+    } else if (document.type === 'idef0') {
+      base.idef0 = document.payload;
     } else {
       base.payload = document.payload;
     }

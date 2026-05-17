@@ -26,6 +26,7 @@ import { getProjectById } from '@/shared/api/projects';
 import {
   createClassDiagramProjectDocument,
   createErdProjectDocument,
+  createIdef0ProjectDocument,
   getDocumentBadge,
   getDocumentTypeLabel,
   type ClassDiagramProjectDocument,
@@ -57,6 +58,8 @@ function getDocumentIcon(type: ProjectDocumentType) {
       return <DatabaseIcon />;
     case 'class-diagram':
       return <Grid2X2 className="size-5 text-gray-400" />;
+    case 'idef0':
+      return <Workflow className="size-5 text-gray-400" />;
     case 'bpmn':
       return <Workflow className="size-5 text-gray-400" />;
     case 'openapi':
@@ -312,7 +315,7 @@ export function ProjectHomePage() {
     return project.documents.filter((document) => document.name.toLowerCase().includes(normalizedQuery));
   }, [project, query]);
 
-	  const handleCreateDocument = async (type: 'erd' | 'class-diagram') => {
+	  const handleCreateDocument = async (type: 'erd' | 'class-diagram' | 'idef0') => {
 	    if (!project) return;
 
     const document = type === 'erd'
@@ -320,7 +323,9 @@ export function ProjectHomePage() {
           ...project.schema,
           domains: project.domains,
         })
-      : createClassDiagramProjectDocument(getNextDocumentName('class-diagram', project.documents), project.domains);
+      : type === 'class-diagram'
+      ? createClassDiagramProjectDocument(getNextDocumentName('class-diagram', project.documents), project.domains)
+      : createIdef0ProjectDocument(getNextDocumentName('idef0', project.documents), project.domains);
 
 	    await createProjectDocument(project.id, document);
 	    await queryClient.invalidateQueries({ queryKey: ['project', project.id] });
@@ -410,6 +415,10 @@ export function ProjectHomePage() {
 	                  <Grid2X2 className="size-4" />
 	                  Class diagram
 	                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={(event) => { event.preventDefault(); void handleCreateDocument('idef0'); }}>
+                  <Workflow className="size-4" />
+                  IDEF0 functional model
+                </DropdownMenuItem>
                 <DropdownMenuItem disabled>
                   <Workflow className="size-4" />
                   BPMN process

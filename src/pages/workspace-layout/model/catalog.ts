@@ -9,6 +9,7 @@ export const CATALOG: TabCatalogItem[] = [
   { type: 'schemas', title: 'Schemas', group: 'Semantic Core' },
   { type: 'erDiagram', title: 'ER diagram', group: 'Diagrams' },
   { type: 'classDiagram', title: 'Class Diagram', group: 'Diagrams' },
+  { type: 'idef0', title: 'IDEF0', group: 'Behavior' },
   { type: 'dependencyGraph', title: 'Dependency Graph', group: 'Diagrams' },
   { type: 'lifecycle', title: 'Lifecycle', group: 'Diagrams' },
   { type: 'impact', title: 'Impact View', group: 'Diagrams' },
@@ -55,6 +56,7 @@ export const INITIAL_WINDOWS: Record<WorkspaceWindowId, WorkspaceWindow> = {
     tabs: [
       createTab('erDiagram', 'canvas-er'),
       createTab('classDiagram', 'canvas-class'),
+      createTab('idef0', 'canvas-idef0'),
       createTab('actions', 'canvas-actions'),
     ],
   },
@@ -80,11 +82,12 @@ export const INITIAL_WINDOWS: Record<WorkspaceWindowId, WorkspaceWindow> = {
 
 let nextTabCounter = 1;
 
-export function createTab(type: TabType, id?: string): WorkspaceTab {
+export function createTab(type: TabType, id?: string, options: { title?: string; documentId?: string } = {}): WorkspaceTab {
   const item = CATALOG_BY_TYPE.get(type);
   return {
     id: id ?? `${type}-${nextTabCounter++}`,
     type,
-    title: item?.title ?? type,
+    title: options.title ?? item?.title ?? type,
+    documentId: options.documentId,
   };
 }

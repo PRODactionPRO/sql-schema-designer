@@ -11,7 +11,7 @@ import { useWorkspaceProjectData } from '../model/useWorkspaceProjectData';
 import { ResizeHandle, TopApplicationBar } from './WorkspaceChrome';
 import { AddTabMenu, SearchFilterMenu } from './WorkspaceMenus';
 import { WorkspacePane } from './WorkspacePane';
-import type { WorkspaceSelection, WorkspaceWindowId } from '../model/types';
+import type { WorkspaceSelection, WorkspaceTab, WorkspaceWindowId } from '../model/types';
 
 export function WorkspaceLayoutPage() {
   const { projectId } = useParams();
@@ -75,7 +75,9 @@ export function WorkspaceLayoutPage() {
     catalogGroups,
     activateTab,
     closeTab,
+    closeDocumentTabs,
     addTab,
+    openDocumentTab,
     updateCanvasViewport,
     openAddMenu,
     commitPanelLayout,
@@ -133,6 +135,22 @@ export function WorkspaceLayoutPage() {
       onStartTabDrag={startTabPointerDrag}
       onProjectChange={handleProjectChange}
       onSelectionChange={setSelection}
+      onCloseDocument={closeDocumentTabs}
+      onOpenDocument={(documentId, fallback) => {
+        const document = activeProject?.documents.find((item) => item.id === documentId);
+        const tabType: WorkspaceTab['type'] | undefined = document
+          ? document.type === 'idef0'
+            ? 'idef0'
+            : document.type === 'class-diagram'
+            ? 'classDiagram'
+            : document.type === 'erd'
+            ? 'erDiagram'
+            : 'file'
+          : fallback?.type;
+        const title = document?.name ?? fallback?.title;
+        if (!tabType || !title) return;
+        openDocumentTab('canvas', tabType, documentId, title);
+      }}
       onCanvasViewportChange={updateCanvasViewport}
     />
   );

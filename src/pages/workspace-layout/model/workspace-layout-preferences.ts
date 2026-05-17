@@ -93,6 +93,9 @@ function normalizeTab(value: unknown): WorkspaceTab | null {
     title: typeof value.title === 'string' && value.title.trim()
       ? value.title
       : catalogItem.title,
+    documentId: typeof value.documentId === 'string' && value.documentId.trim()
+      ? value.documentId
+      : undefined,
   };
 }
 
@@ -135,7 +138,7 @@ function normalizeCanvasViewports(value: unknown): WorkspaceLayoutSnapshot['canv
   if (!isRecord(value)) return {};
 
   return Object.fromEntries(
-    (['erDiagram', 'classDiagram'] as const).flatMap((viewId) => {
+    (['erDiagram', 'classDiagram', 'idef0'] as const).flatMap((viewId) => {
       const viewport = value[viewId];
       if (!isRecord(viewport) || !isRecord(viewport.pan)) return [];
 
