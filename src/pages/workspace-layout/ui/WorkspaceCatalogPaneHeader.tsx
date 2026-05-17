@@ -7,6 +7,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { cn } from '@/shared/ui/utils';
 import type { WorkspaceCatalogSortMode } from '../model/useWorkspaceCatalogOrdering';
 
@@ -14,27 +15,39 @@ export function WorkspaceCatalogPaneHeader({
   title,
   addLabel,
   searchPlaceholder,
+  searchOpen,
   query,
   sortMode,
   areAllGroupsCollapsed,
   collapseDisabled,
   onAdd,
   onQueryChange,
+  onToggleSearch,
+  onCloseSearch,
   onCycleSortMode,
   onToggleGroupsCollapsed,
 }: {
   title: string;
   addLabel: string;
   searchPlaceholder: string;
+  searchOpen: boolean;
   query: string;
   sortMode: WorkspaceCatalogSortMode;
   areAllGroupsCollapsed: boolean;
   collapseDisabled: boolean;
   onAdd: () => void;
   onQueryChange: (query: string) => void;
+  onToggleSearch: () => void;
+  onCloseSearch: () => void;
   onCycleSortMode: () => void;
   onToggleGroupsCollapsed: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (searchOpen) inputRef.current?.focus();
+  }, [searchOpen]);
+
   return (
     <div className="shrink-0 border-b border-gray-200 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -45,7 +58,7 @@ export function WorkspaceCatalogPaneHeader({
           </CatalogToolbarButton>
         </div>
         <div className="flex items-center gap-0.5">
-          <CatalogToolbarButton label={`Search ${title.toLowerCase()}`} active={!!query} onClick={() => onQueryChange(query ? '' : query)}>
+          <CatalogToolbarButton label={`Search ${title.toLowerCase()}`} active={searchOpen || !!query} onClick={onToggleSearch}>
             <Search className="size-3.5" />
           </CatalogToolbarButton>
           <CatalogToolbarButton label={`Sort: ${sortMode}`} active={sortMode !== 'manual'} onClick={onCycleSortMode}>
@@ -60,11 +73,15 @@ export function WorkspaceCatalogPaneHeader({
           </CatalogToolbarButton>
         </div>
       </div>
-      <div className="relative mt-2">
+      {searchOpen ? <div className="relative mt-2">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-gray-400" />
         <input
+          ref={inputRef}
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') onCloseSearch();
+          }}
           placeholder={searchPlaceholder}
           className="h-8 w-full rounded-md border border-gray-200 bg-white pl-8 pr-7 text-sm outline-none focus:border-blue-400"
         />
@@ -73,7 +90,7 @@ export function WorkspaceCatalogPaneHeader({
             <X className="size-3.5" />
           </button>
         ) : null}
-      </div>
+      </div> : null}
     </div>
   );
 }

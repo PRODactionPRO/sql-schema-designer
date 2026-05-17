@@ -5,6 +5,7 @@ import type { Table } from '@/shared/types/schema';
 import type { WorkspaceSelection } from '../model/types';
 import { useWorkspaceCatalogOrdering } from '../model/useWorkspaceCatalogOrdering';
 import type { WorkspaceCatalogSortMode } from '../model/useWorkspaceCatalogOrdering';
+import { useWorkspacePanelSearch } from '../model/useWorkspacePanelSearch';
 import {
   createSemanticObjectProjection,
   deleteSemanticObjectProjection,
@@ -41,7 +42,7 @@ export function WorkspaceTablesPane({
   onProjectChange: (project: ProjectData) => void;
   onSelectionChange: (selection: WorkspaceSelection | null) => void;
 }) {
-  const [query, setQuery] = useState('');
+  const search = useWorkspacePanelSearch();
   const [sortMode, setSortMode] = useState<WorkspaceCatalogSortMode>('manual');
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(() => new Set());
   const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
@@ -67,7 +68,7 @@ export function WorkspaceTablesPane({
     itemById: tableById,
   } = useWorkspaceCatalogOrdering({
     items: project?.schema.tables ?? [],
-    query,
+    query: search.query,
     sortMode,
     enabled: Boolean(project),
     onCommitReorder: commitTables,
@@ -91,8 +92,8 @@ export function WorkspaceTablesPane({
         domainId: null,
         tables: noDomainTables,
       },
-    ].filter((group) => group.tables.length > 0 || !query.trim());
-  }, [domainById, domains, filteredTables, query]);
+    ].filter((group) => group.tables.length > 0 || !search.query.trim());
+  }, [domainById, domains, filteredTables, search.query]);
 
   const collapsibleGroupIds = useMemo(() => groups.map((group) => group.id), [groups]);
   const areAllGroupsCollapsed = collapsibleGroupIds.length > 0 && collapsibleGroupIds.every((id) => collapsedGroupIds.has(id));
@@ -213,12 +214,15 @@ export function WorkspaceTablesPane({
         title="Tables"
         addLabel="Add table"
         searchPlaceholder="Search tables..."
-        query={query}
+        searchOpen={search.isOpen}
+        query={search.query}
         sortMode={sortMode}
         areAllGroupsCollapsed={areAllGroupsCollapsed}
         collapseDisabled={collapsibleGroupIds.length === 0}
         onAdd={addTable}
-        onQueryChange={setQuery}
+        onQueryChange={search.setQuery}
+        onToggleSearch={search.toggleSearch}
+        onCloseSearch={search.closeSearch}
         onCycleSortMode={cycleSortMode}
         onToggleGroupsCollapsed={() => setCollapsedGroupIds(areAllGroupsCollapsed ? new Set() : new Set(collapsibleGroupIds))}
       />

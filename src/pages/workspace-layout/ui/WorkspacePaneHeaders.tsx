@@ -36,9 +36,13 @@ export function ProjectTitleHeader({
 }
 
 export function PanelSearchBar({
+  query,
+  onQueryChange,
   onClose,
   onToggleFilters,
 }: {
+  query: string;
+  onQueryChange: (query: string) => void;
   onClose: () => void;
   onToggleFilters: (trigger: HTMLElement) => void;
 }) {
@@ -55,6 +59,11 @@ export function PanelSearchBar({
         <input
           ref={inputRef}
           aria-label="Search workspace"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') onClose();
+          }}
           className="min-w-0 flex-1 bg-transparent text-sm font-normal text-slate-800 outline-none placeholder:text-[#8a919c]"
           placeholder="Find..."
         />

@@ -3,10 +3,11 @@ import { useOutsidePointerDown } from '@/shared/ui/useOutsidePointerDown';
 import { groupCatalogItemsWithIcons } from './catalog-icons';
 import { getAddMenuPosition, getSearchFilterMenuPosition } from './floating-position';
 import type { AddMenuState, SearchFilterMenuState, WorkspaceWindowId } from './types';
+import { useWorkspacePanelSearch } from './useWorkspacePanelSearch';
 
 export function useWorkspaceMenus() {
   const [addMenu, setAddMenu] = useState<AddMenuState | null>(null);
-  const [projectSearchActive, setProjectSearchActive] = useState(false);
+  const projectSearch = useWorkspacePanelSearch();
   const [searchFilterMenu, setSearchFilterMenu] = useState<SearchFilterMenuState | null>(null);
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const searchFilterMenuRef = useRef<HTMLDivElement | null>(null);
@@ -41,12 +42,12 @@ export function useWorkspaceMenus() {
   };
 
   const openProjectSearch = () => {
-    setProjectSearchActive(true);
+    projectSearch.openSearch();
     setSearchFilterMenu(null);
   };
 
   const closeProjectSearch = () => {
-    setProjectSearchActive(false);
+    projectSearch.closeSearch();
     setSearchFilterMenu(null);
   };
 
@@ -58,7 +59,8 @@ export function useWorkspaceMenus() {
 
   return {
     addMenu,
-    projectSearchActive,
+    projectSearchActive: projectSearch.isOpen,
+    projectSearchQuery: projectSearch.query,
     searchFilterMenu,
     addMenuRef,
     searchFilterMenuRef,
@@ -67,6 +69,7 @@ export function useWorkspaceMenus() {
     openAddMenu,
     openProjectSearch,
     closeProjectSearch,
+    setProjectSearchQuery: projectSearch.setQuery,
     toggleSearchFilterMenu,
   };
 }
