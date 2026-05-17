@@ -17,6 +17,17 @@ export type ProjectDocumentType =
 export type ClassMemberVisibility = 'public' | 'protected' | 'private';
 export type ClassAttributeMultiplicity = 'one' | 'optional' | 'many';
 export type ClassEntityKind = 'class' | 'abstract-class' | 'interface' | 'enum' | 'datatype';
+export type ClassAttributeValueType =
+  | 'string'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'datetime'
+  | 'uuid'
+  | 'json'
+  | 'enum'
+  | 'reference'
+  | 'custom';
 
 export interface ProjectSchemaModel {
   schemaVersion?: number;
@@ -31,6 +42,8 @@ export interface ClassAttribute {
   id: string;
   name: string;
   type: string;
+  valueType?: ClassAttributeValueType;
+  referencedObjectId?: string;
   visibility: ClassMemberVisibility;
   multiplicity?: ClassAttributeMultiplicity;
   description?: string;

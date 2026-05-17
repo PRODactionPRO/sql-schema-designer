@@ -2,6 +2,7 @@ import { Plus } from 'lucide-react';
 import type {
   ClassAttribute,
   ClassAttributeMultiplicity,
+  ClassAttributeValueType,
   ClassMemberVisibility,
   ClassMethod,
 } from '@/shared/types/project';
@@ -9,6 +10,7 @@ import { IconDangerButton, PropertyTextArea } from './WorkspacePropertyControls'
 
 const VISIBILITIES: ClassMemberVisibility[] = ['public', 'protected', 'private'];
 const MULTIPLICITIES: ClassAttributeMultiplicity[] = ['one', 'optional', 'many'];
+const VALUE_TYPES: ClassAttributeValueType[] = ['string', 'number', 'boolean', 'date', 'datetime', 'uuid', 'json', 'enum', 'reference', 'custom'];
 
 export function AttributeEditor({
   attribute,
@@ -44,6 +46,13 @@ export function AttributeEditor({
       </div>
       {!isEnum ? (
         <div className="mt-2 grid grid-cols-2 gap-2">
+          <select
+            value={attribute.valueType ?? 'string'}
+            onChange={(event) => onUpdate({ valueType: event.target.value as ClassAttributeValueType })}
+            className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs outline-none focus:border-blue-500"
+          >
+            {VALUE_TYPES.map((valueType) => <option key={valueType} value={valueType}>{valueType}</option>)}
+          </select>
           <input
             value={attribute.type}
             onChange={(event) => onUpdate({ type: event.target.value })}
@@ -60,6 +69,12 @@ export function AttributeEditor({
           >
             {MULTIPLICITIES.map((multiplicity) => <option key={multiplicity} value={multiplicity}>{multiplicity}</option>)}
           </select>
+          <input
+            value={attribute.referencedObjectId ?? ''}
+            onChange={(event) => onUpdate({ referencedObjectId: event.target.value || undefined })}
+            className="h-8 min-w-0 rounded-md border border-gray-200 bg-white px-2 text-xs outline-none focus:border-blue-500"
+            placeholder="reference object id"
+          />
         </div>
       ) : null}
       <PropertyTextArea label="Description" value={attribute.description ?? ''} onChange={(description) => onUpdate({ description })} compact />

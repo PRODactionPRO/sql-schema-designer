@@ -1,9 +1,19 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { RequestUser } from '../common/interfaces/request-user.interface';
 import { CreateModelObjectDto } from './dto/create-model-object.dto';
 import {
+  CreateRelationCommandDto,
   CreateObjectInViewCommandDto,
   CreateRelationInViewCommandDto,
   CreateSemanticViewCommandDto,
@@ -171,6 +181,19 @@ export class SemanticModelController {
     @Body() dto: CreateRelationInViewCommandDto,
   ) {
     return this.semanticModelService.createRelationInViewCommand(
+      projectId,
+      user.userId,
+      dto,
+    );
+  }
+
+  @Post('commands/create-relation')
+  createRelationCommand(
+    @CurrentUser() user: RequestUser,
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateRelationCommandDto,
+  ) {
+    return this.semanticModelService.createRelationCommand(
       projectId,
       user.userId,
       dto,

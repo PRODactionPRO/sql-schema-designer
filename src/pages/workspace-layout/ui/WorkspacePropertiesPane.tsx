@@ -25,6 +25,7 @@ import {
   withIdef0Diagram,
   withSchema,
 } from '../model/workspace-project-utils';
+import { buildClassAttributeReferenceOptions } from '../model/workspace-class-attribute-references';
 import {
   createErdRelationInView,
   deleteRelationFromSemanticView,
@@ -104,6 +105,7 @@ export function PropertiesPane({
   const selectedDiagram = selection?.kind === 'diagram'
     ? project.documents.find((document) => document.id === selection.id) ?? null
     : null;
+  const classAttributeReferenceOptions = buildClassAttributeReferenceOptions(project);
 
   const applySchema = (schema: ProjectData['schema']) => {
     const nextProject = withSchema(project, schema);
@@ -407,6 +409,7 @@ export function PropertiesPane({
     return (
       <Idef0ConceptPropertiesPane
         concept={selectedIdef0Concept}
+        attributeReferenceOptions={classAttributeReferenceOptions}
         onUpdate={(updates) => updateIdef0Concept(selectedIdef0Document, selectedIdef0Concept.id, updates)}
         onDelete={() => deleteIdef0Concept(selectedIdef0Document, selectedIdef0Concept.id)}
       />

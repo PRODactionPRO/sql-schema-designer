@@ -37,6 +37,7 @@ export function createSemanticObjectProjection({
   name,
   description,
   domainId,
+  parentId,
   metadata,
   position,
 }: {
@@ -46,6 +47,7 @@ export function createSemanticObjectProjection({
   name: string;
   description?: string;
   domainId?: string;
+  parentId?: string;
   metadata: Record<string, unknown>;
   position?: { x: number; y: number };
 }): Promise<ProjectSemanticObjectBinding> {
@@ -56,6 +58,7 @@ export function createSemanticObjectProjection({
       name,
       description,
       domainId,
+      parentId,
       metadata,
       position,
     }).then(({ object, node }) => ({
@@ -70,6 +73,7 @@ export function createSemanticObjectProjection({
     name,
     description,
     domainId,
+    parentId,
     metadata,
   }).then((object) => ({
     objectId: object.id,
@@ -84,6 +88,7 @@ export function updateSemanticObjectProjection({
   name = metadataName(metadata),
   description = metadataDescription(metadata),
   domainId = metadataDomainId(metadata),
+  parentId,
 }: {
   projectId: string;
   binding?: ProjectSemanticObjectBinding;
@@ -91,6 +96,7 @@ export function updateSemanticObjectProjection({
   name?: string;
   description?: string;
   domainId?: string;
+  parentId?: string;
 }) {
   if (!binding) return;
 
@@ -99,6 +105,7 @@ export function updateSemanticObjectProjection({
     name,
     description,
     domainId,
+    parentId,
     metadata,
   }).catch((error) => {
     console.error('[workspace] Failed to update semantic object', error);

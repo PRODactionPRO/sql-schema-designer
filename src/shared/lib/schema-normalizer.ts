@@ -26,6 +26,7 @@ import {
   createErdProjectDocument,
   type ClassAttribute,
   type ClassAttributeMultiplicity,
+  type ClassAttributeValueType,
   type ClassDiagramModel,
   type ClassEntity,
   type ClassEntityKind,
@@ -51,6 +52,7 @@ import {
   type Idef0ArrowRole,
   type Idef0ArrowStatus,
   type Idef0Attribute,
+  type Idef0DataReference,
   type Idef0AttributeValueType,
   type Idef0Concept,
   type Idef0ConceptKind,
@@ -474,13 +476,50 @@ function normalizeAttributeMultiplicity(value: unknown, requiredValue: unknown):
   return asBoolean(requiredValue, true) ? 'one' : 'optional';
 }
 
+function inferClassAttributeValueType(type: string): ClassAttributeValueType {
+  const normalized = type.trim().toLowerCase();
+  if (normalized === 'string' || normalized === 'text') return 'string';
+  if (normalized === 'number' || normalized === 'int' || normalized === 'integer' || normalized === 'float' || normalized === 'decimal') return 'number';
+  if (normalized === 'boolean' || normalized === 'bool') return 'boolean';
+  if (normalized === 'date') return 'date';
+  if (normalized === 'datetime' || normalized === 'timestamp') return 'datetime';
+  if (normalized === 'uuid') return 'uuid';
+  if (normalized === 'json' || normalized === 'jsonb') return 'json';
+  if (normalized === 'enum') return 'enum';
+  if (normalized === 'reference' || normalized === 'ref') return 'reference';
+  return 'custom';
+}
+
+function normalizeClassAttributeValueType(value: unknown, type: string): ClassAttributeValueType {
+  const normalized = asString(value).toLowerCase();
+  if (
+    normalized === 'string'
+    || normalized === 'number'
+    || normalized === 'boolean'
+    || normalized === 'date'
+    || normalized === 'datetime'
+    || normalized === 'uuid'
+    || normalized === 'json'
+    || normalized === 'enum'
+    || normalized === 'reference'
+    || normalized === 'custom'
+  ) {
+    return normalized;
+  }
+
+  return inferClassAttributeValueType(type);
+}
+
 function normalizeClassAttribute(value: unknown, index: number): ClassAttribute {
   const record = isRecord(value) ? value : {};
   const multiplicity = normalizeAttributeMultiplicity(record.multiplicity, record.required);
+  const type = asString(record.type, 'string');
   return {
     id: asString(record.id, `attribute_${index}`),
     name: asString(record.name, `attribute_${index + 1}`),
-    type: asString(record.type, 'string'),
+    type,
+    valueType: normalizeClassAttributeValueType(record.valueType, type),
+    referencedObjectId: asString(record.referencedObjectId) || undefined,
     visibility: normalizeVisibility(record.visibility),
     multiplicity,
     description: asString(record.description) || undefined,
@@ -914,6 +953,26 @@ function normalizeIdef0Attributes(value: unknown): Idef0Attribute[] {
   return uniqueById((Array.isArray(value) ? value : []).map(normalizeIdef0Attribute));
 }
 
+function normalizeIdef0DataReference(value: unknown, index: number): Idef0DataReference {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: asString(record.id, `idef0_data_ref_${index}`),
+    objectId: asString(record.objectId) || undefined,
+    legacyId: asString(record.legacyId) || undefined,
+    classId: asString(record.classId) || undefined,
+    className: asString(record.className) || undefined,
+    attributeId: asString(record.attributeId) || undefined,
+    attributeName: asString(record.attributeName, `attribute_${index + 1}`),
+    valueType: asString(record.valueType) || undefined,
+    domainId: asString(record.domainId) || undefined,
+    domainName: asString(record.domainName) || undefined,
+  };
+}
+
+function normalizeIdef0DataReferences(value: unknown): Idef0DataReference[] {
+  return uniqueById((Array.isArray(value) ? value : []).map(normalizeIdef0DataReference));
+}
+
 function normalizeIdef0Endpoint(value: unknown): Idef0ArrowEndpoint {
   const record = isRecord(value) ? value : {};
   const kind = record.kind === 'function' || record.kind === 'concept' || record.kind === 'boundary'
@@ -965,6 +1024,7 @@ function normalizeIdef0Concept(value: unknown, index: number): Idef0Concept {
     domainId: asString(record.domainId) || undefined,
     ownerId: asString(record.ownerId) || undefined,
     linkedObjectId: asString(record.linkedObjectId) || undefined,
+    dataReferences: normalizeIdef0DataReferences(record.dataReferences),
     attributes: normalizeIdef0Attributes(record.attributes),
     metadata: isRecord(record.metadata) ? record.metadata : undefined,
   };
